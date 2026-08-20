@@ -240,21 +240,141 @@ reasoning):
       view.
 
 ## Phase 5 — Collision
-- [ ] Shared spatial partitioning (sized to collision granularity) — its
-      first real consumer, not the general execution engine (§9.3)
-- [ ] Colliders: plane, box, sphere, expression-capable moving position
-      (§12.2)
-- [ ] Collision groups & filtering (§12.3)
-- [ ] Broad/narrow phase detection (§12.4)
-- [ ] Response: restitution, asymmetric damping, moving-collider velocity
-      via finite difference of position (§12.5)
-- [ ] Resting contact: velocity clamping every step, sleep after
-      `restDuration`, wake propagation via collision/springs/drag (§12.7)
-- [ ] Ball-bouncing worked example, visually checked via Phase 3's debug
-      renderer (§12.6)
-- [ ] Analytic test: bounce apex ratio vs. `e²` using the §12.6 fixture,
+
+First pass covers a single group colliding against static/moving colliders
+— everything §12.6's ball-bounce example actually needs. Particle-vs-particle
+collision, the spatial index, collision-group filtering, and full sleeping
+are real §12 scope but nothing in this phase's worked example needs them, so
+they're a deliberate second pass rather than oversights — see the unchecked
+items below for exactly what's deferred and why.
+
+- [x] Colliders: plane, box, sphere, expression-capable moving position
+      (§12.2) — `particlesim.collision.Collider` (sealed) / `PlaneCollider`
+      / `SphereCollider` / `BoxCollider`. Only position is expression-capable
+      (`VectorExpr`), matching what §12.2 actually marks as such — a
+      plane's normal, a sphere's radius, a box's half-extents are fixed at
+      construction. Box is axis-aligned only; §12.2 allows "axis-aligned or
+      oriented" so this satisfies the spec as written rather than being a
+      narrowing — nothing else in the project has an orientation
+      representation yet (no quaternion/matrix anywhere), so oriented boxes
+      aren't reachable without adding one first.
+- [x] Moving-collider velocity via finite difference of position, not
+      symbolic differentiation of the expression (§12.5) — `Collider.advance(t,
+      dt)` evaluates the position expression and diffs against the previous
+      call's result; defaults to zero on a collider's first `advance` call
+      even if `t != 0`, since there's no genuine previous step yet. Must be
+      called exactly once per step (`CollisionSystem.resolve` does this
+      itself, deduplicated by collider identity, before any contact queries).
+- [x] Broad/narrow phase detection: sphere-plane, sphere-sphere,
+      sphere-box, all against a single moving/static collider (§12.4) —
+      `Collider.contact(sphereCenter, sphereRadius): Contact?`, one
+      override per shape, pure geometry with no `ParticleStore` or
+      simulation loop involved (so it's independently component-testable).
+      "Broad phase" in the sense of skipping non-collidable particles is
+      just "no radius set → skip" (§12.1) — an actual spatial-index broad
+      phase is deferred (see below), since checking every particle in a
+      group against N colliders is fine until a scenario has enough
+      particles/colliders to need better than that.
+- [x] Response: restitution + optional asymmetric compression/extension
+      damping, particle-vs-collider only (§12.5) — `CollisionSystem`,
+      `ParticleColliderRule`. **Collision is a separate call the caller
+      makes after `Integrator.step()` completes, not a stage inside it** —
+      `integrator.step(...)` then `collisions.resolve(...)`. Collision
+      needs colliders, rules, and per-contact state the integrator has no
+      business knowing about; keeping it a separate call keeps the
+      integrator's existing contract (forces in, state out) untouched.
+      Damping reuses §5.1's asymmetric-damper naming but isn't the same
+      mechanism — it's a one-shot attenuation folded directly into the
+      restitution impulse (`relVelAfter = restitution·|relVelBefore| /
+      sqrt(1 + damping)`), not an `F·dt/mass` force impulse. This is
+      deliberate: a force integrated over a single discrete detection step
+      would vanish as `dt` shrinks, which isn't a coherent model for "how
+      much this contact absorbs" — the spec doesn't give an exact formula
+      for this term, so this is a documented design choice, not a
+      transcription of §12.5. `c=0` reduces to plain restitution; larger
+      `c` smoothly pulls the outgoing speed toward zero with no clamping
+      needed (denominator is always ≥ 1). Verified against the "constrained
+      particle behaves as infinite mass" equivalence advisor flagged: a
+      collider *is* infinite mass by construction, so this pass's
+      particle-vs-collider response already satisfies that check trivially
+      — the real test of it lands with particle-vs-particle collision
+      (second pass), where a fixed particle's *actual* mass must be
+      overridden to infinite in the two-body impulse formula instead.
+      The divisor went through two revisions after the user reported the
+      ball-bounce demo looking like it "wasn't bouncing" — a legitimate
+      bug report, not a demo-froze repeat of the port issue below. A plain
+      `/(1 + damping)` divisor, checked against §12.6's own parameters
+      (`compressionDamping: 3.0`), removes ~82% of the impact speed on the
+      very first bounce — visually indistinguishable from "drops and
+      stops," not the demo's own "watch it bounce, settle noticeably
+      faster" description. Softened to `/sqrt(1 + damping)`: `compressionDamping:
+      3.0` now halves the outgoing speed per bounce (several visible
+      bounces, clearly faster than undamped restitution's ~20-bounce
+      settle) and `extensionDamping: 0.2` stays close to a crisp full
+      rebound, both empirically checked against the running demo the same
+      way the flag's wind strength was tuned in Phase 4.
+- [x] Resting contact: velocity clamping every step (§12.7, half of it) —
+      global (not per-rule) `restVelocity`/`restPenetration` thresholds on
+      `CollisionSystem`; when both are below threshold the normal velocity
+      component is clamped straight to zero instead of having
+      restitution/damping applied, so numerical noise can't "re-bounce" an
+      already-resting particle. Sleeping (temporal hysteresis via
+      `restDuration`, wake propagation through collision/springs/drag) is
+      the other half of §12.7 and is **not** built — it's an optimization
+      with three separate wake paths to get right, touches force
+      accumulation and the integrator's particle iteration, and nothing in
+      this phase's worked example needs it (velocity clamping alone is
+      enough for the ball to actually come to rest). Deferred until a
+      scenario has enough resting particles to need the optimization.
+- [x] Penetration correction is gradual, not instantaneous (§13.4) —
+      `ParticleColliderRule.correctionFactor` (default 0.2), applied as a
+      fraction of the detected penetration per step rather than snapping
+      the particle fully out on contact.
+- [x] Ball-bouncing worked example, visually checked via Phase 3's debug
+      renderer (§12.6) — `particlesim.examples.buildBallBounce`
+      (`./gradlew runBallBounceDemo`): radius 0.2, gravity, a plane
+      collider at y=0, restitution 0.7, compressionDamping 3.0,
+      extensionDamping 0.2, matching §12.6's parameters. The demo resets
+      the drop on a fixed cycle (well past the settle time) rather than
+      running once — the ball settles to rest within a few seconds, easy
+      to miss if the viewer tab is opened even slightly after `main`
+      starts, which is exactly what made the damping-formula bug above
+      hard to distinguish at first from just "opened the page too late."
+- [x] Analytic test: bounce apex ratio vs. `e²` using the §12.6 fixture,
       component tests for sphere-plane/sphere-box intersection (§15.1,
-      §15.3)
+      §15.3) — `BounceApexRatioTest` (dedicated zero-damping scenario, not
+      the demo's parameters — damping intentionally pulls the ratio away
+      from the pure `e^(2n)` curve, so testing it against the demo's own
+      settings would be testing the wrong thing), `ColliderTest`.
+      `BounceApexRatioTest` initially failed by ~8% at the second bounce
+      with a *correct* simulation and a *wrong* test formula: `h_n =
+      h_0·e^(2n)` implicitly assumes a point particle bouncing exactly at
+      `y=0`, but a radius-0.2 ball's center bounces at `y=radius`. Fixed by
+      applying the decay to the fall distance above that offset
+      (`radius + (dropHeight - radius)·e^(2n)`) instead of to `dropHeight`
+      directly — a reminder that "the physics looks wrong" and "the test's
+      idealization doesn't match the fixture" are both worth checking
+      before assuming which one is at fault.
+- [ ] Shared spatial partitioning (sized to collision granularity) — its
+      first real consumer, not the general execution engine (§9.3).
+      Deferred: a single ball against one plane collider needs no broad
+      phase at all; building one before a scenario has enough
+      particles/colliders to need it would be optimizing blind. Second
+      pass, alongside particle-vs-particle collision below.
+- [ ] Particle-vs-particle collision (§12.4/§12.5, the two-body case) —
+      deferred to the second pass along with the spatial index above (an
+      all-pairs particle-vs-particle check has the same "needs enough
+      particles to matter" problem broad phase does). This is also where
+      "constrained particles behave as infinite mass in collision
+      response" (§12.5) actually needs implementing — the two-body impulse
+      formula has to substitute infinite mass for a `FixedPosition`/
+      `FixedVelocity` particle's real mass, which particle-vs-collider
+      response never has to do.
+- [ ] Collision groups & filtering beyond a single rule's group/collider
+      pairing (§12.3) — deferred alongside particle-vs-particle collision,
+      since group-vs-group filtering is primarily about *that* case
+      (which pairs of groups collide with each other), not particle-vs-
+      collider (already filtered by which rule references which collider).
 
 ## Phase 6 — Particle lifecycle
 - [ ] Emitters: rate + uniform-box/sphere/point-spread distributions,
