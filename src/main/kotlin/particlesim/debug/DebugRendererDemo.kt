@@ -6,7 +6,6 @@ import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
 import particlesim.physics.FixedPosition
 import particlesim.physics.Integrator
-import particlesim.physics.PairwiseForce
 import particlesim.physics.Spring
 import particlesim.physics.UniformGravity
 
@@ -56,7 +55,7 @@ fun main() {
             integrator.step(store, groups, forces, constraints, t, dt)
             t += dt
         }
-        renderer.broadcast(t, store, ids, springs as List<PairwiseForce>)
+        renderer.broadcast(t, store, ids, springs.map { it.particleA to it.particleB })
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)
     }

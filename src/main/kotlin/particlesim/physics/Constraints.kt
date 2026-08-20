@@ -20,15 +20,30 @@ interface Constraint {
 }
 
 /**
- * Pins every member of [group] to a constant [position] and zero velocity (§6). Scripted,
+ * Pins every member of [group] and zero velocity (§6). Either every member goes to the same
+ * shared [position], or (via [atCurrentPositions]) each member freezes individually wherever
+ * it already is — needed for e.g. §7.3's flag, where "pin the pole edge" means each particle
+ * along that edge keeps its own height, not all collapsing to one point. Scripted,
  * time-varying fixed positions are `[stretch]` (§6) — not implemented here.
  */
-class FixedPosition(private val group: String, private val position: Vector3) : Constraint {
+class FixedPosition private constructor(
+    private val group: String,
+    private val position: Vector3?,
+    private val perParticlePosition: Map<Int, Vector3>?,
+) : Constraint {
+    constructor(group: String, position: Vector3) : this(group, position, null)
+
     override fun applyPosition(store: ParticleStore, groups: Groups, t: Double) {
         for (id in groups.membersOf(group)) {
-            store.setPosition(id, position)
+            store.setPosition(id, perParticlePosition?.get(id) ?: position!!)
             store.setVelocity(id, Vector3.ZERO)
         }
+    }
+
+    companion object {
+        /** Pins every current member of [group] to wherever it is right now, individually. */
+        fun atCurrentPositions(group: String, store: ParticleStore, groups: Groups): FixedPosition =
+            FixedPosition(group, null, groups.membersOf(group).associateWith { store.position(it) })
     }
 }
 

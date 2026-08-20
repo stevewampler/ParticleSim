@@ -62,14 +62,18 @@ reasoning):
       `particlesim.physics.Spring`/`Damper`, direction-dependent
       stiffness/damping, force-magnitude component tests in
       `ForceComponentTest`.
-- [~] Field forces: uniform gravity, wind, drag, N-body gravity (§5.2) —
-      `UniformGravity`, `Drag` (linear + quadratic), `NBodyGravity` done.
-      **Wind is not implemented**: §5.2 requires direction/strength to be
-      expression-capable as functions of *time and position*, but
-      `ScalarExpr` (Phase 1) is time-only. Needs a position-aware
-      `VectorExpr` that doesn't exist yet — deferred to Phase 4, where
-      surfaces are wind's first real consumer anyway, rather than building
-      it speculatively now.
+- [x] Field forces: uniform gravity, wind, drag, N-body gravity (§5.2) —
+      `UniformGravity`, `Drag` (linear + quadratic), `NBodyGravity` done in
+      Phase 2. Wind landed in Phase 4 (`particlesim.physics.Wind`), keyed
+      on triangles rather than particles directly, since surfaces (§7.2)
+      turned out to be its only real consumer. **Correction to this
+      bullet's original note**: it assumed wind was blocked on a
+      position-aware expression type before building `VectorExpr` (Phase
+      4) and seeing what §7.3's flag actually needed — turned out wind
+      only needs to vary in *time* (§5.2 marks position-dependence
+      optional, "and/or position"), so plain `VectorExpr` (time-only,
+      mirroring `ScalarExpr`) was enough. Spatially-varying wind (gusts
+      that differ across a sheet) is still unbuilt.
 - [x] Breakable forces, asymmetric break thresholds, deterministic
       end-of-step batch break ordering (§5.4) — `Breakable` interface,
       implemented by `Spring` (threshold = displacement from `restLength`,
@@ -183,12 +187,57 @@ reasoning):
       and swing correctly at `http://localhost:8888`.
 
 ## Phase 4 — Surfaces
-- [ ] Triangulated surfaces, auto-generated structural springs (§7.1)
-- [ ] Wind pressure on triangles — two-sided, consistent mesh winding
-      (§7.2)
-- [ ] Flag worked example running end-to-end, visually checked via
+- [x] Triangulated surfaces, auto-generated structural springs (§7.1) —
+      grid-only mesh generation (`particlesim.surface.Grid`/`Triangle`;
+      arbitrary/general mesh triangulation is out of scope, matching
+      §7.3's flag being the only shape this project targets). Structural,
+      shear, and bend edge topology (`Grid.structuralEdges`/`shearEdges`/
+      `bendEdges`) generated separately from `MeshSprings`, the `Force`
+      that turns any edge list into one chunk-striding spring+damper
+      system (`particlesim.physics.MeshSprings`) — combining spring and
+      damper per edge (not two separate `Force`s, unlike single explicit
+      `Spring`/`Damper`) so a broken edge can't have its damper keep
+      damping a connection its spring stopped resisting. Per-edge
+      breakability is self-managed inside `MeshSprings` (deactivate in
+      place, not routed through `Integrator`'s external `Breakable`
+      mechanism, which is for removing a whole `Force`) — see its KDoc for
+      why in-place mutation is still safe once Phase 8 threads chunks.
+      Winding-consistency and edge-topology-count component tests
+      (`GridTest`).
+- [x] Wind pressure on triangles — two-sided, consistent mesh winding
+      (§7.2) — `particlesim.physics.Wind`, `F = density * area *
+      (relativeWind · normal) * normal`; two-sidedness falls out of this
+      formula being quadratic in the normal (flipping winding flips the
+      normal twice, canceling out) rather than needing a special case —
+      verified directly in `WindTest` by reversing a triangle's winding
+      and asserting the same force. Added `particlesim.core.VectorExpr`
+      (time-only, mirroring `ScalarExpr`) for wind's direction/strength —
+      see the corrected note on Phase 2's field-forces bullet for why
+      time-only turned out to be enough.
+- [x] Flag worked example running end-to-end, visually checked via
       Phase 3's debug renderer, added as a golden-file scenario (§7.3,
-      §15.2)
+      §15.2) — `particlesim.examples.buildFlag` (shared by the demo and
+      its stability test), `./gradlew runFlagDemo`. `dt` (1e-3) chosen
+      from §13.1's stability budget before tuning stiffness, not after;
+      `FlagStabilityTest` runs it 4 sim-seconds and checks for both hard
+      (`BlowUpException`) and soft (unbounded speed growth) instability.
+      Also added `FixedPosition.atCurrentPositions` (pins each group
+      member to wherever it individually already is, not one shared
+      point) — needed because the pole edge is a column of particles at
+      different heights, and useful generally beyond this scenario.
+      `FlagGoldenTest` samples 3 named vertices (pinned pole-top, free
+      corner, mid-sheet) at 4 sample times — not the whole ~100-particle
+      sheet, matching `NBodyGoldenTest`'s established pattern (step-index
+      sampling, not accumulated float time). Verified server-side
+      (particle/connection counts and content confirmed via a raw
+      WebSocket client) — **visual confirmation of the actual three.js
+      render is the user's call**, same caveat as Phase 3's chain demo.
+      Also added the `PairwiseForce`-vs-many-pairs-per-force resolution
+      the Phase 2 TODO note anticipated: `DebugFrame`/`DebugRenderer` now
+      take plain `(id, id)` pairs rather than `PairwiseForce` instances,
+      so `MeshSprings.activeConnections()` (many pairs, one `Force`) and
+      a single `Spring`/`Damper` (one pair) can both feed the same debug
+      view.
 
 ## Phase 5 — Collision
 - [ ] Shared spatial partitioning (sized to collision granularity) — its

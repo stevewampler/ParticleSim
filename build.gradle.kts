@@ -20,7 +20,17 @@ dependencies {
 }
 
 application {
+    // `./gradlew run` — the spring-chain demo. `./gradlew runFlagDemo` below runs §7.3's
+    // flag instead; the `application` plugin only wires up one default `run` task, so the
+    // second demo gets its own JavaExec task rather than a way to swap `run`'s target.
     mainClass.set("particlesim.debug.DebugRendererDemoKt")
+}
+
+tasks.register<JavaExec>("runFlagDemo") {
+    group = "application"
+    description = "Runs §7.3's flag worked example through the Phase 3 debug renderer."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("particlesim.debug.FlagDebugDemoKt")
 }
 
 kotlin {

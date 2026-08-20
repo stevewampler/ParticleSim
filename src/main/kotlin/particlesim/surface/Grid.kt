@@ -1,0 +1,69 @@
+package particlesim.surface
+
+/**
+ * Grid-only mesh generation for [Surface] (§7.1) — arbitrary/general mesh triangulation is
+ * out of scope; a rectangular grid of particles (`ids[row][col]`, same layout the Kotlin
+ * DSL's `particles.grid(...)` produces) is all §7.3's flag needs and all this project
+ * targets for now.
+ */
+object Grid {
+    /**
+     * Two triangles per grid cell, wound consistently: for a flat sheet laid out with `col`
+     * along +X and `row` along +Y (the DSL grid builder's own default layout), every
+     * triangle's normal points toward +Z.
+     */
+    fun triangles(ids: List<List<Int>>): List<Triangle> {
+        val rows = ids.size
+        require(rows >= 2) { "grid needs at least 2 rows, got $rows" }
+        val cols = ids[0].size
+        require(cols >= 2) { "grid needs at least 2 cols, got $cols" }
+
+        val result = ArrayList<Triangle>((rows - 1) * (cols - 1) * 2)
+        for (r in 0 until rows - 1) {
+            for (c in 0 until cols - 1) {
+                val v00 = ids[r][c]
+                val v01 = ids[r][c + 1]
+                val v10 = ids[r + 1][c]
+                val v11 = ids[r + 1][c + 1]
+                result += Triangle(v00, v01, v10)
+                result += Triangle(v01, v11, v10)
+            }
+        }
+        return result
+    }
+
+    /** An edge between two particle ids — direction doesn't matter, used for spring topology. */
+    data class Edge(val a: Int, val b: Int)
+
+    /** Grid-adjacent edges (horizontal + vertical) — the standard cloth "structural" springs (§7.1). */
+    fun structuralEdges(ids: List<List<Int>>): List<Edge> {
+        val rows = ids.size
+        val cols = ids[0].size
+        val edges = ArrayList<Edge>()
+        for (r in 0 until rows) for (c in 0 until cols - 1) edges += Edge(ids[r][c], ids[r][c + 1])
+        for (r in 0 until rows - 1) for (c in 0 until cols) edges += Edge(ids[r][c], ids[r + 1][c])
+        return edges
+    }
+
+    /** Per-cell diagonals — the "shear" springs that resist a square cell collapsing into a rhombus. */
+    fun shearEdges(ids: List<List<Int>>): List<Edge> {
+        val rows = ids.size
+        val cols = ids[0].size
+        val edges = ArrayList<Edge>()
+        for (r in 0 until rows - 1) for (c in 0 until cols - 1) {
+            edges += Edge(ids[r][c], ids[r + 1][c + 1])
+            edges += Edge(ids[r][c + 1], ids[r + 1][c])
+        }
+        return edges
+    }
+
+    /** Skip-one-vertex edges — the "bend" springs that resist the sheet folding along a row/column. */
+    fun bendEdges(ids: List<List<Int>>): List<Edge> {
+        val rows = ids.size
+        val cols = ids[0].size
+        val edges = ArrayList<Edge>()
+        for (r in 0 until rows) for (c in 0 until cols - 2) edges += Edge(ids[r][c], ids[r][c + 2])
+        for (r in 0 until rows - 2) for (c in 0 until cols) edges += Edge(ids[r][c], ids[r + 2][c])
+        return edges
+    }
+}

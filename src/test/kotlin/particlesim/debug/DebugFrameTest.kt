@@ -2,7 +2,6 @@ package particlesim.debug
 
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
-import particlesim.physics.PairwiseForce
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -12,15 +11,13 @@ import kotlin.test.assertEquals
  */
 class DebugFrameTest {
 
-    private class FakeConnection(override val particleA: Int, override val particleB: Int) : PairwiseForce
-
     @Test
     fun `renders particle positions and connection endpoints as JSON`() {
         val store = ParticleStore()
         val a = store.create(position = Vector3(1.0, 2.0, 3.0))
         val b = store.create(position = Vector3(-1.5, 0.0, 2.25))
 
-        val json = DebugFrame.render(1.5, store, listOf(a, b), listOf(FakeConnection(a, b)))
+        val json = DebugFrame.render(1.5, store, listOf(a, b), listOf(a to b))
 
         assertEquals(
             "{\"t\":1.500000,\"particles\":[" +

@@ -1,24 +1,30 @@
 package particlesim.debug
 
 import particlesim.core.ParticleStore
-import particlesim.physics.PairwiseForce
 import java.util.Locale
 
 /**
  * Serializes one frame of the Phase 3 debug state stream (§9.1, partial): positions of the
- * given particles and the endpoints of the given pairwise-force connections, as JSON text.
+ * given particles and the endpoints of the given connection lines, as JSON text.
+ *
+ * Connections are plain `(id, id)` pairs, not [particlesim.physics.PairwiseForce] instances
+ * directly — [particlesim.physics.MeshSprings] represents many connections as *one* `Force`
+ * (§9.3's chunking requirement, see its KDoc), so a single-pair-per-force assumption here
+ * would miss a mesh's edges entirely. Callers flatten whatever force shapes they're using
+ * (`spring.particleA to spring.particleB`, or `meshSprings.activeConnections()`) into this
+ * common list.
  *
  * Deliberately minimal, matching TODO.md's Phase 3 scope — no camera pose, no events, no
  * force/collider magnitude data, no binary framing. The full per-frame contract (§9.1) is
  * Phase 8's job; this only needs to be enough for `--render-all` to draw dots and lines.
  */
 object DebugFrame {
-    fun render(t: Double, store: ParticleStore, ids: List<Int>, connections: List<PairwiseForce>): String {
+    fun render(t: Double, store: ParticleStore, ids: List<Int>, connections: List<Pair<Int, Int>>): String {
         val particles = ids.joinToString(",") { id ->
             val p = store.position(id)
             "{\"id\":$id,\"x\":${fmt(p.x)},\"y\":${fmt(p.y)},\"z\":${fmt(p.z)}}"
         }
-        val lines = connections.joinToString(",") { c -> "{\"a\":${c.particleA},\"b\":${c.particleB}}" }
+        val lines = connections.joinToString(",") { (a, b) -> "{\"a\":$a,\"b\":$b}" }
         return "{\"t\":${fmt(t)},\"particles\":[$particles],\"connections\":[$lines]}"
     }
 
