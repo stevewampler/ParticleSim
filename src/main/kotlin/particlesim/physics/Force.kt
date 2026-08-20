@@ -42,3 +42,14 @@ interface Force {
 interface Breakable {
     fun shouldBreak(store: ParticleStore): Boolean
 }
+
+/**
+ * A [Force] that connects exactly two named particles — currently [Spring] and [Damper].
+ * Lets generic code (the debug renderer's line-per-connection view, §10.2; later the real
+ * pairwise-force renderer) find a connection's endpoints without knowing which concrete
+ * force type it is.
+ */
+interface PairwiseForce {
+    val particleA: Int
+    val particleB: Int
+}

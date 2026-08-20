@@ -122,7 +122,10 @@ class Spring(
     private val extensionBreakThreshold: Double = breakThreshold,
     private val compressionBreakThreshold: Double = breakThreshold,
     override val name: String? = null,
-) : Force, Breakable {
+) : Force, Breakable, PairwiseForce {
+    override val particleA: Int get() = idA
+    override val particleB: Int get() = idB
+
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
@@ -179,7 +182,10 @@ class Damper(
     private val extensionBreakThreshold: Double = breakThreshold,
     private val compressionBreakThreshold: Double = breakThreshold,
     override val name: String? = null,
-) : Force, Breakable {
+) : Force, Breakable, PairwiseForce {
+    override val particleA: Int get() = idA
+    override val particleB: Int get() = idB
+
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,

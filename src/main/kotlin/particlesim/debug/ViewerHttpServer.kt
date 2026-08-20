@@ -1,0 +1,31 @@
+package particlesim.debug
+
+import com.sun.net.httpserver.HttpServer
+import java.net.InetSocketAddress
+
+/**
+ * Serves the debug viewer's static HTML page over `http://localhost` (§10.2's
+ * `--render-all` mode). A real HTTP origin, not a `file://` page: three.js is loaded as an
+ * ES module from a CDN in the page itself, and `file://` origins block module scripts in
+ * Chrome — serving over loopback HTTP sidesteps that without vendoring three.js. Uses the
+ * JDK's built-in [HttpServer] rather than a new dependency, since a single static file is
+ * all this needs.
+ */
+class ViewerHttpServer(port: Int) {
+    private val server = HttpServer.create(InetSocketAddress(port), 0)
+
+    init {
+        val page = javaClass.getResourceAsStream("/particlesim/debug-viewer.html")
+            ?.readBytes()
+            ?: error("missing bundled resource particlesim/debug-viewer.html")
+        server.createContext("/") { exchange ->
+            exchange.responseHeaders.add("Content-Type", "text/html; charset=utf-8")
+            exchange.sendResponseHeaders(200, page.size.toLong())
+            exchange.responseBody.use { it.write(page) }
+        }
+        server.executor = null
+    }
+
+    fun start() = server.start()
+    fun stop() = server.stop(0)
+}

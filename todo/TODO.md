@@ -148,13 +148,39 @@ reasoning):
       across repeated runs.
 
 ## Phase 3 — Debug rendering
-- [ ] Minimal one-way WebSocket state stream: positions (and basic
+- [x] Minimal one-way WebSocket state stream: positions (and basic
       force/collider data) only — no camera pose, events, or bidirectional
-      input yet; the full contract is Phase 8's job (§9.1, partial)
-- [ ] Debug-render override in the web viewer (`--render-all`): every
+      input yet; the full contract is Phase 8's job (§9.1, partial) —
+      `particlesim.debug.DebugServer` (`org.java-websocket:Java-WebSocket`,
+      the project's first runtime dependency — a single small jar, not a
+      framework, chosen so Phase 8's bidirectional upgrade is an
+      `onMessage` override on the same class, not a rewrite). JSON text
+      frames for now, not §9.1's eventual compact binary framing — that's
+      explicitly attributed to the *full* contract, which is Phase 8's
+      job. Collider data isn't in the frame — colliders don't exist yet
+      (Phase 5).
+- [x] Debug-render override in the web viewer (`--render-all`): every
       particle as a dot, every pairwise force as a line, every collider as
       wireframe, ignoring the (not-yet-built) opt-in renderer declarations
-      (§10.2)
+      (§10.2) — `src/main/resources/particlesim/debug-viewer.html`
+      (three.js via CDN import map), served over `http://localhost` by
+      `ViewerHttpServer` (JDK's built-in `HttpServer`, no dependency) —
+      not `file://`, which blocks ES module `<script>` tags in Chrome.
+      `particlesim.debug.DebugRenderer` ties both servers together;
+      `DebugRendererDemo` (`./gradlew run`) is a runnable example — a
+      pinned chain of spring-connected particles swinging under gravity.
+      **Colliders and surfaces aren't drawn** — neither exists yet
+      (Phase 4/5); those branches of `--render-all` land with the things
+      they draw, not stubbed out now.
+      Verified: `DebugFrame`'s serialization is unit-tested; the running
+      demo was confirmed end-to-end from the server side (HTTP page
+      serves, a raw WebSocket client receives well-formed frames showing
+      the anchored particle staying fixed while the rest of the chain
+      moves under gravity/spring forces, including out-of-plane z motion
+      at the free end — added specifically so a y/z axis mixup in the
+      viewer couldn't hide behind an all-XY test scene). Visually
+      confirmed in-browser by the user: dots and connecting lines render
+      and swing correctly at `http://localhost:8888`.
 
 ## Phase 4 — Surfaces
 - [ ] Triangulated surfaces, auto-generated structural springs (§7.1)

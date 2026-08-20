@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm") version "2.0.20"
+    application
 }
 
 group = "particlesim"
@@ -10,7 +11,16 @@ repositories {
 }
 
 dependencies {
+    // Phase 3's debug renderer (§9.1, §10.2): a minimal one-way WebSocket state stream.
+    // A single small jar rather than a full framework (Ktor etc.) — all Phase 3 needs is a
+    // WebSocketServer subclass to broadcast on; Phase 8's bidirectional upgrade reuses the
+    // same class via its onMessage callback, no re-architecture.
+    implementation("org.java-websocket:Java-WebSocket:1.6.0")
     testImplementation(kotlin("test"))
+}
+
+application {
+    mainClass.set("particlesim.debug.DebugRendererDemoKt")
 }
 
 kotlin {
