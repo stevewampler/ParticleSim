@@ -7,6 +7,16 @@ import particlesim.core.ParticleStore
 class BlowUpException(message: String) : RuntimeException(message)
 
 /**
+ * Result of one [Integrator.step]. [brokenForces] (§5.4) is empty on almost every step — it's
+ * the set of breakable forces whose threshold was exceeded by the state at the *start* of
+ * this step. They still contributed their force this step (removal takes effect starting
+ * next step, never retroactively), so the caller is responsible for dropping them from the
+ * active force list before calling [Integrator.step] again — the integrator itself is
+ * stateless and doesn't own the force list between calls.
+ */
+data class StepResult(val brokenForces: List<Force>)
+
+/**
  * Advances a simulation by one fixed timestep using semi-implicit (symplectic) Euler (§8,
  * §13.1): `v += (F/m)·dt` then `x += v·dt`. Explicit Euler is deliberately not offered — it's
  * unstable for anything involving springs (§13.1).
@@ -25,10 +35,15 @@ class Integrator(private val chunkCount: Int = DEFAULT_CHUNK_COUNT) {
         constraints: List<Constraint>,
         t: Double,
         dt: Double,
-    ) {
+    ): StepResult {
         store.refreshDynamicMass(t)
 
         val net = accumulateForces(store, groups, forces, t)
+
+        // Break checks (§5.4) read the same pre-integration state the forces above were just
+        // computed from — fixed forces-list order, so which connections break doesn't depend
+        // on evaluation order, and "multiple breaks in one step" are inherently simultaneous.
+        val broken = forces.filter { it is Breakable && it.shouldBreak(store) }
 
         for (id in store.liveIds()) {
             val slot = store.slotOf(id)
@@ -43,6 +58,8 @@ class Integrator(private val chunkCount: Int = DEFAULT_CHUNK_COUNT) {
         for (c in constraints) c.applyPosition(store, groups, t)
 
         checkForBlowUp(store)
+
+        return StepResult(broken)
     }
 
     private fun accumulateForces(

@@ -31,3 +31,14 @@ interface Force {
         chunkCount: Int,
     )
 }
+
+/**
+ * A [Force] that can permanently remove itself from the simulation once some threshold is
+ * exceeded (§5.4) — currently [Spring] and [Damper]. Checked once per physics step against
+ * the state at the *start* of that step, before integration moves anything — never
+ * re-evaluated mid-step, so which connections break in a given step doesn't depend on the
+ * order they're checked in.
+ */
+interface Breakable {
+    fun shouldBreak(store: ParticleStore): Boolean
+}

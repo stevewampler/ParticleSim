@@ -102,6 +102,13 @@ class NBodyGravity(
  * contributes on `chunkIndex == 0`; Phase 4's auto-generated mesh springs (potentially
  * thousands of them) should be one `Force` striding its own pair list like [NBodyGravity],
  * not thousands of individual `Spring` instances that would all collide on chunk 0.
+ *
+ * Optionally breakable (§5.4): [breakThreshold] is a maximum *displacement from [restLength]*
+ * (meters) — the default/symmetric limit; [extensionBreakThreshold]/[compressionBreakThreshold]
+ * independently override it, mirroring the stiffness split above. Left at the default
+ * [Double.POSITIVE_INFINITY], a spring never breaks. A rope that snaps under tension but goes
+ * slack (never breaks) under compression is `extensionBreakThreshold` finite,
+ * `compressionBreakThreshold` left at its infinite default.
  */
 class Spring(
     private val idA: Int,
@@ -111,8 +118,11 @@ class Spring(
     private val extensionStiffness: Double = stiffness,
     private val compressionStiffness: Double = stiffness,
     private val minLength: Double = DEFAULT_MIN_LENGTH,
+    private val breakThreshold: Double = Double.POSITIVE_INFINITY,
+    private val extensionBreakThreshold: Double = breakThreshold,
+    private val compressionBreakThreshold: Double = breakThreshold,
     override val name: String? = null,
-) : Force {
+) : Force, Breakable {
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
@@ -126,6 +136,12 @@ class Spring(
         val forceOnB = dir * (-k * displacement)
         chunk.add(store.slotOf(idB), forceOnB)
         chunk.add(store.slotOf(idA), -forceOnB)
+    }
+
+    override fun shouldBreak(store: ParticleStore): Boolean {
+        val length = (store.position(idB) - store.position(idA)).length()
+        val displacement = length - restLength
+        return if (displacement >= 0.0) displacement > extensionBreakThreshold else -displacement > compressionBreakThreshold
     }
 
     /** Elastic potential energy stored in the spring at its current length (§11, §13.5). */
@@ -146,6 +162,11 @@ class Spring(
  * along the connecting axis, direction-dependent on whether the pair is separating
  * (extending) or approaching (compressing). Same single-atomic-work chunking note as
  * [Spring] applies.
+ *
+ * Optionally breakable (§5.4), same [breakThreshold]/[extensionBreakThreshold]/
+ * [compressionBreakThreshold] pattern as [Spring] — but a damper has no rest length to
+ * measure a displacement against, so its threshold is a *relative-velocity magnitude*
+ * (m/s) instead of a distance: the same quantity its own force law is already keyed on.
  */
 class Damper(
     private val idA: Int,
@@ -154,8 +175,11 @@ class Damper(
     private val extensionDamping: Double = damping,
     private val compressionDamping: Double = damping,
     private val minLength: Double = Spring.DEFAULT_MIN_LENGTH,
+    private val breakThreshold: Double = Double.POSITIVE_INFINITY,
+    private val extensionBreakThreshold: Double = breakThreshold,
+    private val compressionBreakThreshold: Double = breakThreshold,
     override val name: String? = null,
-) : Force {
+) : Force, Breakable {
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
@@ -169,6 +193,14 @@ class Damper(
         val forceOnB = dir * (-c * relativeVelocity)
         chunk.add(store.slotOf(idB), forceOnB)
         chunk.add(store.slotOf(idA), -forceOnB)
+    }
+
+    override fun shouldBreak(store: ParticleStore): Boolean {
+        val delta = store.position(idB) - store.position(idA)
+        val length = maxOf(delta.length(), minLength)
+        val dir = delta * (1.0 / length)
+        val relativeVelocity = (store.velocity(idB) - store.velocity(idA)).dot(dir)
+        return if (relativeVelocity >= 0.0) relativeVelocity > extensionBreakThreshold else -relativeVelocity > compressionBreakThreshold
     }
 }
 

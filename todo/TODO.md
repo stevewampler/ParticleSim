@@ -70,8 +70,24 @@ reasoning):
       `VectorExpr` that doesn't exist yet — deferred to Phase 4, where
       surfaces are wind's first real consumer anyway, rather than building
       it speculatively now.
-- [ ] Breakable forces, asymmetric break thresholds, deterministic
-      end-of-step batch break ordering (§5.4) — not started; second pass.
+- [x] Breakable forces, asymmetric break thresholds, deterministic
+      end-of-step batch break ordering (§5.4) — `Breakable` interface,
+      implemented by `Spring` (threshold = displacement from `restLength`,
+      matching its existing extension/compression split) and `Damper`
+      (threshold = relative-velocity magnitude, since a damper has no rest
+      length to measure a displacement against — documented in its KDoc as
+      a deliberate reading of §5.4's "distance or force magnitude" phrasing).
+      `Integrator.step` now returns `StepResult(brokenForces)`: breaks are
+      checked once, against the same pre-integration state the forces were
+      accumulated from, in fixed forces-list order — deterministic
+      regardless of how many exceed threshold in one step. The integrator
+      stays stateless; the caller drops broken forces from its own active
+      list before the next `step` call, so a broken connection still
+      applies its force the step it broke (never retroactively) and stops
+      contributing starting the next one. `BreakableForceTest`.
+      Discrete break *events* on a per-frame state stream, and the
+      `breakProximity` renderer warning, are Phase 8/9 (no stream/viewer
+      exists yet).
 - [x] Constraints: fixed position/velocity/force — only position/velocity
       count as infinite mass in collisions, fixed-force does not (§6) —
       `Constraint` (two-stage: velocity-then-position, matching semi-
@@ -116,13 +132,20 @@ reasoning):
       two-body circular orbit stability, energy-conservation assertion
       (§15.1) — all four passing (`HarmonicOscillatorTest`,
       `ProjectileMotionTest`, `TwoBodyOrbitTest`, `EnergyConservationTest`).
-- [ ] Golden-file regression harness: plain-text sampled-state format,
+- [x] Golden-file regression harness: plain-text sampled-state format,
       checked-in references, deliberate-regeneration workflow (§15.2) —
-      not started. §15.2's own scenario list (flag, ball bounce) is Phase
-      4/5 material anyway; when this is built, start with an N-body
-      scenario since that's already exercisable now, and add the others
-      as their phases land rather than treating this as one all-at-once
-      deliverable.
+      `particlesim.golden.GoldenFile` (test-only, `src/test/kotlin`, not
+      shipped with the engine — a golden test deliberately doesn't reuse
+      the production recording format, §9.2): fixed-precision plain-text
+      lines (`t=... label pos=(...) vel=(...)`), checked-in references
+      under `src/test/resources/golden/`, `regenerate()` kept separate
+      from `assertMatchesReference()` so overwriting a reference is never
+      a side effect of running the suite. One scenario built —
+      `NBodyGoldenTest`, a three-body config sampled at 4 times — since
+      §15.2's other named scenarios (flag, ball bounce) need Phase 4/5 to
+      exist first; add them as those phases land rather than treating this
+      as one all-at-once deliverable. Confirmed bit-exact/reproducible
+      across repeated runs.
 
 ## Phase 3 — Debug rendering
 - [ ] Minimal one-way WebSocket state stream: positions (and basic
