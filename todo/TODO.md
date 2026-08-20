@@ -377,11 +377,107 @@ items below for exactly what's deferred and why.
       collider (already filtered by which rule references which collider).
 
 ## Phase 6 — Particle lifecycle
-- [ ] Emitters: rate + uniform-box/sphere/point-spread distributions,
+- [x] Emitters: rate + uniform-box/sphere/point-spread distributions,
       particle budget cap + policy, independent per-emitter RNG sub-stream,
-      added as a golden-file scenario (§14.1, §15.2)
-- [ ] Destruction: lifetime, expression, collision-triggered (§14.2)
-- [ ] Cleanup semantics on destroy (§14.3)
+      added as a golden-file scenario (§14.1, §15.2) — `particlesim.lifecycle`:
+      `VectorDistribution` (UniformBox/UniformSphere/PointWithSpread, uniform
+      over solid angle within the spread cone, not uniform in angle — a wide
+      cone shouldn't over-sample its own edge), `ScalarDistribution`
+      (Constant/UniformRange — "point-with-spread" collapses to a plain 1D
+      range, no separate scalar variant needed), `Emitter`. Spawn rate is a
+      fractional-accumulator model (`accumulator += rate(t)·dt`, spawn once
+      per whole unit crossed) so a rate far below `1/dt` still spawns at the
+      right long-run average instead of rounding to zero every step. Each
+      emitter's RNG sub-stream is seeded via a SplitMix64-style mix of the
+      master seed and the emitter's name, not `masterSeed xor name.hashCode()`
+      — plain XOR only changes the low 32 bits (`hashCode()`'s width), so two
+      emitters in one run got seeds differing only in their low bits, and
+      `Random` streams seeded that close can start out correlated — exactly
+      the "different emitters, suspiciously similar sequences" bug
+      determinism exists to rule out, just disguised as near-duplicates
+      instead of caught as exact ones. `EmitterTest` asserts both directions
+      (same name+seed → identical sequence; different name, same seed →
+      different sequence), not just the second. Particle budget cap policies
+      (`STOP`, `EVICT_OLDEST`) are per-emitter, not global — each emitter
+      tracks its own spawned-and-still-alive ids (oldest first, for eviction
+      order); live count is derived by pruning that list against
+      `store.contains()` each `update()` call rather than requiring
+      destruction to notify the emitter when it removes something — a
+      cross-system contract that's easy to forget once and have the cap
+      silently throttle emission to zero forever after. `STOP` clamps unspent
+      accumulator budget while blocked so clearing the cap later resumes at
+      the steady rate instead of releasing a backlog burst; the cap-hit
+      warning is edge-triggered (fires once when newly at cap, not once per
+      blocked/evicted spawn) to avoid spamming `onWarning` every step of a
+      long-running full emitter.
+- [x] Destruction: lifetime, expression, collision-triggered (§14.2) —
+      `particlesim.lifecycle.DestructionSystem`, `DestroyCondition` (a native
+      lambda predicate per group, ahead of Phase 7's expression parser, same
+      stand-in already used for mass/radius/wind), `CollisionDestroyRule`
+      (reuses Phase 5's `Collider.contact()` narrow-phase geometry, minus the
+      physical response). Composed the same way Phase 5's collision
+      resolution is — a separate call the caller makes, not folded into
+      `Integrator.step()` or `DestructionSystem` owning the emitter loop
+      itself. **Per-step order is `destroy → emit`, deliberately not
+      `emit → destroy`**: a particle spawned this step needs to be
+      integrated at least once before it's eligible for its own
+      lifetime/collision check, otherwise a near-zero sampled lifetime, or a
+      spawn position already touching a destroy-collider, kills it before it
+      was ever simulated.
+- [x] Cleanup semantics on destroy (§14.3) — `Groups.removeParticle` (Phase
+      1) already covers every force/constraint that targets by group
+      membership (`UniformGravity`, `NBodyGravity`, `MeshSprings`, `Wind`,
+      `FixedPosition`/`FixedVelocity`, including `FixedPosition`'s
+      per-particle-position map — it's only ever consulted while iterating
+      *live* group members, so a destroyed id's stale map entry is simply
+      never reached again, no explicit cleanup needed there). The one real
+      gap is `PairwiseForce`s (`Spring`, `Damper`) that hold `idA`/`idB`
+      directly, bypassing groups entirely — `DestructionResult.danglingForces`
+      reports any of those referencing a destroyed id, mirroring
+      `StepResult.brokenForces` exactly: the caller drops them from its own
+      active force list before the next `Integrator.step` call. **Scoped to
+      free (non-surface) particles, per spec** — nothing in
+      `DestructionSystem` checks whether a destroyed id is a surface-mesh
+      vertex, so a destroy rule whose group includes flag-cloth particles
+      would leave `MeshSprings`/`Wind` holding a dangling id (throws on the
+      next `accumulate`). Not guarded against: this phase's worked example
+      never touches surfaces, and surface-vertex removal needs its own
+      mesh-repair design that §14.3 already marks `[stretch]` — documented
+      in `DestructionSystem`'s KDoc rather than silently assumed away.
+- [x] Worked example + golden-file scenario (§14.1, §15.2) — a spark
+      fountain, `particlesim.examples.buildSparks` (`./gradlew
+      runSparksDemo`): one `Emitter` spraying upward in a cone
+      (`PointWithSpread`) at a rate that pulses over time
+      (`20 + 15·sin(0.5t)`) rather than staying constant, specifically to
+      exercise "expression-capable... bursts, ramps" rather than just
+      picking a constant. Sparks fall under gravity+drag and leave the
+      simulation via whichever of two mechanisms comes first — lifetime
+      expiry or ground contact (§14.2's own "a spark disappearing when it
+      hits the ground" example) — plus a bounding-region `DestroyCondition`
+      backstop for stray fast sparks, exercising all three §14.2 mechanisms
+      together. `SparksGoldenTest` samples *live count + mean position/
+      velocity* rather than named particles by id, unlike the flag/N-body
+      goldens — which particles are still alive at a given sample time
+      depends on randomly-drawn lifetimes and where each one landed, so a
+      particle picked up front has no guarantee of surviving to the next
+      sample; aggregate state is well-defined at every sample regardless of
+      individual particle lifecycles, and still moves if spawn/destroy logic
+      regresses. `SparksStabilityTest` runs 10s and checks the population
+      stays at/under the emitter's cap and that destruction is actually
+      firing (far more ids issued than are currently alive), separately from
+      the golden file's short 1s window.
+      One bug, self-caught before this ever reached a demo/golden file: the
+      scenario's *first* draft spawned particles in a small sphere centered
+      directly on the ground collider's position, so most sparks were born
+      already overlapping the floor and got destroyed before ever visibly
+      existing — golden output showed `alive=0` at the first sample. Fixed
+      by spawning well clear of the floor (a real flight arc, not a
+      coin-flip on spawn-position overlap) rather than by touching the
+      destroy logic, since the destroy logic itself was correct — the
+      scenario's own parameters were the bug. (The `destroy → emit`
+      ordering above was designed in from the start, based on the
+      architecture review before any lifecycle code was written — not a
+      bug this scenario caught.)
 
 ## Phase 7 — Expression language & YAML front-end
 - [ ] Hand-rolled expression parser — incl. `noise()` as seeded
