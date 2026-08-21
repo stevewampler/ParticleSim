@@ -644,25 +644,97 @@ this project has used since Phase 5.
       **Not yet built**: discrete-event channel (breaks/spawn/destroy —
       needs a scenario that actually produces events, which ball-bounce
       doesn't), checkpointing, resume.
-- [ ] Checkpointing: full-state snapshot at each shard boundary (group
+- [x] Checkpointing: full-state snapshot at each shard boundary (group
       membership, broken connections, emitter accumulator+RNG state,
       t/step index), resume-from-checkpoint on crash (§9.5, §13.2).
-      Second sub-pass of the item above — deliberately not started until
-      recording itself was proven; will need `sparks` as its proof
-      scenario (only one with an emitter/dynamic population to round-trip)
-      and two design gaps already reasoned through but not yet
-      implemented: (1) `ParticleStore.nextId` isn't recoverable from the
-      alive-particle-id set alone (destroyed ids are never reused, but the
-      alive set's max id can be *lower* than the true next-id if the
-      highest-numbered particles happened to die first) — checkpoint needs
-      to persist it explicitly, even though it's not named in §9.5's own
-      bullet list. (2) A broken `Spring`/`Damper` is fully removed from
-      the forces list when it breaks (unlike `MeshSprings`, which just
-      flips an internal `active` bit and stays in the list) — so "the set
-      of already-broken connections" has to be persisted as particle-id
-      pairs, with the resume caller filtering a freshly-rebuilt force list
-      against that set, mirroring how `StepResult.brokenForces` already
-      works during a live run.
+      Second sub-pass of the batch/record item above, proven against
+      `sparks` (the only worked example with dynamic population and an
+      emitter to round-trip) plus one small synthetic scenario for the one
+      piece sparks can't exercise on its own (broken connections — sparks
+      has no `PairwiseForce` at all).
+      **Core proof**: `CheckpointTest` runs the sparks scenario two ways
+      from the same seed — 1500 steps straight through, vs. 1000 steps,
+      checkpoint-through-real-files, resume onto a *completely fresh*
+      `buildSparks()` scenario shell, then 500 more steps — and asserts
+      the two final states (live ids, positions, velocities) match
+      *exactly*. Passed on the first run. Population genuinely churns in
+      this window (spawns and destroys both happen; asserted, not
+      assumed), so this isn't a degenerate no-op proof.
+      **`particlesim.record`**: `CheckpointSchema` (Arrow columns for
+      per-particle bulk state — id/position/velocity/mass/radius/
+      spawnTime/lifetime — separate from `RecordingSchema`, since a
+      checkpoint needs more than a played-back frame does), `Checkpoint`/
+      `CheckpointParticle` data classes, `captureCheckpoint`/
+      `applyCheckpoint`/`filterBrokenConnections` free functions,
+      `CheckpointWriter`/`CheckpointReader` (one `.arrow` file for the
+      bulk particle columns + one `.yaml` sidecar for everything
+      non-columnar: t, step, nextId, group membership, broken connections,
+      emitter state).
+      **Two design gaps found and resolved while implementing** (both
+      correct, but worth flagging since neither is literally what §9.5's
+      bullet list says):
+      1. **`mass` *is* captured, contradicting §9.5's explicit "mass —
+         recomputed from expression" line.** That's the right call for a
+         mass that's a genuinely re-evaluable function of time, shared
+         across particles — but an emitter-spawned particle's mass
+         (§14.1) is sampled *once* from a `ScalarDistribution` at spawn
+         time and baked in as a particle-specific constant; there's no
+         shared expression left to re-evaluate for a particle that
+         already existed before the checkpoint. `ParticleStore.restoreParticle`'s
+         doc comment covers this in full, including the resulting gap: a
+         particle whose mass is a genuine time-varying `ScalarExpr.OfTime`
+         does *not* survive a checkpoint round-trip with that
+         time-variance intact — harmless today since no worked example
+         gives an emitter-spawned particle a dynamic mass, but a real gap
+         if one ever does.
+      2. **The sidecar is YAML, not the literally-specified JSON** —
+         reusing SnakeYAML (already a dependency, added for Phase 7)
+         rather than adding a JSON library for a same-shaped need. Nothing
+         in §9.5 requires JSON specifically for external-tool
+         compatibility as far as this implementation found; flagging the
+         deviation here rather than silently renaming it.
+      **`ParticleStore.nextId` gap** (anticipated in this bullet before
+      implementation, confirmed real): not recoverable from the
+      alive-particle-id set alone, since ids are never reused and the
+      highest-numbered particles may have already been destroyed by
+      checkpoint time. `restoreParticle`/`advanceNextIdTo` (new `internal`
+      methods) handle this — the latter must move forward only, checked
+      with a `require`.
+      **Broken connections**: `Checkpoint.brokenConnections` is a
+      `Set<Pair<Int,Int>>` the *caller* accumulates step-by-step (folding
+      in both `StepResult.brokenForces` and `DestructionResult.danglingForces`,
+      filtered to `PairwiseForce`) — nothing in the engine remembers a
+      break after the force is dropped from the active list, so this
+      can't be discovered after the fact by the checkpoint mechanism
+      itself. `BrokenConnectionCheckpointTest`: a synthetic two-particle
+      breakable spring, broken on step 1, checkpointed, and resumed onto a
+      freshly-rebuilt (same static definition) force list — confirms
+      `filterBrokenConnections` correctly excludes the rebuilt spring.
+      **Emitter RNG checkpointing — the trickiest piece**: `kotlin.random.Random`
+      has no public API to serialize its internal state. Solved with
+      `CountingRandom` (`particlesim.lifecycle`), a `Random` subclass that
+      counts calls to `nextDouble()` — the one primitive every
+      `VectorDistribution`/`ScalarDistribution` sampler in this codebase
+      actually calls (confirmed by reading `Distribution.kt`, not
+      assumed) — and can rebuild+fast-forward a fresh stream to any
+      captured draw count by literally replaying that many draws.
+      `CountingRandomTest` proves the fast-forwarded stream's *next*
+      values are identical to the original stream's actual continuation,
+      not just similarly-distributed. `Emitter` gained `captureState()`/
+      `restoreState()` plus `EmitterCheckpointState` (accumulator phase,
+      this emitter's own live-spawned ids in spawn order — needed for
+      correct future `EVICT_OLDEST` behavior, which a generic *unordered*
+      group-membership capture wouldn't preserve — the at-cap warning
+      flag, and the RNG draw count).
+      **Not yet done**: checkpoint-taking isn't wired into `RecordingWriter`'s
+      shard-rollover automatically (§9.5 says checkpoints happen "at each
+      recording shard boundary") — `captureCheckpoint`/`CheckpointWriter`
+      work standalone today, proven directly rather than through that
+      integration. Also still open: the real engine loop's crash-resume
+      wiring (§13.2 — "failing fast costs at most the frames since the
+      last shard boundary") and playback-fork-to-live are both listed
+      separately below/in the deferred `[stretch]` section and weren't
+      started here.
 - [x] Multi-threaded force accumulation: turn on the fixed-chunk reduction
       designed back in Phase 2 — fixed logical chunk count, per-chunk
       private accumulators, fixed chunk-index merge order, deterministic

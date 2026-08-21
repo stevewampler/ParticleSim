@@ -15,6 +15,16 @@ enum class EmitterCapPolicy {
     EVICT_OLDEST,
 }
 
+/** Everything [Emitter.captureState]/[Emitter.restoreState] round-trip through a checkpoint
+ * (§9.5) — see [Emitter.captureState]'s doc comment for what each field is for. */
+data class EmitterCheckpointState(
+    val name: String,
+    val accumulator: Double,
+    val liveIds: List<Int>,
+    val atCap: Boolean,
+    val rngDrawCount: Long,
+)
+
 /**
  * The primary spawning mechanism (§14.1): a spawn rate (particles/sec, expression-capable so
  * it can ramp or burst) plus initial-property distributions for each new particle's position,
@@ -45,7 +55,10 @@ class Emitter(
     // Each emitter gets its own independent RNG sub-stream (§11, §14.4), seeded from the run's
     // master seed plus this emitter's stable name — not a shared stream, since which emitter
     // consumes the next value first would depend on iteration/scheduling order, not the seed.
-    private val rng = Random(mixSeed(masterSeed, name))
+    // CountingRandom (not plain Random) so its exact stream position can be checkpointed
+    // (§9.5) and restored on resume — see restoreState/captureState below.
+    private val seed = mixSeed(masterSeed, name)
+    private var rng = CountingRandom(Random(seed))
 
     // Fractional spawn budget: `rate` is particles/sec but a step is a tiny fraction of a
     // second, so most steps accumulate less than one whole particle. Carried across steps.
@@ -98,6 +111,33 @@ class Emitter(
 
             accumulator -= 1.0
         }
+    }
+
+    /** Snapshots everything about this emitter that isn't recoverable from the static
+     * scenario definition alone (§9.5): the fractional spawn-rate accumulator's phase, this
+     * emitter's own spawned-and-still-alive ids in spawn order (needed for correct future
+     * [EmitterCapPolicy.EVICT_OLDEST] behavior — a generic *unordered* group-membership set
+     * wouldn't preserve that), whether it had already warned about hitting its cap, and its
+     * RNG sub-stream's exact position. */
+    fun captureState(): EmitterCheckpointState = EmitterCheckpointState(
+        name = name,
+        accumulator = accumulator,
+        liveIds = liveIds.toList(),
+        atCap = atCap,
+        rngDrawCount = rng.drawCount,
+    )
+
+    /** Restores state captured by [captureState] onto a freshly-constructed `Emitter` (same
+     * `name`/`masterSeed`, so the same base RNG seed) — the checkpoint-resume counterpart.
+     * Must be called before any real [update] call, since it fast-forwards a *fresh*
+     * `CountingRandom` from its zero state rather than mutating the current stream position. */
+    fun restoreState(state: EmitterCheckpointState) {
+        require(state.name == name) { "checkpoint state is for emitter '${state.name}', this is '$name'" }
+        accumulator = state.accumulator
+        liveIds.clear()
+        liveIds.addAll(state.liveIds)
+        atCap = state.atCap
+        rng = CountingRandom.restore(seed, state.rngDrawCount)
     }
 
     companion object {

@@ -146,6 +146,63 @@ class ParticleStore(private val onWarning: (String) -> Unit = { System.err.print
     internal fun slotOf(id: Int): Int =
         idToSlot[id] ?: throw IllegalArgumentException("no such particle: $id")
 
+    /** Current id-assignment counter — needed by checkpoint capture (§9.5), since it isn't
+     * recoverable from the live/alive id set alone (see [advanceNextIdTo]). */
+    internal val nextIdValue: Int get() = nextId
+
+    /**
+     * Rebuilds one particle's live state directly from checkpoint data (§9.5), bypassing the
+     * normal [create] id-assignment path — every id here is already fixed by the checkpoint,
+     * not newly minted. [mass] is taken as a plain already-evaluated `Double` rather than a
+     * [ScalarExpr]: a deliberate deviation from §9.5's own list of what a checkpoint captures
+     * (which says mass is *not* captured, "recomputed from expression"). That's correct for a
+     * mass that's a genuinely re-evaluable function shared across particles, but an
+     * emitter-spawned particle's mass (§14.1) is sampled *once* from a [particlesim.lifecycle.ScalarDistribution]
+     * at spawn time and baked in as a particle-specific constant — there is no shared
+     * expression left to re-evaluate for a particle that already existed before the
+     * checkpoint, so the sampled value itself has to be captured. A particle whose mass is a
+     * genuine time-varying expression (`ScalarExpr.OfTime`) doesn't survive a checkpoint
+     * round-trip with that time-variance intact — it comes back as a constant fixed at the
+     * checkpoint's value. Undocumented gap in general, but harmless for now: no worked example
+     * built so far gives emitter-spawned particles a dynamic mass.
+     */
+    internal fun restoreParticle(
+        id: Int,
+        position: Vector3,
+        velocity: Vector3,
+        mass: Double,
+        radius: Double?,
+        spawnTime: Double,
+        lifetime: Double?,
+    ) {
+        require(!idToSlot.containsKey(id)) { "particle $id already exists" }
+        val slot = if (freeSlots.isNotEmpty()) freeSlots.removeLast() else allocateSlot()
+
+        idToSlot[id] = slot
+        slotToId[slot] = id
+
+        posX[slot] = position.x; posY[slot] = position.y; posZ[slot] = position.z
+        velX[slot] = velocity.x; velY[slot] = velocity.y; velZ[slot] = velocity.z
+        accX[slot] = 0.0; accY[slot] = 0.0; accZ[slot] = 0.0
+
+        massArr[slot] = mass
+        radiusArr[slot] = radius ?: Double.NaN
+        spawnTimeArr[slot] = spawnTime
+        lifetimeArr[slot] = lifetime ?: Double.NaN
+        // No expr map entries: a restored particle's mass/radius/lifetime are always treated
+        // as constants (see this method's own doc comment above).
+    }
+
+    /** Moves the id-assignment counter forward to at least [id] (§9.5's checkpoint-resume
+     * needs this restored explicitly — it can't be inferred from the live particle set alone,
+     * since ids are never reused (§14.3): if the highest-numbered particles happened to
+     * already be destroyed before the checkpoint was taken, `max(aliveIds) + 1` would
+     * under-count and a future emitter spawn could collide with a still-referenced dead id). */
+    internal fun advanceNextIdTo(id: Int) {
+        require(id >= nextId) { "cannot move nextId backward: current=$nextId, requested=$id" }
+        nextId = id
+    }
+
     private fun setOrClearExpr(map: MutableMap<Int, ScalarExpr.OfTime>, id: Int, expr: ScalarExpr?) {
         if (expr is ScalarExpr.OfTime) map[id] = expr else map.remove(id)
     }
