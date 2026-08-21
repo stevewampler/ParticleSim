@@ -84,4 +84,11 @@ class WindTest {
 
         assertEquals(Vector3.ZERO, netForceOn(a, store, groups, wind))
     }
+
+    @Test
+    fun `sampleAt returns the wind velocity itself, ignoring position, for the arrow renderer`() {
+        val wind = Wind(emptyList(), VectorExpr.of { t -> Vector3(t, 0.0, 0.0) })
+        assertEquals(Vector3(3.0, 0.0, 0.0), wind.sampleAt(Vector3(100.0, -50.0, 7.0), t = 3.0))
+        assertEquals(Vector3(3.0, 0.0, 0.0), wind.sampleAt(Vector3.ZERO, t = 3.0), "position is unused - wind is spatially uniform today")
+    }
 }

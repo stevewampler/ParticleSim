@@ -2,6 +2,7 @@ package particlesim.physics
 
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
+import particlesim.core.Vector3
 import particlesim.core.VectorExpr
 import particlesim.surface.Triangle
 
@@ -26,7 +27,15 @@ class Wind(
     private val velocity: VectorExpr,
     private val density: Double = 1.0,
     override val name: String? = null,
-) : Force {
+) : Force, UniformFieldForce {
+    /** The wind *velocity* itself (§10.2's arrow renderer target) — not the resulting
+     * per-triangle pressure force [accumulate] computes, which depends on each triangle's own
+     * orientation/motion and isn't a spatial field in the same sense. [position] is unused:
+     * wind is spatially uniform today (§5.2 marks position-dependence optional, and Phase 2
+     * confirmed the flag example never needed it) — spatially-varying gusts remain a
+     * documented, unbuilt gap. */
+    override fun sampleAt(position: Vector3, t: Double): Vector3 = velocity.evaluate(t)
+
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,

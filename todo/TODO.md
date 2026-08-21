@@ -942,11 +942,59 @@ this project has used since Phase 5.
       scripted" toggle — deliberately deferred, since there's no orbit
       control in the viewer yet for "manual" to mean anything; that's the
       web-viewer-upgrade sub-pass, not this one.
-- [ ] Renderers: particle/surface (dot/sphere/mesh) — the real opt-in
+- [~] Renderers: particle/surface (dot/sphere/mesh) — the real opt-in
       system; Phase 3's debug-render override stays available as a
       permanent fallback alongside it, not replaced (§10.2)
-- [ ] Renderers: force (arrows for fields, lines w/ colorblind-safe
-      breakProximity gradient for springs/dampers) (§10.2)
+- [~] Renderers: force (arrows for fields, lines w/ colorblind-safe
+      breakProximity gradient for springs/dampers) (§10.2). Second
+      sub-pass of Phase 9 — **declaration types and computation logic
+      only, proven with unit tests; not yet wired into any wire protocol
+      or viewer**, deliberately deferred to the third sub-pass (web
+      viewer upgrade) so this data flows through the *new* binary
+      protocol once, not bolted onto the old JSON debug-frame format now
+      and redone later.
+      **`particlesim.render`**: `ParticleRenderer`/`ParticleStyle`
+      (Dot/Sphere), `SurfaceRenderer` (a `List<Triangle>` directly, same
+      as `Wind` already takes — surfaces have no name→object registry
+      yet), `LineRenderer` (a `PairwiseForce` + `ColorBy`), `ArrowRenderer`
+      (a new `UniformFieldForce` + region + resolution). Kotlin-DSL-first
+      like everything since Phase 7 — renderers reference the actual
+      force/group/triangle objects, not YAML string names; YAML
+      `renderers:` support is a deferred second pass, same status as
+      every other post-Phase-7 YAML gap.
+      **`Breakable` gained `breakProximity(store): Double`** (alongside
+      the existing `shouldBreak`) — `0` at rest, `1` the instant before
+      breaking, possibly `>1` transiently the one step a connection
+      actually breaks (its force still applies that step, §5.4).
+      Implemented on `Spring`/`Damper` using the same direction-dependent
+      threshold logic `shouldBreak` already has (extension vs.
+      compression) — an infinite (never-breaks) threshold returns `0.0`
+      rather than dividing into a technically-correct-but-meaningless
+      value.
+      **New `UniformFieldForce` interface** (`sampleAt(position, t):
+      Vector3`) — implemented by `UniformGravity` and `Wind`, both
+      already spatially uniform today (Wind's `velocity` field, not the
+      resulting per-triangle pressure force `accumulate` computes, which
+      isn't a spatial field in the same sense). `position` is accepted
+      but currently unused by both — ready for a future spatially-varying
+      force (gusty wind, a known unbuilt gap since Phase 2/4) without an
+      interface change.
+      **`ColorRamp.blueOrange`**: the spec's own suggested colorblind-safe
+      gradient (Okabe-Ito palette's blue/orange pair, not the intuitive-
+      but-deuteranopia-hostile green→yellow→red), clamping its input
+      first so a `>1` breakProximity still resolves to a valid color.
+      **`LineRenderer` validates eagerly**: declaring
+      `colorBy=BREAK_PROXIMITY` on a force that isn't `Breakable` fails at
+      construction (`require`), not silently — an authoring mistake
+      that's much easier to debug as an immediate exception than as "why
+      isn't my spring changing color?" discovered later.
+      **Deferred, not built**: `stretch`/`force`-magnitude `colorBy`
+      variants from the spec's own list — unlike `breakProximity`,
+      neither has one definition that means the same thing across every
+      `PairwiseForce` type (`Damper` has no rest length for "stretch" to
+      mean anything against), so they need their own design pass rather
+      than being guessed at here. N-body/custom-force renderers are
+      `[stretch]` per the spec itself.
 - [ ] Web viewer (WebGL/three.js) + binary WebSocket protocol, full
       orbit/picking/camera controls — sole first-class viewer, upgrading
       from Phase 3's bare-bones renderer (§9.1, §10)

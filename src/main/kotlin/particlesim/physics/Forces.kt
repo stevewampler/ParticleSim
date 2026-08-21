@@ -10,7 +10,7 @@ class UniformGravity(
     private val group: String,
     private val acceleration: Vector3,
     override val name: String? = null,
-) : Force {
+) : Force, UniformFieldForce {
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
@@ -23,6 +23,10 @@ class UniformGravity(
             i += chunkCount
         }
     }
+
+    /** Uniform everywhere — [position] is unused (§10.2's arrow renderer still needs to pass
+     * one, since [UniformFieldForce] is shared with forces that could vary spatially later). */
+    override fun sampleAt(position: Vector3, t: Double): Vector3 = acceleration
 }
 
 /** Drag/air resistance opposing velocity, linear or quadratic in speed (§5.2). */
@@ -147,6 +151,14 @@ class Spring(
         return if (displacement >= 0.0) displacement > extensionBreakThreshold else -displacement > compressionBreakThreshold
     }
 
+    override fun breakProximity(store: ParticleStore): Double {
+        val length = (store.position(idB) - store.position(idA)).length()
+        val displacement = length - restLength
+        val threshold = if (displacement >= 0.0) extensionBreakThreshold else compressionBreakThreshold
+        if (threshold.isInfinite()) return 0.0
+        return kotlin.math.abs(displacement) / threshold
+    }
+
     /** Elastic potential energy stored in the spring at its current length (§11, §13.5). */
     fun potentialEnergy(store: ParticleStore): Double {
         val length = maxOf((store.position(idB) - store.position(idA)).length(), minLength)
@@ -207,6 +219,16 @@ class Damper(
         val dir = delta * (1.0 / length)
         val relativeVelocity = (store.velocity(idB) - store.velocity(idA)).dot(dir)
         return if (relativeVelocity >= 0.0) relativeVelocity > extensionBreakThreshold else -relativeVelocity > compressionBreakThreshold
+    }
+
+    override fun breakProximity(store: ParticleStore): Double {
+        val delta = store.position(idB) - store.position(idA)
+        val length = maxOf(delta.length(), minLength)
+        val dir = delta * (1.0 / length)
+        val relativeVelocity = (store.velocity(idB) - store.velocity(idA)).dot(dir)
+        val threshold = if (relativeVelocity >= 0.0) extensionBreakThreshold else compressionBreakThreshold
+        if (threshold.isInfinite()) return 0.0
+        return kotlin.math.abs(relativeVelocity) / threshold
     }
 }
 

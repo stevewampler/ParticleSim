@@ -104,4 +104,11 @@ class ForceComponentTest {
         // magnitude = c * speed^2 = 50, direction opposite velocity: (3,4,0)/5 * -50
         assertEquals(Vector3(-30.0, -40.0, 0.0), force)
     }
+
+    @Test
+    fun `uniform gravity's sampleAt returns the constant acceleration everywhere, for the arrow renderer`() {
+        val gravity = UniformGravity("g", Vector3(0.0, -9.8, 0.0))
+        assertEquals(Vector3(0.0, -9.8, 0.0), gravity.sampleAt(Vector3(50.0, 50.0, 50.0), t = 123.0))
+        assertEquals(Vector3(0.0, -9.8, 0.0), gravity.sampleAt(Vector3.ZERO, t = 0.0))
+    }
 }

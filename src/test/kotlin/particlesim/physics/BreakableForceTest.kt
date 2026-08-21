@@ -47,6 +47,55 @@ class BreakableForceTest {
         assertTrue(damper.shouldBreak(store))
     }
 
+    // --- breakProximity (§10.2's breakProximity line-renderer coloring) ----------------------
+
+    @Test
+    fun `spring breakProximity is 0 at rest, approaches 1 near the threshold, exceeds 1 once broken`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3(0.0, 0.0, 0.0))
+        val b = store.create(position = Vector3(1.0, 0.0, 0.0)) // at rest length
+        val spring = Spring(a, b, restLength = 1.0, stiffness = 10.0, breakThreshold = 1.0)
+
+        assertEquals(0.0, spring.breakProximity(store))
+
+        store.setPosition(b, Vector3(1.5, 0.0, 0.0)) // displacement 0.5 of threshold 1.0
+        assertEquals(0.5, spring.breakProximity(store), 1e-12)
+
+        store.setPosition(b, Vector3(2.5, 0.0, 0.0)) // displacement 1.5 > threshold 1.0 -> broken
+        assertTrue(spring.breakProximity(store) > 1.0)
+    }
+
+    @Test
+    fun `spring breakProximity uses the direction-appropriate threshold, same as shouldBreak`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3(0.0, 0.0, 0.0))
+        val b = store.create(position = Vector3(0.5, 0.0, 0.0)) // compressed by 0.5
+        val spring = Spring(
+            a, b, restLength = 1.0, stiffness = 1.0, compressionStiffness = 0.0,
+            extensionBreakThreshold = 1.0, compressionBreakThreshold = 2.0,
+        )
+        assertEquals(0.25, spring.breakProximity(store), 1e-12) // 0.5 / 2.0, not 0.5 / 1.0
+    }
+
+    @Test
+    fun `breakProximity is 0 for an unbounded (never-breaks) threshold, not a division blow-up`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3(0.0, 0.0, 0.0))
+        val b = store.create(position = Vector3(1000.0, 0.0, 0.0))
+        val spring = Spring(a, b, restLength = 1.0, stiffness = 1.0) // default infinite threshold
+        assertEquals(0.0, spring.breakProximity(store))
+    }
+
+    @Test
+    fun `damper breakProximity is keyed on relative-velocity magnitude, matching shouldBreak`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3(0.0, 0.0, 0.0))
+        val b = store.create(position = Vector3(1.0, 0.0, 0.0), velocity = Vector3(1.5, 0.0, 0.0))
+        val damper = Damper(a, b, damping = 1.0, breakThreshold = 3.0)
+
+        assertEquals(0.5, damper.breakProximity(store), 1e-12)
+    }
+
     @Test
     fun `a broken spring still applies its force the step it broke, but not the next`() {
         val store = ParticleStore()

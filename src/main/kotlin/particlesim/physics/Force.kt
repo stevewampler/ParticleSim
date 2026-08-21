@@ -2,6 +2,7 @@ package particlesim.physics
 
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
+import particlesim.core.Vector3
 
 /**
  * A force contributes to particles' net force each step (§5). `accumulate` is called once
@@ -41,6 +42,16 @@ interface Force {
  */
 interface Breakable {
     fun shouldBreak(store: ParticleStore): Boolean
+
+    /** The ratio of current deformation to whichever break threshold currently applies
+     * (extension- or compression-side, same direction-dependent logic [shouldBreak] uses) —
+     * `0` at rest, `1` the instant before breaking, possibly transiently `>1` the one step a
+     * connection actually breaks on (its force still applies that step — §5.4). Powers
+     * §10.2's `breakProximity` line-renderer coloring; a connection with an infinite
+     * (default, never-breaks) threshold always returns `0.0` rather than dividing by
+     * infinity into a value that's technically correct but meaningless to color by.
+     */
+    fun breakProximity(store: ParticleStore): Double
 }
 
 /**
@@ -52,4 +63,17 @@ interface Breakable {
 interface PairwiseForce {
     val particleA: Int
     val particleB: Int
+}
+
+/**
+ * A [Force] whose vector value can be sampled at an arbitrary point in space — [UniformGravity]
+ * and [Wind] both qualify today, since neither currently varies spatially (§10.2's arrow
+ * renderer samples a field force on a grid over a region; [position] is accepted for a future
+ * spatially-varying force — gusty wind that differs across a sheet is a documented, still-
+ * unbuilt gap from Phase 2/4 — but is unused by either current implementation). Deliberately
+ * not exposed on [Force] itself: N-body gravity and pairwise forces have no single "value at a
+ * point" to report, so this is an opt-in capability, not part of the base contract.
+ */
+interface UniformFieldForce {
+    fun sampleAt(position: Vector3, t: Double): Vector3
 }
