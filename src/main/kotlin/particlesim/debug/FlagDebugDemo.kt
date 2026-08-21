@@ -3,6 +3,8 @@ package particlesim.debug
 import particlesim.core.Vector3
 import particlesim.examples.FLAG_DT
 import particlesim.examples.buildFlag
+import particlesim.physics.Constraint
+import particlesim.physics.DragConstraint
 import particlesim.physics.Integrator
 import particlesim.render.CameraFunction
 import particlesim.render.CameraPose
@@ -19,6 +21,10 @@ import kotlin.math.sin
  * Also §10.1's first worked example: a scripted camera orbiting the cloth's centroid while
  * looking at the free corner (farthest from the pole, so the most visually dynamic point) —
  * almost exactly the requirements doc's own motivating example for camera scripting.
+ *
+ * And §9.4's drag, wired the same way `DragDebugDemo` already does it — a cloth particle can
+ * be grabbed and pulled, same as the spring-chain's, but here it demonstrates propagation
+ * through a whole sheet instead of a line.
  */
 fun main() {
     val scenario = buildFlag(rows = 8, cols = 14)
@@ -32,7 +38,10 @@ fun main() {
         )
     }
 
-    val renderer = DebugRenderer()
+    val dragQueue = DragMessageQueue()
+    val renderer = DebugRenderer(onTextMessage = { text ->
+        DragMessage.parse(text)?.let(dragQueue::offer)
+    })
     renderer.start()
 
     val integrator = Integrator()
@@ -41,12 +50,31 @@ fun main() {
 
     var t = 0.0
     var step = 0L
+    var activeDrag: DragConstraint? = null
     val frameNanos = 1_000_000_000L / framesPerSecond
     val allIds = scenario.grid.flatten()
     while (true) {
         val frameStart = System.nanoTime()
         repeat(stepsPerFrame) {
-            integrator.step(scenario.store, scenario.groups, scenario.forces, scenario.constraints, t, FLAG_DT)
+            for (message in dragQueue.drainAll()) {
+                when (message) {
+                    is DragMessage.Start -> {
+                        // The pole edge is already FixedPosition-constrained — dragging it
+                        // would just fight that constraint, same reasoning as DragDebugDemo
+                        // excluding its own pinned anchor.
+                        if ("pole" !in scenario.groups.groupsOf(message.particleId)) {
+                            activeDrag = DragConstraint(message.particleId, message.target)
+                        }
+                    }
+                    is DragMessage.Move -> activeDrag?.updateTarget(message.target, FLAG_DT)
+                    is DragMessage.End -> {
+                        activeDrag?.let { scenario.store.setVelocity(it.particleId, it.releaseVelocity()) }
+                        activeDrag = null
+                    }
+                }
+            }
+            val constraints: List<Constraint> = activeDrag?.let { scenario.constraints + it } ?: scenario.constraints
+            integrator.step(scenario.store, scenario.groups, scenario.forces, constraints, t, FLAG_DT)
             t += FLAG_DT
             step++
         }
