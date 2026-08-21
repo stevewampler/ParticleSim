@@ -3,6 +3,7 @@ package particlesim.debug
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
 import particlesim.render.CameraPose
+import particlesim.render.Color
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -25,7 +26,7 @@ class BinaryFrameTest {
         assertEquals(1.5, decoded.t)
         assertEquals(42L, decoded.step)
         assertEquals(listOf(DecodedParticle(a, Vector3(1.0, 2.0, 3.0)), DecodedParticle(b, Vector3(-1.5, 0.25, 100.0))), decoded.particles)
-        assertEquals(listOf(a to b), decoded.connections)
+        assertEquals(listOf(DecodedConnection(a, b, Color.DEFAULT_LINE)), decoded.connections, "no lineColors override -> the default line color")
         assertNull(decoded.camera)
     }
 
@@ -50,6 +51,27 @@ class BinaryFrameTest {
         val decoded = BinaryFrame.decode(buffer)
 
         assertEquals(camera, decoded.camera)
+    }
+
+    @Test
+    fun `a lineColors override resolves to that color, other connections still get the default`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+        val b = store.create(position = Vector3.ZERO)
+        val c = store.create(position = Vector3.ZERO)
+        val red = Color(1.0, 0.0, 0.0)
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = listOf(a, b, c),
+            connections = listOf(a to b, b to c),
+            lineColors = mapOf((a to b) to red),
+        )
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(
+            listOf(DecodedConnection(a, b, red), DecodedConnection(b, c, Color.DEFAULT_LINE)),
+            decoded.connections,
+        )
     }
 
     @Test

@@ -56,6 +56,27 @@ class MeshSprings(
     fun activeConnections(): List<Pair<Int, Int>> =
         (0 until idA.size).filter { active[it] }.map { idA[it] to idB[it] }
 
+    /** Endpoints plus per-edge break proximity (§10.2's `breakProximity` line-renderer
+     * coloring) for every currently-active edge — `0` at rest, `1` the instant before
+     * breaking, mirroring [Breakable.breakProximity]'s semantics. `MeshSprings` isn't itself
+     * [Breakable] (it represents *many* independently-breakable edges as one `Force`, §9.3's
+     * chunking requirement — there's no single proximity value for "the force" as a whole),
+     * so this is its own per-edge equivalent rather than an interface implementation. */
+    fun activeConnectionsWithBreakProximity(store: ParticleStore): List<Triple<Int, Int, Double>> {
+        val result = ArrayList<Triple<Int, Int, Double>>()
+        for (i in idA.indices) {
+            if (!active[i]) continue
+            val a = idA[i]
+            val b = idB[i]
+            val length = maxOf((store.position(b) - store.position(a)).length(), minLength)
+            val displacement = length - restLength[i]
+            val threshold = if (displacement >= 0.0) extensionBreakThreshold else compressionBreakThreshold
+            val proximity = if (threshold.isInfinite()) 0.0 else kotlin.math.abs(displacement) / threshold
+            result += Triple(a, b, proximity)
+        }
+        return result
+    }
+
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,

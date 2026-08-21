@@ -89,4 +89,45 @@ class MeshSpringsTest {
         assertFalse(a to b in mesh.activeConnections())
         assertTrue(a to c in mesh.activeConnections())
     }
+
+    // --- activeConnectionsWithBreakProximity (§10.2's breakProximity line-renderer coloring) --
+
+    @Test
+    fun `breakProximity is 0 at rest and rises toward 1 as an edge approaches its threshold`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val a = store.create(position = Vector3(0.0, 0.0, 0.0))
+        val b = store.create(position = Vector3(1.0, 0.0, 0.0)) // restLength captured as 1.0
+        val mesh = MeshSprings(listOf(Grid.Edge(a, b)), store, stiffness = 10.0, extensionBreakThreshold = 1.0)
+
+        assertEquals(0.0, mesh.activeConnectionsWithBreakProximity(store).single().third)
+
+        store.setPosition(b, Vector3(1.5, 0.0, 0.0)) // displacement 0.5 of threshold 1.0
+        assertEquals(0.5, mesh.activeConnectionsWithBreakProximity(store).single().third, 1e-12)
+    }
+
+    @Test
+    fun `breakProximity is 0 for an edge with an unbounded (never-breaks) threshold`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val a = store.create(position = Vector3(0.0, 0.0, 0.0))
+        val b = store.create(position = Vector3(1000.0, 0.0, 0.0))
+        val mesh = MeshSprings(listOf(Grid.Edge(a, b)), store, stiffness = 1.0) // default infinite threshold
+
+        assertEquals(0.0, mesh.activeConnectionsWithBreakProximity(store).single().third)
+    }
+
+    @Test
+    fun `a broken edge is excluded from activeConnectionsWithBreakProximity, same as activeConnections`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val a = store.create(position = Vector3(0.0, 0.0, 0.0))
+        val b = store.create(position = Vector3(1.0, 0.0, 0.0))
+        val mesh = MeshSprings(listOf(Grid.Edge(a, b)), store, stiffness = 100.0, extensionBreakThreshold = 0.5)
+        store.setPosition(b, Vector3(2.0, 0.0, 0.0)) // displacement 1.0 > threshold 0.5
+
+        mesh.accumulate(store, groups, 0.0, ChunkAccumulator(store.capacity), 0, 1) // deactivates the edge
+
+        assertTrue(mesh.activeConnectionsWithBreakProximity(store).isEmpty())
+    }
 }

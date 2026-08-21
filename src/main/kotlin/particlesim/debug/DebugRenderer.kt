@@ -2,6 +2,7 @@ package particlesim.debug
 
 import particlesim.core.ParticleStore
 import particlesim.render.CameraPose
+import particlesim.render.Color
 
 /**
  * The debug-render-all viewer entry point (§10.2's `--render-all`): starts the viewer's HTTP
@@ -32,8 +33,9 @@ class DebugRenderer(
         ids: List<Int>,
         connections: List<Pair<Int, Int>>,
         camera: CameraPose? = null,
+        lineColors: Map<Pair<Int, Int>, Color> = emptyMap(),
     ) {
-        wsServer.broadcastFrame(BinaryFrame.encode(t, step, store, ids, connections, camera))
+        wsServer.broadcastFrame(BinaryFrame.encode(t, step, store, ids, connections, camera, lineColors))
     }
 
     fun stop() {

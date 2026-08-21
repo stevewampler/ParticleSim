@@ -8,6 +8,7 @@ import particlesim.physics.DragConstraint
 import particlesim.physics.Integrator
 import particlesim.render.CameraFunction
 import particlesim.render.CameraPose
+import particlesim.render.ColorRamp
 import particlesim.render.SceneQueryImpl
 import kotlin.math.cos
 import kotlin.math.sin
@@ -25,9 +26,16 @@ import kotlin.math.sin
  * And §9.4's drag, wired the same way `DragDebugDemo` already does it — a cloth particle can
  * be grabbed and pulled, same as the spring-chain's, but here it demonstrates propagation
  * through a whole sheet instead of a line.
+ *
+ * And §10.2's `breakProximity` line-renderer coloring — almost exactly the requirements doc's
+ * own extended flag example ("in a strong enough gust you'll see the cloth redden right at the
+ * seam that's about to tear"). `buildFlag`'s structural springs are infinite-threshold (never
+ * break) by default for every other caller (the golden-file tests need that exact, unchanged
+ * behavior); this demo alone opts into a finite one purely to have something worth coloring.
  */
 fun main() {
-    val scenario = buildFlag(rows = 8, cols = 14)
+    val structuralBreakThreshold = 0.02 // ~13% of restLength (spacing=0.15) - tune by watching it, not guessing
+    val scenario = buildFlag(rows = 8, cols = 14, structuralBreakThreshold = structuralBreakThreshold)
     val structural = scenario.meshSprings[0]
     val flagTip = scenario.grid.last().last()
     val scene = SceneQueryImpl(scenario.store, scenario.groups)
@@ -78,7 +86,14 @@ fun main() {
             t += FLAG_DT
             step++
         }
-        renderer.broadcast(t, step, scenario.store, allIds, structural.activeConnections(), camera.evaluate(t, scene))
+        val withProximity = structural.activeConnectionsWithBreakProximity(scenario.store)
+        val lineColors = withProximity.associate { (a, b, proximity) -> (a to b) to ColorRamp.blueOrange(proximity) }
+        renderer.broadcast(
+            t, step, scenario.store, allIds,
+            connections = withProximity.map { (a, b, _) -> a to b },
+            camera = camera.evaluate(t, scene),
+            lineColors = lineColors,
+        )
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)
     }

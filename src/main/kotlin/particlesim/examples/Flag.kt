@@ -46,7 +46,16 @@ data class FlagScenario(
  */
 const val FLAG_DT = 1e-3
 
-fun buildFlag(rows: Int = 8, cols: Int = 14, spacing: Double = 0.15): FlagScenario {
+fun buildFlag(
+    rows: Int = 8,
+    cols: Int = 14,
+    spacing: Double = 0.15,
+    // Infinite by default (never breaks) — matches this function's original, already-golden-
+    // tested behavior exactly, so every existing caller (FlagGoldenTest, FlagYamlParityTest)
+    // is unaffected. FlagDebugDemo passes a finite value to demonstrate §10.2's breakProximity
+    // line-renderer coloring; nothing else needs to.
+    structuralBreakThreshold: Double = Double.POSITIVE_INFINITY,
+): FlagScenario {
     val store = ParticleStore()
     val groups = Groups()
     val massPerParticle = 0.005
@@ -64,6 +73,7 @@ fun buildFlag(rows: Int = 8, cols: Int = 14, spacing: Double = 0.15): FlagScenar
     val structural = MeshSprings(
         Grid.structuralEdges(grid), store,
         stiffness = 200.0, damping = 1.0,
+        breakThreshold = structuralBreakThreshold,
     )
     val shear = MeshSprings(
         Grid.shearEdges(grid), store,

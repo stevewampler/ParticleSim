@@ -1044,20 +1044,61 @@ this project has used since Phase 5.
       that same pointerdown from also starting an orbit gesture — a
       standard pattern, but genuinely untested interaction-feel-wise for
       the same reason as the rest of this bullet.
-      **Not done, deliberately deferred rather than rushed**: the
-      previous sub-pass's `ParticleRenderer`/`SurfaceRenderer`/
-      `LineRenderer`/`ArrowRenderer` declarations aren't wired into
-      `BinaryFrame` or the client at all yet — the wire format and
-      viewer today still only draw dots-and-plain-lines
-      (`--render-all`-equivalent), same visual capability as before this
-      sub-pass, just over the new protocol. Actually rendering spheres
-      (radius-based size), shaded/wireframe meshes, sampled arrows, and
-      colorBy-driven line colors is real remaining scope: it needs the
-      binary format extended to carry per-particle style/radius, mesh
-      triangle indices, arrow sample data, and per-line color, plus a
-      worked-example demo that actually declares renderers (nothing does
-      yet — every existing demo still uses debug-render-all's implicit
-      "everything as a dot/line" behavior) to prove it end to end.
+      **Fourth sub-pass: `breakProximity`-colored lines wired end to
+      end** — the one piece of the previous sub-pass's renderer
+      declarations actually connected to the wire protocol and viewer so
+      far, chosen first because it's the spec's own most emphasized
+      renderer feature (a full paragraph plus a dedicated flag worked
+      example: "in a strong enough gust you'll see the cloth redden right
+      at the seam that's about to tear").
+      **`MeshSprings.activeConnectionsWithBreakProximity(store)`** (new):
+      per-edge `breakProximity`, since `MeshSprings` isn't itself
+      `Breakable` — it represents *many* independently-breakable edges as
+      one `Force` (§9.3's chunking requirement), so there's no single
+      proximity value for "the force" as a whole the way there is for a
+      lone `Spring`/`Damper`. Mirrors `Breakable.breakProximity`'s
+      semantics (direction-dependent threshold, `0.0` for an unbounded
+      threshold) rather than being a new, different rule.
+      **`buildFlag` gained an optional `structuralBreakThreshold`**
+      (default `Double.POSITIVE_INFINITY`, i.e. unchanged from before) —
+      confirmed behavior-preserving for every existing caller by rerunning
+      `FlagGoldenTest`/`FlagYamlParityTest` after the change, not just
+      assumed from the default value alone. `FlagDebugDemo` alone passes
+      a finite value (`0.02`, ~13% of the structural restLength) purely
+      to have something worth coloring.
+      **`BinaryFrame`'s connections section now always carries a color**
+      (extended from `{i32 a, i32 b}` to `{i32 a, i32 b, f64 r, f64 g,
+      f64 b}`) rather than adding a second, sparse color channel —
+      resolved from an optional `lineColors: Map<Pair<Int,Int>, Color>`
+      at encode time, defaulting to `Color.DEFAULT_LINE` (the viewer's
+      original uncolored blue) for any connection not in the map, so
+      every other existing demo needed zero changes (empty map is the
+      default). `DebugRenderer.broadcast` threads `lineColors` through
+      the same way.
+      **Client**: `debug-viewer.html`'s line material switched to
+      `vertexColors: true` with a parallel color `BufferAttribute`
+      alongside position; `decodeFrame` reads the 3 extra `f64`s per
+      connection. Unverified beyond careful transliteration, same
+      Chrome-automation caveat as the rest of this phase's client-side
+      work.
+      **Verified server-side**: sampled `FlagDebugDemo`'s actual
+      connection colors over 8 seconds via a raw `WebSocketClient` —
+      confirmed real, varying color (red channel ranging roughly 0 to
+      0.35, never fully saturated) rather than uniformly blue or
+      uniformly maxed out. One edge incidentally exceeded the threshold
+      and broke during sampling (connection count dropped from 202 to
+      201 and stayed there) — an unplanned but welcome extra proof that
+      `MeshSprings`' per-edge breaking still works correctly under this
+      wiring.
+      **Still not done**: `ParticleRenderer` (sphere/radius sizing),
+      `SurfaceRenderer` (shaded/wireframe mesh), and `ArrowRenderer`
+      (field-force sampling) remain declared types with computation logic
+      but no wire-protocol or viewer wiring — the wire format would need
+      per-particle style/radius, mesh triangle indices, and arrow sample
+      data added, plus (for particles/surfaces specifically) a worked
+      example that opts OUT of debug-render-all's implicit dot rendering,
+      which none of the existing demos do. Real remaining scope, not an
+      oversight.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

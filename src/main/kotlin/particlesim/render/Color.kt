@@ -2,7 +2,13 @@ package particlesim.render
 
 /** RGB in `[0,1]` per channel — three.js's `Color.setRGB` convention, since this is meant to
  * be consumed directly by the (future) web viewer without a client-side conversion step. */
-data class Color(val r: Double, val g: Double, val b: Double)
+data class Color(val r: Double, val g: Double, val b: Double) {
+    companion object {
+        /** The debug viewer's original uncolored-line blue (`0x3388ff`) — what a connection
+         * renders as when nothing declares a `colorBy` for it. */
+        val DEFAULT_LINE = Color(0x33 / 255.0, 0x88 / 255.0, 0xff / 255.0)
+    }
+}
 
 object ColorRamp {
     // Okabe-Ito colorblind-safe palette's blue/orange pair.
