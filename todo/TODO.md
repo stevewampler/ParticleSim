@@ -895,7 +895,53 @@ this project has used since Phase 5.
       for pandas/Spark-style tooling) (§9.2)
 
 ## Phase 9 — Full visualization
-- [ ] Camera: scripted (engine-evaluated) + manual (viewer-local) (§10.1)
+- [~] Camera: scripted (engine-evaluated) + manual (viewer-local) (§10.1).
+      First sub-pass of Phase 9 — camera picked first since the frame
+      protocol needs a camera field before renderer declarations (next
+      sub-pass) have anything meaningful to add camera-relative info to.
+      **`particlesim.render`**: `SceneQuery` (read-only — deliberately
+      narrower than `ParticleStore`/`Groups`, since camera evaluation
+      must never be able to mutate simulation state), `SceneQueryImpl`
+      (`position(id)`, `centroid(group)` — `normal(surface, triangleIndex)`
+      from the spec's own list isn't built yet, no consumer needs it
+      before a camera actually orbits a surface). `CameraPose` (plain
+      position/lookAt/up numbers — what actually gets serialized, not a
+      matrix). `CameraFunction`: a `fun interface` taking `(t, SceneQuery)
+      -> CameraPose`, evaluated by the **engine** every broadcast (a
+      simplification of the requirements doc's own nested
+      `camera { position { t -> ... }; lookAt(...) }` builder — same
+      "simplify the sugar, keep the semantics" call already made for
+      Phase 1's `mass(...)`/`mass { t -> ... }` function-call style
+      instead of property assignment). **YAML camera expressions
+      (scene-query grammar extension) are a deferred second pass**, same
+      status as every other post-Phase-7 YAML gap — this sub-pass only
+      wires up the Kotlin-DSL/native-lambda path.
+      **Wired into the existing debug-frame protocol, not a new one**:
+      `DebugFrame`/`DebugRenderer` gained an optional `camera: CameraPose?`
+      parameter — `null` (the default) omits the JSON field entirely, so
+      every pre-existing demo (ball-bounce, sparks, the plain spring-chain,
+      drag) needed zero changes. `debug-viewer.html` applies the camera
+      pose when the field is present and otherwise leaves its static
+      default camera untouched.
+      **Worked example**: `FlagDebugDemo` now scripts a camera orbiting
+      the cloth's centroid while looking at the flag's free corner —
+      almost exactly the requirements doc's own motivating example for
+      camera scripting (`centroid("flag") + Vector3(sin(t*0.3)*5, 2,
+      cos(t*0.3)*5)`, looking at a named point).
+      **Verification**: Chrome automation still wasn't available in this
+      environment, so (as with §9.4's drag work) the server-side pipeline
+      was verified with a raw WebSocket client sampling the running
+      `FlagDebugDemo`'s frames over several seconds — confirmed the
+      camera field is present, its position traces a smooth arc (not
+      static, not jumping), and `lookAt` tracks the flag tip's actual
+      live (wind-blown) position, not a fixed point. Actual visual
+      quality in a browser (does the orbit look smooth, is the flag
+      framed well) is still unconfirmed by a human.
+      **Not done**: manual/viewer-local camera mode and the "interacting
+      with the viewport switches to manual, an explicit action returns to
+      scripted" toggle — deliberately deferred, since there's no orbit
+      control in the viewer yet for "manual" to mean anything; that's the
+      web-viewer-upgrade sub-pass, not this one.
 - [ ] Renderers: particle/surface (dot/sphere/mesh) — the real opt-in
       system; Phase 3's debug-render override stays available as a
       permanent fallback alongside it, not replaced (§10.2)

@@ -64,6 +64,17 @@ let latestStep = 0;
 function applyFrame(frame) {
   latestStep = frame.step;
 
+  // §10.1's scripted camera: engine-evaluated, so applying it here is just "set the numbers
+  // we were sent" — no expression/lambda evaluation needed client-side. Omitted entirely by
+  // demos with no scripted camera (see DebugFrame's own doc comment), in which case the
+  // viewer's static default (set once, above) is left untouched.
+  if (frame.camera) {
+    const c = frame.camera;
+    camera.position.set(c.position.x, c.position.y, c.position.z);
+    camera.up.set(c.up.x, c.up.y, c.up.z);
+    camera.lookAt(c.lookAt.x, c.lookAt.y, c.lookAt.z);
+  }
+
   while (dots.children.length < frame.particles.length) {
     dots.add(new THREE.Mesh(dotGeometry, dotMaterial));
   }

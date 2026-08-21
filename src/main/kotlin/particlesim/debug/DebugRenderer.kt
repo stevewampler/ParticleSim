@@ -1,6 +1,7 @@
 package particlesim.debug
 
 import particlesim.core.ParticleStore
+import particlesim.render.CameraPose
 
 /**
  * The Phase 3 debug renderer entry point (§10.2's `--render-all`): starts the viewer's HTTP
@@ -24,8 +25,15 @@ class DebugRenderer(
         println("debug viewer: http://localhost:$httpPort  (state stream: ws://localhost:$webSocketPort)")
     }
 
-    fun broadcast(t: Double, step: Long, store: ParticleStore, ids: List<Int>, connections: List<Pair<Int, Int>>) {
-        wsServer.broadcastFrame(DebugFrame.render(t, step, store, ids, connections))
+    fun broadcast(
+        t: Double,
+        step: Long,
+        store: ParticleStore,
+        ids: List<Int>,
+        connections: List<Pair<Int, Int>>,
+        camera: CameraPose? = null,
+    ) {
+        wsServer.broadcastFrame(DebugFrame.render(t, step, store, ids, connections, camera))
     }
 
     fun stop() {
