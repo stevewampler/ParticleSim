@@ -22,6 +22,7 @@ fun main() {
     val stepsPerFrame = maxOf(1, ((1.0 / framesPerSecond) / FLAG_DT).toInt())
 
     var t = 0.0
+    var step = 0L
     val frameNanos = 1_000_000_000L / framesPerSecond
     val allIds = scenario.grid.flatten()
     while (true) {
@@ -29,8 +30,9 @@ fun main() {
         repeat(stepsPerFrame) {
             integrator.step(scenario.store, scenario.groups, scenario.forces, scenario.constraints, t, FLAG_DT)
             t += FLAG_DT
+            step++
         }
-        renderer.broadcast(t, scenario.store, allIds, structural.activeConnections())
+        renderer.broadcast(t, step, scenario.store, allIds, structural.activeConnections())
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)
     }

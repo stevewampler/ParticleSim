@@ -48,14 +48,16 @@ fun main() {
     val stepsPerFrame = maxOf(1, ((1.0 / framesPerSecond) / dt).toInt())
 
     var t = 0.0
+    var step = 0L
     val frameNanos = 1_000_000_000L / framesPerSecond
     while (true) {
         val frameStart = System.nanoTime()
         repeat(stepsPerFrame) {
             integrator.step(store, groups, forces, constraints, t, dt)
             t += dt
+            step++
         }
-        renderer.broadcast(t, store, ids, springs.map { it.particleA to it.particleB })
+        renderer.broadcast(t, step, store, ids, springs.map { it.particleA to it.particleB })
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)
     }

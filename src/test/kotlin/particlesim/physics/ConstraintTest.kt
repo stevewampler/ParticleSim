@@ -45,4 +45,59 @@ class ConstraintTest {
         assertEquals(Vector3(1.0, 0.0, 0.0), store.velocity(id))
         assertEquals(Vector3(0.1, 0.0, 0.0), store.position(id))
     }
+
+    @Test
+    fun `drag constraint pins position and zeroes velocity, overriding gravity and connected springs`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val dragged = store.create(position = Vector3(0.0, 5.0, 0.0))
+        val anchor = store.create(position = Vector3(1.0, 5.0, 0.0))
+        groups.add("free", dragged)
+        groups.add("anchor", anchor)
+
+        val gravity = UniformGravity("free", Vector3(0.0, -9.8, 0.0))
+        val spring = Spring(dragged, anchor, restLength = 1.0, stiffness = 50.0)
+        val drag = DragConstraint(dragged, Vector3(0.0, 5.0, 0.0))
+        val anchorConstraint = FixedPosition("anchor", Vector3(1.0, 5.0, 0.0))
+        val integrator = Integrator()
+
+        var t = 0.0
+        repeat(50) {
+            integrator.step(store, groups, listOf(gravity, spring), listOf(drag, anchorConstraint), t, 0.01)
+            t += 0.01
+        }
+
+        assertEquals(Vector3(0.0, 5.0, 0.0), store.position(dragged))
+        assertEquals(Vector3.ZERO, store.velocity(dragged))
+    }
+
+    @Test
+    fun `drag constraint follows an updated target on the very next step`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val id = store.create(position = Vector3.ZERO)
+        groups.add("dragged", id)
+
+        val drag = DragConstraint(id, Vector3.ZERO)
+        val integrator = Integrator()
+
+        integrator.step(store, groups, emptyList(), listOf(drag), 0.0, 0.01)
+        assertEquals(Vector3.ZERO, store.position(id))
+
+        drag.updateTarget(Vector3(2.0, 0.0, 0.0), 0.01)
+        integrator.step(store, groups, emptyList(), listOf(drag), 0.01, 0.01)
+        assertEquals(Vector3(2.0, 0.0, 0.0), store.position(id))
+    }
+
+    @Test
+    fun `release velocity is the finite difference of the two most recent targets`() {
+        val drag = DragConstraint(0, Vector3(0.0, 0.0, 0.0))
+        assertEquals(Vector3.ZERO, drag.releaseVelocity(), "never moved yet -> zero")
+
+        drag.updateTarget(Vector3(1.0, 0.0, 0.0), dt = 0.1)
+        assertEquals(Vector3(10.0, 0.0, 0.0), drag.releaseVelocity())
+
+        drag.updateTarget(Vector3(1.0, 0.5, 0.0), dt = 0.05)
+        assertEquals(Vector3(0.0, 10.0, 0.0), drag.releaseVelocity())
+    }
 }

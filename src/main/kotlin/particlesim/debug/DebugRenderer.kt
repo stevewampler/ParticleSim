@@ -10,8 +10,12 @@ import particlesim.core.ParticleStore
  * Phase 9), and colliders/surfaces aren't in `--render-all` yet because neither exists
  * before Phase 4/5.
  */
-class DebugRenderer(private val webSocketPort: Int = 8887, private val httpPort: Int = 8888) {
-    private val wsServer = DebugServer(webSocketPort)
+class DebugRenderer(
+    private val webSocketPort: Int = 8887,
+    private val httpPort: Int = 8888,
+    onTextMessage: ((String) -> Unit)? = null,
+) {
+    private val wsServer = DebugServer(webSocketPort, onTextMessage)
     private val httpServer = ViewerHttpServer(httpPort)
 
     fun start() {
@@ -20,8 +24,8 @@ class DebugRenderer(private val webSocketPort: Int = 8887, private val httpPort:
         println("debug viewer: http://localhost:$httpPort  (state stream: ws://localhost:$webSocketPort)")
     }
 
-    fun broadcast(t: Double, store: ParticleStore, ids: List<Int>, connections: List<Pair<Int, Int>>) {
-        wsServer.broadcastFrame(DebugFrame.render(t, store, ids, connections))
+    fun broadcast(t: Double, step: Long, store: ParticleStore, ids: List<Int>, connections: List<Pair<Int, Int>>) {
+        wsServer.broadcastFrame(DebugFrame.render(t, step, store, ids, connections))
     }
 
     fun stop() {

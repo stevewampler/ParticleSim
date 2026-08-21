@@ -23,6 +23,7 @@ fun main() {
     val stepsPerFrame = maxOf(1, ((1.0 / framesPerSecond) / SPARKS_DT).toInt())
 
     var t = 0.0
+    var step = 0L
     val frameNanos = 1_000_000_000L / framesPerSecond
     while (true) {
         val frameStart = System.nanoTime()
@@ -31,8 +32,9 @@ fun main() {
             scenario.destruction.resolve(scenario.store, scenario.groups, scenario.forces, t, SPARKS_DT)
             scenario.emitter.update(scenario.store, scenario.groups, t, SPARKS_DT)
             t += SPARKS_DT
+            step++
         }
-        renderer.broadcast(t, scenario.store, scenario.store.liveIds(), emptyList())
+        renderer.broadcast(t, step, scenario.store, scenario.store.liveIds(), emptyList())
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)
     }

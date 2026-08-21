@@ -820,8 +820,77 @@ this project has used since Phase 5.
       speedup" — whether multi-threading actually pays off is an
       N-dependent question with no large-N scenario yet to answer it, so
       the honest status is "correct and available," not "faster."
-- [ ] Interactive particle drag, step-index-stamped drag targets for
-      exact replay (viewer input → engine) (§9.4)
+- [~] Interactive particle drag, step-index-stamped drag targets for
+      exact replay (viewer input → engine) (§9.4). Reuses the constraint
+      mechanism per §9.4's own framing ("driven exactly like a
+      fixed-position constraint, except the target comes from the live
+      input stream") rather than a parallel one.
+      **`DragConstraint`** (`particlesim.physics`): pins *one specific
+      id*, not a `Groups` selector like every other constraint — a
+      deliberate deviation, since a drag session is ad hoc and freely
+      reassigned particle-to-particle over its lifetime, so a throwaway
+      one-off group per drag would just accumulate stale entries.
+      Position/velocity pinned every step exactly like `FixedPosition`
+      (so a connected spring only ever feels the dragged particle's
+      *position* changing, never a velocity it doesn't actually have);
+      `releaseVelocity()` recovers a throw velocity from the two most
+      recent targets via finite difference — the same idea moving
+      colliders already use for velocity (§12.5), reused rather than
+      adding a second analytic-velocity path.
+      **Wire protocol**: `DragMessage` (`particlesim.debug`) parses
+      viewer→engine `drag_start`/`drag_move`/`drag_end` JSON, each
+      stamped with the step it's for. Parsed with SnakeYAML (already a
+      dependency) rather than a JSON library — same call already made for
+      the checkpoint sidecar. `DragMessageQueue` is the thread-safe
+      hand-off from `DebugServer`'s WebSocket I/O thread to the physics
+      loop's own thread — a real concurrency concern, not a formality:
+      `DebugServer.onMessage` fires on the WebSocket library's thread,
+      the step loop runs on a different one, and start/end ordering
+      matters (a click-and-immediately-release shouldn't coalesce away),
+      which rules out a plain "latest wins" reference.
+      `DebugServer`/`DebugRenderer` gained an `onTextMessage` callback —
+      the exact `onMessage` upgrade Phase 3 anticipated, not a new class —
+      deliberately ignorant of `DragMessage` itself, so it stays reusable
+      for any future viewer input. `DebugFrame`'s JSON gained a `step`
+      field so the viewer can stamp outgoing messages without deriving a
+      step count from `t`/`dt` itself (fragile: floating-point drift).
+      **`DragDebugDemo`** (`./gradlew runDragDemo`): the same spring-chain
+      scenario as the default `run` demo (one end pinned, hanging under
+      gravity) — chosen over ball-bounce specifically because it has
+      connected forces to propagate through, matching §9.4's own
+      motivating example ("see how motion propagates through connected
+      forces... to the rest of the system"); dragging an isolated single
+      particle wouldn't demonstrate that at all. Picking/raycasting and
+      the drag-plane projection (through the picked point, facing the
+      camera — the standard way to turn a 2D mouse position into a 3D
+      target) are added to `debug-viewer.html`, resolved entirely
+      client-side per §9.4 ("the engine doesn't need to know about
+      cameras or screen coordinates").
+      **Verification**: Chrome browser automation wasn't available in
+      this environment (extension not connected), so the full
+      server-side pipeline was verified instead with a throwaway raw
+      WebSocket client (connect, send synthetic `drag_start`/`drag_move`/
+      `drag_end` messages, inspect the resulting broadcast frames) —
+      confirmed (1) a dragged particle is pinned exactly at the sent
+      target while held, (2) neighboring chain particles visibly get
+      pulled toward it through the springs (propagation actually works,
+      not just the pin itself), and (3) releasing while still moving
+      imparts a real throw — the particle kept moving on its own in
+      frames captured well after release, not frozen. This proves the
+      constraint/queue/protocol/server wiring end to end. **What it can't
+      prove**: whether the actual mouse-driven picking/dragging *feels*
+      right in a real browser (raycasting against the right dot, the
+      drag plane tracking the cursor naturally, no jank) — that needs a
+      human trying it, still pending. 40 test classes, 192 tests green
+      (12 new: `ConstraintTest` +4, `DragMessageTest` +6, `DragMessageQueueTest`
+      +3, minus the pre-existing `DebugFrameTest` cases updated for the
+      new `step` field).
+      **Not done**: replay-exactness for recorded runs — the message
+      protocol carries the step stamp §9.2's future events channel would
+      need, but nothing consumes it in step-ordered-queue fashion yet
+      (live mode just applies whichever message arrived most recently);
+      genuinely blocked on the same missing discrete-event channel noted
+      throughout Phase 8's recording work, not new to this piece.
 - [ ] `[stretch]` Parquet export (post-hoc conversion from Arrow shards,
       for pandas/Spark-style tooling) (§9.2)
 

@@ -29,6 +29,7 @@ fun main() {
     val stepsPerFrame = maxOf(1, ((1.0 / framesPerSecond) / BALL_BOUNCE_DT).toInt())
 
     var t = 0.0
+    var step = 0L
     var cycleStart = 0.0
     val frameNanos = 1_000_000_000L / framesPerSecond
     val ids = listOf(scenario.ballId)
@@ -43,8 +44,9 @@ fun main() {
             integrator.step(scenario.store, scenario.groups, scenario.forces, emptyList(), t, BALL_BOUNCE_DT)
             scenario.collisions.resolve(scenario.store, scenario.groups, t, BALL_BOUNCE_DT)
             t += BALL_BOUNCE_DT
+            step++
         }
-        renderer.broadcast(t, scenario.store, ids, emptyList())
+        renderer.broadcast(t, step, scenario.store, ids, emptyList())
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)
     }

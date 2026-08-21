@@ -19,13 +19,18 @@ import java.util.Locale
  * Phase 8's job; this only needs to be enough for `--render-all` to draw dots and lines.
  */
 object DebugFrame {
-    fun render(t: Double, store: ParticleStore, ids: List<Int>, connections: List<Pair<Int, Int>>): String {
+    /** [step] is the physics step index this frame was captured after (§9.4) — carried so the
+     * viewer can stamp drag messages it sends back with the step they're meant for, without
+     * needing to derive it from `t`/`dt` itself (fragile: floating-point `t` accumulation
+     * drifting from an integer step count is exactly the kind of mismatch step-stamping exists
+     * to avoid). */
+    fun render(t: Double, step: Long, store: ParticleStore, ids: List<Int>, connections: List<Pair<Int, Int>>): String {
         val particles = ids.joinToString(",") { id ->
             val p = store.position(id)
             "{\"id\":$id,\"x\":${fmt(p.x)},\"y\":${fmt(p.y)},\"z\":${fmt(p.z)}}"
         }
         val lines = connections.joinToString(",") { (a, b) -> "{\"a\":$a,\"b\":$b}" }
-        return "{\"t\":${fmt(t)},\"particles\":[$particles],\"connections\":[$lines]}"
+        return "{\"t\":${fmt(t)},\"step\":$step,\"particles\":[$particles],\"connections\":[$lines]}"
     }
 
     private fun fmt(v: Double): String = String.format(Locale.ROOT, "%.6f", v)

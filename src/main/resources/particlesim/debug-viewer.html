@@ -51,6 +51,7 @@ scene.add(new THREE.AxesHelper(1));
 // or surfaces yet since neither exists before Phase 4/5.
 const dotGeometry = new THREE.SphereGeometry(0.06, 8, 6);
 const dotMaterial = new THREE.MeshBasicMaterial({ color: 0xffcc33 });
+const draggedDotMaterial = new THREE.MeshBasicMaterial({ color: 0xff4444 });
 let dots = new THREE.Group();
 scene.add(dots);
 
@@ -58,7 +59,11 @@ const lineMaterial = new THREE.LineBasicMaterial({ color: 0x3388ff });
 let lines = new THREE.LineSegments(new THREE.BufferGeometry(), lineMaterial);
 scene.add(lines);
 
+let latestStep = 0;
+
 function applyFrame(frame) {
+  latestStep = frame.step;
+
   while (dots.children.length < frame.particles.length) {
     dots.add(new THREE.Mesh(dotGeometry, dotMaterial));
   }
@@ -67,7 +72,10 @@ function applyFrame(frame) {
   }
   const byId = new Map();
   frame.particles.forEach((p, i) => {
-    dots.children[i].position.set(p.x, p.y, p.z);
+    const dot = dots.children[i];
+    dot.position.set(p.x, p.y, p.z);
+    dot.userData.particleId = p.id;
+    dot.material = p.id === draggedParticleId ? draggedDotMaterial : dotMaterial;
     byId.set(p.id, p);
   });
 
@@ -86,20 +94,82 @@ function applyFrame(frame) {
   lines.geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
 }
 
+let socket = null;
+
 function connect() {
   // Matches DebugRenderer's default WebSocket port; pass a different DebugRenderer(webSocketPort=)
   // and this needs to change too — Phase 3 is deliberately this minimal.
   const ws = new WebSocket(`ws://${location.hostname}:8887`);
+  socket = ws;
   ws.onopen = () => { statusEl.textContent = "connected"; };
   ws.onclose = () => { statusEl.textContent = "disconnected — retrying…"; setTimeout(connect, 1000); };
   ws.onerror = () => ws.close();
   ws.onmessage = (event) => {
     const frame = JSON.parse(event.data);
-    statusEl.textContent = `t=${frame.t.toFixed(3)}  particles=${frame.particles.length}`;
+    statusEl.textContent = `t=${frame.t.toFixed(3)}  step=${frame.step}  particles=${frame.particles.length}`;
     applyFrame(frame);
   };
 }
 connect();
+
+// --- Interactive drag (§9.4) --------------------------------------------------------------
+// Picking is resolved entirely here (raycast against the currently-rendered dots) — the
+// engine never needs to know about cameras or screen coordinates, only the resulting 3D
+// target position. Only meaningful for a live engine attached over this WebSocket; a demo
+// that doesn't wire DebugServer's onTextMessage just never receives these and nothing happens.
+
+const raycaster = new THREE.Raycaster();
+const pointerNdc = new THREE.Vector2();
+const dragPlane = new THREE.Plane();
+const dragPlaneHit = new THREE.Vector3();
+let draggedParticleId = null;
+
+function send(message) {
+  if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+}
+
+function pointerToNdc(event) {
+  pointerNdc.set(
+    (event.clientX / window.innerWidth) * 2 - 1,
+    -(event.clientY / window.innerHeight) * 2 + 1,
+  );
+}
+
+renderer.domElement.addEventListener("pointerdown", (event) => {
+  pointerToNdc(event);
+  raycaster.setFromCamera(pointerNdc, camera);
+  const hit = raycaster.intersectObjects(dots.children)[0];
+  if (!hit) return;
+
+  draggedParticleId = hit.object.userData.particleId;
+  hit.object.material = draggedDotMaterial;
+
+  // Drag plane: through the picked point, facing the camera — the standard way to turn a 2D
+  // mouse position into a 3D target without the user having to separately control depth.
+  const cameraForward = new THREE.Vector3();
+  camera.getWorldDirection(cameraForward);
+  dragPlane.setFromNormalAndCoplanarPoint(cameraForward, hit.point);
+
+  send({ type: "drag_start", particleId: draggedParticleId, step: latestStep, x: hit.point.x, y: hit.point.y, z: hit.point.z });
+  renderer.domElement.setPointerCapture(event.pointerId);
+});
+
+renderer.domElement.addEventListener("pointermove", (event) => {
+  if (draggedParticleId === null) return;
+  pointerToNdc(event);
+  raycaster.setFromCamera(pointerNdc, camera);
+  if (!raycaster.ray.intersectPlane(dragPlane, dragPlaneHit)) return;
+  send({ type: "drag_move", step: latestStep, x: dragPlaneHit.x, y: dragPlaneHit.y, z: dragPlaneHit.z });
+});
+
+function endDrag(event) {
+  if (draggedParticleId === null) return;
+  send({ type: "drag_end", step: latestStep });
+  draggedParticleId = null;
+  renderer.domElement.releasePointerCapture(event.pointerId);
+}
+renderer.domElement.addEventListener("pointerup", endDrag);
+renderer.domElement.addEventListener("pointercancel", endDrag);
 
 function animate() {
   requestAnimationFrame(animate);
