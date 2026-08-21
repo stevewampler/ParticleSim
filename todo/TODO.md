@@ -726,15 +726,42 @@ this project has used since Phase 5.
       correct future `EVICT_OLDEST` behavior, which a generic *unordered*
       group-membership capture wouldn't preserve — the at-cap warning
       flag, and the RNG draw count).
-      **Not yet done**: checkpoint-taking isn't wired into `RecordingWriter`'s
-      shard-rollover automatically (§9.5 says checkpoints happen "at each
-      recording shard boundary") — `captureCheckpoint`/`CheckpointWriter`
-      work standalone today, proven directly rather than through that
-      integration. Also still open: the real engine loop's crash-resume
-      wiring (§13.2 — "failing fast costs at most the frames since the
-      last shard boundary") and playback-fork-to-live are both listed
-      separately below/in the deferred `[stretch]` section and weren't
-      started here.
+      **Wired into `RecordingWriter`'s shard rollover** (§9.5's "a
+      checkpoint is written at each recording shard boundary" as an
+      actual mechanism, not two features that happen to coexist):
+      `RecordingWriter` gained an optional
+      `onShardComplete: ((shardIndex: Int, t: Double, step: Long) -> Unit)?`
+      constructor param, invoked right after a shard's footer is
+      finalized (so the shard it closes is already safe to read) — with
+      the completed shard's index and the `t`/`step` of the last frame
+      written into it, but deliberately *no* particle/scene state of its
+      own. `RecordingWriter` has no reason to know about `Groups`,
+      emitters, or an accumulated broken-connections set, so the callback
+      is a closure over whatever the caller's own step loop is already
+      tracking, not a self-contained checkpoint call — same "own the
+      boundary, don't reach across it" instinct as everywhere else broken
+      forces/destroyed particles are the *caller's* bookkeeping
+      responsibility (`StepResult.brokenForces`,
+      `DestructionResult.danglingForces`). Also fires for a *partial*
+      final shard finalized by `close()` (a run ending mid-shard is a
+      legitimate boundary too), verified directly in `RecordingTest` (25
+      frames at `framesPerShard=10`: two full-shard fires at frame indices
+      9/19, one partial-shard fire at 24 when the writer closes).
+      `RecordingCheckpointIntegrationTest`: drives sparks through a real
+      `RecordingWriter` for 1500 steps at `framesPerShard=500` (exactly 3
+      shards), writing a real checkpoint file pair at every boundary via
+      the callback; confirms exactly 3 checkpoints were written, then
+      resumes from the *last automatically-triggered* one onto a
+      completely fresh scenario shell and confirms it already matches an
+      independent uninterrupted reference run's final state exactly — the
+      same bit-for-bit proof `CheckpointTest` already established for a
+      manually-chosen checkpoint moment, now shown to hold for the
+      automatic wiring too. Passed on the first run.
+      **Still open**: the real engine loop's crash-resume wiring (§13.2 —
+      "failing fast costs at most the frames since the last shard
+      boundary" — there's no long-running engine loop yet for this to
+      attach to) and playback-fork-to-live are both listed separately
+      below/in the deferred `[stretch]` section and weren't started here.
 - [x] Multi-threaded force accumulation: turn on the fixed-chunk reduction
       designed back in Phase 2 — fixed logical chunk count, per-chunk
       private accumulators, fixed chunk-index merge order, deterministic

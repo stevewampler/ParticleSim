@@ -66,6 +66,28 @@ class RecordingTest {
     }
 
     @Test
+    fun `onShardComplete fires once per full shard, plus once more for a partial final shard on close`() {
+        val dir = tempDir()
+        val scenario = buildBallBounce()
+        val boundaries = mutableListOf<Triple<Int, Double, Long>>()
+
+        RecordingWriter(dir, framesPerShard = 10, onShardComplete = { shardIndex, t, step ->
+            boundaries += Triple(shardIndex, t, step)
+        }).use { writer ->
+            var t = 0.0
+            // 25 frames at framesPerShard=10: two full shards fire mid-stream (at frame
+            // indices 9 and 19), then close() finalizes the 5-frame partial third shard.
+            repeat(25) { step ->
+                writer.writeFrame(scenario.store, t, step.toLong())
+                t += BALL_BOUNCE_DT
+            }
+        }
+
+        assertEquals(listOf(0, 1, 2), boundaries.map { it.first })
+        assertEquals(listOf(9L, 19L, 24L), boundaries.map { it.third }) // last frame's step in each shard
+    }
+
+    @Test
     fun `shards split at exactly framesPerShard frames`() {
         val dir = tempDir()
         val scenario = buildBallBounce()

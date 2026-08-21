@@ -22,12 +22,19 @@ import java.nio.channels.Channels
  *
  * Shard rollover happens purely on frame count ([framesPerShard]), never on file size or
  * wall-clock time — this is the same boundary §9.5 hangs checkpoints off of ("a checkpoint
- * is written at each recording shard boundary").
+ * is written at each recording shard boundary"). [onShardComplete], when supplied, fires
+ * exactly there: right after a shard's footer is finalized (so the shard it closes is already
+ * safe to read), with the completed shard's index and the `t`/`step` of the last frame written
+ * into it. It fires with *no* particle/scene state of its own — checkpoint capture needs
+ * `Groups`/emitters/accumulated broken-connections this writer has no reason to know about, so
+ * the callback is expected to be a closure over whatever the caller's own step loop is already
+ * tracking (see `RecordingCheckpointIntegrationTest`), not a self-contained checkpoint call.
  */
 class RecordingWriter(
     private val directory: File,
     private val framesPerShard: Int,
     allocator: BufferAllocator? = null,
+    private val onShardComplete: ((shardIndex: Int, t: Double, step: Long) -> Unit)? = null,
 ) : AutoCloseable {
 
     init {
@@ -41,6 +48,8 @@ class RecordingWriter(
     private var shardIndex = 0
     private var framesInCurrentShard = 0
     private var currentShard: OpenShard? = null
+    private var lastFrameT = 0.0
+    private var lastFrameStep = 0L
 
     private class OpenShard(val root: VectorSchemaRoot, val writer: ArrowFileWriter, val out: FileOutputStream)
 
@@ -79,6 +88,8 @@ class RecordingWriter(
 
         shard.writer.writeBatch()
         framesInCurrentShard++
+        lastFrameT = t
+        lastFrameStep = step
 
         if (framesInCurrentShard >= framesPerShard) {
             closeCurrentShard()
@@ -103,8 +114,10 @@ class RecordingWriter(
         shard.writer.close()
         shard.out.close()
         shard.root.close()
+        val completedIndex = shardIndex
         currentShard = null
         shardIndex++
+        onShardComplete?.invoke(completedIndex, lastFrameT, lastFrameStep)
     }
 
     /** Finalizes the in-progress shard, if any, so it becomes readable, then releases the
