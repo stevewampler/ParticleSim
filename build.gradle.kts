@@ -6,6 +6,15 @@ plugins {
 group = "particlesim"
 version = "0.1.0-SNAPSHOT"
 
+// Arrow's off-heap memory allocator (§9.2's recording format) reaches into java.nio via
+// reflection; JDK 16+'s strong encapsulation blocks that without these opens. Needed on every
+// JVM that links arrow-memory-netty: tests, and (once the recorder is wired into a demo) the
+// run/JavaExec tasks below.
+val arrowAddOpens = listOf(
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+)
+
 repositories {
     mavenCentral()
 }
@@ -22,6 +31,12 @@ dependencies {
     // boundary, don't lean on a general framework" choice already made for the expression
     // parser (§4.1) rather than a data-binding library like Jackson.
     implementation("org.yaml:snakeyaml:2.2")
+    // Phase 8's recording format (§9.2): Arrow IPC File format, chosen in requirements.md over
+    // a custom binary format or Parquet for its footer-based random access and off-the-shelf
+    // columnar per-frame writer. Spiking this dependency before designing the recorder around
+    // it, since arrow-memory's off-heap allocator needs `--add-opens` on JDK 16+.
+    implementation("org.apache.arrow:arrow-vector:18.1.0")
+    implementation("org.apache.arrow:arrow-memory-netty:18.1.0")
     testImplementation(kotlin("test"))
 }
 
@@ -64,4 +79,11 @@ kotlin {
 
 tasks.test {
     useJUnitPlatform()
+    jvmArgs(arrowAddOpens)
+}
+
+// Every JavaExec run task (the `application` plugin's `run`, plus the demo tasks above) links
+// the same arrow-memory-netty dependency the tests do, so they need the same opens.
+tasks.withType<JavaExec>().configureEach {
+    jvmArgs(arrowAddOpens)
 }

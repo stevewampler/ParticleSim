@@ -590,15 +590,137 @@ this project has used since Phase 5.
 - [ ] Real-time interactive loop: full state stream contract (camera pose,
       events), bidirectional input, wall-clock pacing policy (drop frames,
       never coarsen physics) — upgrades Phase 3's bare-bones stream (§9.1)
-- [ ] Batch/record mode: sharded Arrow IPC File format, per-frame
-      particle-id column, format version field (§9.2)
+- [~] Batch/record mode: sharded Arrow IPC File format, per-frame
+      particle-id column, format version field (§9.2). **First sub-pass
+      done** (recording only — no checkpoint/resume, no discrete-event
+      channel yet); scoped narrowly to ball-bounce (static particle count)
+      to prove the sharded-Arrow mechanism itself before a second sub-pass
+      proves the dynamic-population/checkpoint pieces against sparks,
+      which is the scenario that actually needs them.
+      **Dependency spike first**: added `arrow-vector`/`arrow-memory-netty`
+      18.1.0 and wrote a throwaway round-trip test *before* designing
+      anything around it, since arrow-memory's off-heap allocator reaches
+      into `java.nio` via reflection and JDK 16+'s strong encapsulation
+      blocks that by default. Confirmed real failure
+      (`InaccessibleObjectException`) on first run; fixed with
+      `--add-opens=java.base/java.nio=ALL-UNNAMED` and
+      `.../java.lang=ALL-UNNAMED`, applied to `tasks.test` and every
+      `JavaExec` task in `build.gradle.kts` (a `val arrowAddOpens` shared
+      between them) — the spike test itself was then deleted.
+      **`particlesim.record`**: `RecordingSchema` (one Arrow record batch
+      per frame, one row per live particle: `step`/`t`/`id`/px,py,pz/
+      vx,vy,vz; `id` column present even though ball-bounce's population
+      never changes, since positional identity across frames can't be
+      relied on once particle count is dynamic elsewhere — §14).
+      `RecordingWriter(directory, framesPerShard)`: rolls to a new
+      `shard-NNNNN.arrow` file purely on frame count (never size or wall
+      clock — the same boundary §9.5 will hang checkpoints off of), each
+      shard's Arrow-file footer written only when the shard closes.
+      `RecordingReader`: `readFrame(shardIndex, frameIndexInShard)` does
+      true random access via the file's footer-based block index (loads
+      one target batch without reading anything before it) — the
+      documented reason §9.2 picked the *File* IPC variant over the
+      streaming one, so it seemed worth actually proving rather than just
+      building sequential-only `readAllFrames` and asserting it.
+      **Format version**: embedded as Arrow schema-level metadata
+      (`particlesim.format_version`, carried in every shard's own footer)
+      rather than a separate sidecar file, since it's a property of the
+      columnar schema itself; `RecordingReader` checks it on every shard
+      open and rejects a mismatch before trying to interpret any column.
+      **Crash-boundary property actually tested, not just asserted**:
+      `RecordingTest` completes shard 0, writes a few frames into shard 1,
+      then abandons the writer *without* calling `close()` (no `.end()` on
+      shard 1, simulating a crash mid-shard) — confirms shard 0 still
+      reads back exactly and shard 1 (bytes on disk, footer missing)
+      throws rather than being silently misread.
+      **Known gap, deliberately deferred, not silently shipped**: `step`/
+      `t` are denormalized onto every row of a frame's batch rather than
+      stored once via Arrow's lower-level per-batch `appMetadata` API — if
+      a frame's row count is ever zero (impossible for ball-bounce, since
+      it never destroys its one particle), that frame loses its timestamp
+      under the current scheme. Left as-is since sub-pass A's scenario
+      can't hit it; sub-pass B (sparks) will need either to fix this or to
+      prove it truly doesn't come up before checkpointing is built on top.
+      **Not yet built**: discrete-event channel (breaks/spawn/destroy —
+      needs a scenario that actually produces events, which ball-bounce
+      doesn't), checkpointing, resume.
 - [ ] Checkpointing: full-state snapshot at each shard boundary (group
       membership, broken connections, emitter accumulator+RNG state,
-      t/step index), resume-from-checkpoint on crash (§9.5, §13.2)
-- [ ] Multi-threaded force accumulation: turn on the fixed-chunk reduction
+      t/step index), resume-from-checkpoint on crash (§9.5, §13.2).
+      Second sub-pass of the item above — deliberately not started until
+      recording itself was proven; will need `sparks` as its proof
+      scenario (only one with an emitter/dynamic population to round-trip)
+      and two design gaps already reasoned through but not yet
+      implemented: (1) `ParticleStore.nextId` isn't recoverable from the
+      alive-particle-id set alone (destroyed ids are never reused, but the
+      alive set's max id can be *lower* than the true next-id if the
+      highest-numbered particles happened to die first) — checkpoint needs
+      to persist it explicitly, even though it's not named in §9.5's own
+      bullet list. (2) A broken `Spring`/`Damper` is fully removed from
+      the forces list when it breaks (unlike `MeshSprings`, which just
+      flips an internal `active` bit and stays in the list) — so "the set
+      of already-broken connections" has to be persisted as particle-id
+      pairs, with the resume caller filtering a freshly-rebuilt force list
+      against that set, mirroring how `StepResult.brokenForces` already
+      works during a live run.
+- [x] Multi-threaded force accumulation: turn on the fixed-chunk reduction
       designed back in Phase 2 — fixed logical chunk count, per-chunk
       private accumulators, fixed chunk-index merge order, deterministic
-      across machines/thread counts, not just reruns (§9.3)
+      across machines/thread counts, not just reruns (§9.3). Done first,
+      ahead of the other Phase 8 items below, since it's the most
+      self-contained piece and Phase 2's `ChunkAccumulator`/chunk-striding
+      design already anticipated it — this was "turn it on," not design it.
+      `Integrator` gained an optional `executor: ExecutorService?`
+      constructor param (default `null` = every pre-Phase-8 call site's
+      behavior, unchanged): non-null submits each chunk's work to it and
+      joins every chunk's `Future` before the merge, which was *already*
+      written in fixed chunk-index order rather than completion order, so
+      it needed no changes at all. `chunkCount` and the executor's actual
+      thread/pool size are independent on purpose (§9.3) — chunk count is
+      what determinism is keyed on and must stay fixed across runs/
+      machines; how many threads service those chunks can be anything,
+      including fewer than `chunkCount` (some threads process more than
+      one chunk, sequentially).
+      **Ownership is caller's, not `Integrator`'s** — no lifecycle method
+      was added to `Integrator` itself. A one-off `Integrator()` (nearly
+      every test) never touches a thread pool at all; the real engine loop
+      (later Phase 8 items) can share *one* executor across its whole
+      lifetime instead of each `Integrator` owning a short-lived pool.
+      **Thread-safety of the one piece of state a chunk's accumulate path
+      actually mutates** — `MeshSprings.active` (an edge's break flag) —
+      was verified by inspection, not assumed: every write is `active[i]`
+      for the *same* `i` chunk-striding already gives that chunk exclusive
+      ownership of, every read the break decision depends on is either
+      `active[i]` or immutable per-edge data, and `activeConnections()`
+      (which reads the whole array) is never called from inside
+      `accumulate` — only by a caller after the step (and its chunk join)
+      completes. No other force holds mutable state touched during
+      accumulation. `ExecutionException` from a chunk's `Future.get()` is
+      unwrapped (`e.cause ?: e`) before rethrowing, so a force's own
+      exception type (e.g. `BlowUpException`) surfaces as itself whether
+      the run was sequential or parallel — a catch block for a specific
+      exception type shouldn't have to know which.
+      `ParallelIntegratorTest`: runs the flag scenario (chosen because its
+      3 `MeshSprings` instances are the one real concurrency stress case)
+      for 500 steps and checks every live particle's position/velocity is
+      *exactly* equal, not just close, across two configurations —
+      `chunkCount=4` sequential vs. 8 threads, and `chunkCount=7` sequential
+      vs. exactly 2 threads (the asymmetric case: one worker processes
+      chunks 0/2/4/6, the other 1/3/5, so completion order diverges from
+      submission order the most — the configuration that would have
+      exposed a merge that accidentally depended on completion order
+      instead of the fixed index order it's actually written to use). Plus
+      two tests confirming a deliberately-thrown exception surfaces as its
+      own type on both the parallel and sequential paths.
+      **Measured, not assumed, whether this actually helps**: 500 steps of
+      the flag scenario (~112 particles) at `chunkCount=4`, sequential
+      ≈ 14.6–15.7ms vs. 4 threads ≈ 21.5–22.5ms — parallel was *slower*,
+      thread-dispatch overhead dominating the genuinely tiny per-step work
+      at this N. Expected and fine: the TODO item was "turn on the
+      mechanism and prove it's still deterministic," not "prove a
+      speedup" — whether multi-threading actually pays off is an
+      N-dependent question with no large-N scenario yet to answer it, so
+      the honest status is "correct and available," not "faster."
 - [ ] Interactive particle drag, step-index-stamped drag targets for
       exact replay (viewer input → engine) (§9.4)
 - [ ] `[stretch]` Parquet export (post-hoc conversion from Arrow shards,
