@@ -10,21 +10,31 @@
     font: 12px/1.4 monospace; color: #9f9; background: rgba(0,0,0,0.5);
     padding: 4px 8px; border-radius: 4px;
   }
+  #returnToScripted {
+    position: fixed; top: 8px; right: 8px; z-index: 1;
+    font: 12px/1.4 monospace; color: #fff; background: rgba(50,90,160,0.85);
+    padding: 6px 10px; border-radius: 4px; border: none; cursor: pointer;
+    display: none;
+  }
 </style>
 </head>
 <body>
 <div id="status">connecting…</div>
+<button id="returnToScripted">return to scripted camera</button>
 <script type="importmap">
 {
   "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js"
+    "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"
   }
 }
 </script>
 <script type="module">
 import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const statusEl = document.getElementById("status");
+const returnToScriptedEl = document.getElementById("returnToScripted");
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x111111);
@@ -47,6 +57,29 @@ window.addEventListener("resize", () => {
 scene.add(new THREE.GridHelper(20, 20, 0x444444, 0x222222));
 scene.add(new THREE.AxesHelper(1));
 
+// --- Camera: scripted (engine-evaluated, §10.1) vs. manual (viewer-local orbit) -----------
+// Both drive the *same* camera object; only one writes to it on any given frame, decided by
+// cameraMode, so they never fight each other. OrbitControls stays enabled at all times so its
+// own pointer/wheel listeners can detect "the user just grabbed the viewport" via its "start"
+// event even while scripted mode has been driving the camera up to that point — but its
+// internal state is only ever *applied* to the camera (via controls.update()) while in manual
+// mode, and applyFrame only ever writes the server's camera pose while in scripted mode.
+const controls = new OrbitControls(camera, renderer.domElement);
+let cameraMode = "scripted";
+let lastScriptedLookAt = new THREE.Vector3(0, 0, 0);
+
+function enterManualCamera() {
+  if (cameraMode === "manual") return;
+  cameraMode = "manual";
+  controls.target.copy(lastScriptedLookAt);
+  returnToScriptedEl.style.display = "block";
+}
+controls.addEventListener("start", enterManualCamera);
+returnToScriptedEl.addEventListener("click", () => {
+  cameraMode = "scripted";
+  returnToScriptedEl.style.display = "none";
+});
+
 // Every particle as a dot, every pairwise force as a line (§10.2 --render-all) — no colliders
 // or surfaces yet since neither exists before Phase 4/5.
 const dotGeometry = new THREE.SphereGeometry(0.06, 8, 6);
@@ -66,13 +99,16 @@ function applyFrame(frame) {
 
   // §10.1's scripted camera: engine-evaluated, so applying it here is just "set the numbers
   // we were sent" — no expression/lambda evaluation needed client-side. Omitted entirely by
-  // demos with no scripted camera (see DebugFrame's own doc comment), in which case the
-  // viewer's static default (set once, above) is left untouched.
+  // demos with no scripted camera, in which case the viewer's static default (set once,
+  // above) is left untouched. Suppressed entirely once the viewer has switched to manual mode.
   if (frame.camera) {
-    const c = frame.camera;
-    camera.position.set(c.position.x, c.position.y, c.position.z);
-    camera.up.set(c.up.x, c.up.y, c.up.z);
-    camera.lookAt(c.lookAt.x, c.lookAt.y, c.lookAt.z);
+    lastScriptedLookAt.set(frame.camera.lookAt.x, frame.camera.lookAt.y, frame.camera.lookAt.z);
+    if (cameraMode === "scripted") {
+      const c = frame.camera;
+      camera.position.set(c.position.x, c.position.y, c.position.z);
+      camera.up.set(c.up.x, c.up.y, c.up.z);
+      camera.lookAt(c.lookAt.x, c.lookAt.y, c.lookAt.z);
+    }
   }
 
   while (dots.children.length < frame.particles.length) {
@@ -105,19 +141,61 @@ function applyFrame(frame) {
   lines.geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
 }
 
+// --- Binary frame decoding (§9.1) ---------------------------------------------------------
+// Mirrors particlesim.debug.BinaryFrame's layout exactly (little-endian throughout): f64 t,
+// i64 step, i32 particleCount, particleCount * {i32 id, f64 x, f64 y, f64 z}, i32
+// connectionCount, connectionCount * {i32 a, i32 b}, u8 hasCamera, and if set: 9x f64
+// (position, lookAt, up).
+function decodeFrame(buffer) {
+  const view = new DataView(buffer);
+  let offset = 0;
+  const t = view.getFloat64(offset, true); offset += 8;
+  const step = Number(view.getBigInt64(offset, true)); offset += 8;
+  const particleCount = view.getInt32(offset, true); offset += 4;
+  const particles = new Array(particleCount);
+  for (let i = 0; i < particleCount; i++) {
+    const id = view.getInt32(offset, true); offset += 4;
+    const x = view.getFloat64(offset, true); offset += 8;
+    const y = view.getFloat64(offset, true); offset += 8;
+    const z = view.getFloat64(offset, true); offset += 8;
+    particles[i] = { id, x, y, z };
+  }
+  const connectionCount = view.getInt32(offset, true); offset += 4;
+  const connections = new Array(connectionCount);
+  for (let i = 0; i < connectionCount; i++) {
+    const a = view.getInt32(offset, true); offset += 4;
+    const b = view.getInt32(offset, true); offset += 4;
+    connections[i] = { a, b };
+  }
+  const hasCamera = view.getUint8(offset); offset += 1;
+  let camera = null;
+  if (hasCamera) {
+    const readVec = () => {
+      const x = view.getFloat64(offset, true); offset += 8;
+      const y = view.getFloat64(offset, true); offset += 8;
+      const z = view.getFloat64(offset, true); offset += 8;
+      return { x, y, z };
+    };
+    camera = { position: readVec(), lookAt: readVec(), up: readVec() };
+  }
+  return { t, step, particles, connections, camera };
+}
+
 let socket = null;
 
 function connect() {
   // Matches DebugRenderer's default WebSocket port; pass a different DebugRenderer(webSocketPort=)
-  // and this needs to change too — Phase 3 is deliberately this minimal.
+  // and this needs to change too.
   const ws = new WebSocket(`ws://${location.hostname}:8887`);
+  ws.binaryType = "arraybuffer";
   socket = ws;
   ws.onopen = () => { statusEl.textContent = "connected"; };
   ws.onclose = () => { statusEl.textContent = "disconnected — retrying…"; setTimeout(connect, 1000); };
   ws.onerror = () => ws.close();
   ws.onmessage = (event) => {
-    const frame = JSON.parse(event.data);
-    statusEl.textContent = `t=${frame.t.toFixed(3)}  step=${frame.step}  particles=${frame.particles.length}`;
+    const frame = decodeFrame(event.data);
+    const cameraTag = cameraMode === "manual" ? " [manual camera]" : "";
+    statusEl.textContent = `t=${frame.t.toFixed(3)}  step=${frame.step}  particles=${frame.particles.length}${cameraTag}`;
     applyFrame(frame);
   };
 }
@@ -128,6 +206,8 @@ connect();
 // engine never needs to know about cameras or screen coordinates, only the resulting 3D
 // target position. Only meaningful for a live engine attached over this WebSocket; a demo
 // that doesn't wire DebugServer's onTextMessage just never receives these and nothing happens.
+// Drag messages are still sent as JSON text (a separate, low-frequency channel from the
+// binary per-frame stream) — see DragMessage's own doc comment.
 
 const raycaster = new THREE.Raycaster();
 const pointerNdc = new THREE.Vector2();
@@ -152,6 +232,10 @@ renderer.domElement.addEventListener("pointerdown", (event) => {
   const hit = raycaster.intersectObjects(dots.children)[0];
   if (!hit) return;
 
+  // A drag beats an orbit — stop OrbitControls' own gesture handling for this pointer so it
+  // doesn't also start panning the camera while a particle is being dragged.
+  event.stopPropagation();
+
   draggedParticleId = hit.object.userData.particleId;
   hit.object.material = draggedDotMaterial;
 
@@ -163,7 +247,7 @@ renderer.domElement.addEventListener("pointerdown", (event) => {
 
   send({ type: "drag_start", particleId: draggedParticleId, step: latestStep, x: hit.point.x, y: hit.point.y, z: hit.point.z });
   renderer.domElement.setPointerCapture(event.pointerId);
-});
+}, { capture: true });
 
 renderer.domElement.addEventListener("pointermove", (event) => {
   if (draggedParticleId === null) return;
@@ -184,6 +268,7 @@ renderer.domElement.addEventListener("pointercancel", endDrag);
 
 function animate() {
   requestAnimationFrame(animate);
+  if (cameraMode === "manual") controls.update();
   renderer.render(scene, camera);
 }
 animate();

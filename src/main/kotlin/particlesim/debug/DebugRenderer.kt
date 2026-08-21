@@ -4,12 +4,12 @@ import particlesim.core.ParticleStore
 import particlesim.render.CameraPose
 
 /**
- * The Phase 3 debug renderer entry point (§10.2's `--render-all`): starts the viewer's HTTP
- * page and WebSocket stream, and broadcasts a [DebugFrame] each time the caller's physics
- * loop calls [broadcast]. Every particle draws as a dot, every connection line passed in as
- * a line — there's no renderer-declaration mechanism yet (that's the real opt-in system,
- * Phase 9), and colliders/surfaces aren't in `--render-all` yet because neither exists
- * before Phase 4/5.
+ * The debug-render-all viewer entry point (§10.2's `--render-all`): starts the viewer's HTTP
+ * page and WebSocket stream, and broadcasts a [BinaryFrame] each time the caller's physics
+ * loop calls [broadcast]. Every particle draws as a dot, every connection line passed in as a
+ * line — there's no renderer-declaration mechanism wired in here (§10.2's real opt-in system
+ * exists as `particlesim.render` types, but nothing consumes them over the wire yet), and
+ * colliders/surfaces aren't in `--render-all` yet.
  */
 class DebugRenderer(
     private val webSocketPort: Int = 8887,
@@ -33,7 +33,7 @@ class DebugRenderer(
         connections: List<Pair<Int, Int>>,
         camera: CameraPose? = null,
     ) {
-        wsServer.broadcastFrame(DebugFrame.render(t, step, store, ids, connections, camera))
+        wsServer.broadcastFrame(BinaryFrame.encode(t, step, store, ids, connections, camera))
     }
 
     fun stop() {

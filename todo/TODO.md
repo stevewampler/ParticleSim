@@ -995,9 +995,69 @@ this project has used since Phase 5.
       mean anything against), so they need their own design pass rather
       than being guessed at here. N-body/custom-force renderers are
       `[stretch]` per the spec itself.
-- [ ] Web viewer (WebGL/three.js) + binary WebSocket protocol, full
+- [~] Web viewer (WebGL/three.js) + binary WebSocket protocol, full
       orbit/picking/camera controls — sole first-class viewer, upgrading
-      from Phase 3's bare-bones renderer (§9.1, §10)
+      from Phase 3's bare-bones renderer (§9.1, §10). Third sub-pass of
+      Phase 9. **Binary protocol + orbit controls done and server-side
+      verified; real mesh/sphere/arrow/colored-line rendering consuming
+      the previous sub-pass's renderer declarations is NOT done** — see
+      below.
+      **`particlesim.debug.BinaryFrame`**: replaces `DebugFrame`'s JSON
+      text entirely (deleted, along with its test — genuinely unused
+      once nothing called it, not left as dead code) with a fixed-layout
+      little-endian buffer (`f64 t, i64 step, i32 particleCount,
+      particleCount*{i32 id, f64 x,y,z}, i32 connectionCount,
+      connectionCount*{i32 a,b}, u8 hasCamera, [9x f64 if set]`) — §9.1's
+      own stated reason: JSON's bandwidth/parse cost "would otherwise
+      bite at large N and in drag-interaction latency." `encode`/`decode`
+      round-trip-tested (`BinaryFrameTest`), including that `decode`
+      never mutates a buffer's position a caller might still need to
+      send. `DebugServer.broadcastFrame` now takes a `ByteBuffer`
+      (`WebSocketServer.broadcast(ByteBuffer)` already existed in the
+      Java-WebSocket dependency — no new dependency needed).
+      **Verified two ways**: the JVM-side round-trip test above, and
+      (since Chrome automation still wasn't available) a raw
+      `WebSocketClient` connected to a *live* `FlagDebugDemo` and
+      decoded real frames off the wire with `BinaryFrame.decode` —
+      confirmed correct particle count (112), connection count (202),
+      and a smoothly-changing camera pose matching the flag demo's known
+      shape, not just a self-consistent encode/decode round-trip in
+      isolation.
+      **Client (`debug-viewer.html`)**: `ws.binaryType = "arraybuffer"`
+      plus a hand-written `decodeFrame` mirroring `BinaryFrame`'s layout
+      exactly via `DataView` (little-endian) — this half is **unverified
+      by anything other than careful transliteration**, since it can
+      only really be proven by a browser actually rendering something,
+      which this environment couldn't do.
+      **Orbit controls added** (three.js's `OrbitControls` addon, loaded
+      via the same CDN import map already in use) — §10.1's scripted-vs-
+      manual toggle: `OrbitControls` stays *enabled* at all times so its
+      own "start" event can detect "the user just grabbed the viewport"
+      even while scripted mode has been driving the camera, but its
+      internal state is only ever *applied* to the camera
+      (`controls.update()`) while in manual mode, and the scripted pose
+      from `applyFrame` is only ever applied while in scripted mode —
+      never both, so they can't fight each other. An always-visible
+      "return to scripted camera" button is the spec's required
+      "explicit action returns to scripted" (§10.1). A drag on a
+      particle calls `stopPropagation()` in the capture phase to stop
+      that same pointerdown from also starting an orbit gesture — a
+      standard pattern, but genuinely untested interaction-feel-wise for
+      the same reason as the rest of this bullet.
+      **Not done, deliberately deferred rather than rushed**: the
+      previous sub-pass's `ParticleRenderer`/`SurfaceRenderer`/
+      `LineRenderer`/`ArrowRenderer` declarations aren't wired into
+      `BinaryFrame` or the client at all yet — the wire format and
+      viewer today still only draw dots-and-plain-lines
+      (`--render-all`-equivalent), same visual capability as before this
+      sub-pass, just over the new protocol. Actually rendering spheres
+      (radius-based size), shaded/wireframe meshes, sampled arrows, and
+      colorBy-driven line colors is real remaining scope: it needs the
+      binary format extended to carry per-particle style/radius, mesh
+      triangle indices, arrow sample data, and per-line color, plus a
+      worked-example demo that actually declares renderers (nothing does
+      yet — every existing demo still uses debug-render-all's implicit
+      "everything as a dot/line" behavior) to prove it end to end.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

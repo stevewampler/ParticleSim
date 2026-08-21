@@ -4,14 +4,15 @@ import org.java_websocket.WebSocket
 import org.java_websocket.handshake.ClientHandshake
 import org.java_websocket.server.WebSocketServer
 import java.net.InetSocketAddress
+import java.nio.ByteBuffer
 
 /**
- * WebSocket broadcast of debug frames (§9.1), now bidirectional (§9.4): every connected viewer
- * gets every frame via [broadcastFrame], and text sent back by a viewer (drag input) is
- * forwarded verbatim to [onTextMessage] — the exact [onMessage] upgrade Phase 3 anticipated,
- * not a new class. Deliberately doesn't know about [DragMessage] itself: parsing/routing is
- * the caller's job (see the drag demo), so this class stays reusable for any future viewer
- * input, not just drag.
+ * WebSocket broadcast of per-frame state (§9.1), bidirectional (§9.4): every connected viewer
+ * gets every frame via [broadcastFrame] (binary, §9.1's compact framing — [BinaryFrame]), and
+ * text sent back by a viewer (drag input) is forwarded verbatim to [onTextMessage] — the exact
+ * [onMessage] upgrade Phase 3 anticipated, not a new class. Deliberately doesn't know about
+ * [DragMessage] itself: parsing/routing is the caller's job (see the drag demo), so this class
+ * stays reusable for any future viewer input, not just drag.
  */
 class DebugServer(port: Int, private val onTextMessage: ((String) -> Unit)? = null) : WebSocketServer(InetSocketAddress(port)) {
 
@@ -25,7 +26,7 @@ class DebugServer(port: Int, private val onTextMessage: ((String) -> Unit)? = nu
     }
     override fun onStart() {}
 
-    fun broadcastFrame(json: String) {
-        broadcast(json)
+    fun broadcastFrame(buffer: ByteBuffer) {
+        broadcast(buffer)
     }
 }
