@@ -480,18 +480,111 @@ items below for exactly what's deferred and why.
       bug this scenario caught.)
 
 ## Phase 7 — Expression language & YAML front-end
-- [ ] Hand-rolled expression parser — incl. `noise()` as seeded
+
+Scoped narrowly on purpose: instead of schema coverage for every
+force/constraint/collider/emitter type built across Phases 2–6, this phase
+gets exactly one worked example — the flag (§7.3) — expressible in YAML, and
+*proves* parity by loading it and running it through the flag's existing
+golden-file test, asserting byte-identical output against the same checked-in
+reference `buildFlag` already produces. That's a stronger proof than partial
+schema breadth would be, and it's a deliberately reusable pattern: colliders,
+emitters, destroy rules, breakable thresholds, other bulk-generation shapes,
+and the N-body/ball-bounce/sparks scenarios all still need YAML coverage —
+second pass, same framing as every other phase's worked-example-first scoping
+this project has used since Phase 5.
+
+- [x] Hand-rolled expression parser — incl. `noise()` as seeded
       deterministic gradient noise, scalar/vector type-checking at parse
-      time (§4.1). The full set of expression-capable fields is known by
-      now from Phases 2–6, rather than guessed at upfront.
-- [ ] Wire the parser into every expression-capable field already built
-      via Kotlin lambdas in Phases 2–6, bringing YAML to full parity with
-      the Kotlin DSL (§4.1, §4.3, §4.4)
-- [ ] YAML front-end + schema validation, incl. version field, zero-match
+      time (§4.1) — `particlesim.expr`: `Lexer`, `Parser` (recursive-descent;
+      precedence loosest→tightest is `+`/`-` < `*`/`/` < unary `-` < `^`,
+      with `^` right-associative and unary minus binding *looser* than `^`
+      so `-2^2 = -4` not `4`), `Ast` (each node resolves its scalar/vector
+      `type` and `isConstant` structurally as it's constructed — a
+      scalar/vector mismatch throws immediately during parsing, never on
+      first `evaluate`), `Noise` (1-3 argument value noise — the spec's
+      "value or simplex, implementation's choice" hedge, chosen because
+      value noise is far simpler to hand-roll correctly than gradient/
+      simplex noise while still being a pure, deterministic, non-RNG
+      function of its arguments; hashed lattice points via the same
+      SplitMix64-style mixing Phase 6's `Emitter` uses for seed derivation,
+      smoothstep-interpolated). `ExpressionParser.parseScalar`/`parseVector`
+      bridge into the *exact* `ScalarExpr`/`VectorExpr` types every force/
+      constraint/collider/emitter already consumes — not a parallel
+      evaluation path — folding a `t`-independent result to `.Constant`
+      (matching what a literal already gets) rather than always producing
+      `.OfTime`.
+      **Only `t` is a working built-in variable.** §4.1 also lists `dt` and
+      "the entity's own position, velocity, id (where applicable)" —
+      none of those are reachable without first widening `ScalarExpr`/
+      `VectorExpr`'s `evaluate(t)` signature, which every force/collider/
+      emitter built in Phases 2–6 consumes; that's a breaking change to the
+      core evaluation contract with zero current consumers, not something
+      to make partially/silently work here. `dt` is a recognized identifier
+      that fails with a clear "not available yet" message (not a silent
+      wrong value, and not indistinguishable from an actual typo);
+      position/velocity/id aren't in the grammar at all yet. Camera scene
+      queries (§4.1's `position(id)`, `centroid(group)`, etc.) are
+      out of scope for the same reason one level up — there's no camera
+      system yet (Phase 8) for them to query.
+- [x] YAML front-end + schema validation, incl. version field, zero-match
       selector warning, unknown-name load errors, load-time rejection of
       statically-checkable bad values (e.g. a literal negative mass) (§4.2)
-- [ ] Component tests: expression parser (incl. type-checking), YAML
-      schema validation error cases (§15.3)
+      — `particlesim.yaml.YamlLoader`, scoped to exactly what §7.3's flag
+      needs: a particle grid (with `edge_groups` for "column 0 also joins
+      group X," the flag's pole-edge pattern — a narrow, rectangular-grid-
+      only mechanism, not a general selector), `gravity`/`mesh_springs`/
+      `wind` forces, `fixed_position` (incl. `at_current_positions`).
+      SnakeYAML only for text→generic-Map/List parsing; all schema
+      validation and binding into the simulation model is hand-written, the
+      same "own the sandbox boundary" choice already made for the
+      expression parser rather than a data-binding library. **No tag/id/
+      range selector language exists yet** — group membership in this
+      schema comes only from a grid's own `name`/`edge_groups`, plus an
+      optional top-level `groups:` list whose only purpose is making a
+      group's "declared but currently unmatched" state distinguishable
+      from "never declared anywhere," so the two required semantic checks
+      have a real difference to key off: a name in `groups:` with zero
+      members after loading → **warning**; a `group:` reference anywhere
+      else to a name no declaration ever produced → load-time **error**. A
+      real selector system would give the zero-match warning a more
+      natural home; this is the narrowest schema that demonstrates both
+      checks exactly as specified rather than conflating them. Gravity's
+      `acceleration` is a literal-only `[x,y,z]` (mirroring
+      `UniformGravity` itself not being expression-capable, a Phase 2
+      decision this phase didn't reopen); `wind.velocity` and `mass` accept
+      either a literal or an expression string, reusing
+      `ExpressionParser`. A literal negative mass is rejected by letting
+      `ParticleStore.create`'s existing validation throw (synchronously,
+      during loading) rather than duplicating that rule a second time in
+      the loader — one source of truth for "mass must be positive."
+- [x] Parity proof — `particlesim.golden.FlagYamlParityTest` loads
+      `src/test/resources/yaml/flag.yaml` (hand-written to match
+      `buildFlag`'s exact parameters *and* force order — force
+      accumulation order affects the bit pattern of a floating-point sum,
+      so matching values alone wouldn't be enough), runs it through the
+      same sampling `FlagGoldenTest` uses, and asserts it against the
+      *same* checked-in `flag.golden.txt` — passed byte-identical on the
+      first run. If this ever needs a separate reference file, the two
+      front-ends have diverged.
+- [x] Component tests: expression parser (incl. type-checking), YAML
+      schema validation error cases (§15.3) — `ExpressionParserTest` (27
+      tests: precedence/associativity incl. `2^3^2=512` and `-2^2=-4`,
+      vector/scalar type errors at parse time, `noise()` determinism/
+      range/continuity, constant-folding), `YamlLoaderTest` (14 tests:
+      version field, both required semantic checks with a case
+      distinguishing "declared-empty warns" from "undeclared errors,"
+      malformed-expression-string and unknown-grid-name errors, literal
+      negative mass rejection).
+- [ ] **Second pass** (not this phase): wire every other expression-capable
+      field (colliders' moving position, emitters' rate/distributions,
+      destroy conditions, breakable thresholds, N-body/collision/
+      resting-contact parameters) into the YAML schema; general
+      bulk-generation shapes beyond a rectangular grid (uniform-random-in-
+      volume, explicit particle lists, individual particle declarations);
+      a real tag/id/range selector language (§4.2) to replace this phase's
+      narrow name-based group model; YAML coverage for the ball-bounce and
+      sparks scenarios, each getting their own golden-file parity proof
+      the same way the flag did.
 
 ## Phase 8 — Full execution engine
 - [ ] Real-time interactive loop: full state stream contract (camera pose,

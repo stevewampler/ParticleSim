@@ -16,6 +16,12 @@ dependencies {
     // WebSocketServer subclass to broadcast on; Phase 8's bidirectional upgrade reuses the
     // same class via its onMessage callback, no re-architecture.
     implementation("org.java-websocket:Java-WebSocket:1.6.0")
+    // Phase 7's YAML front-end (§4.2): only used to parse YAML text into generic
+    // Map/List/scalar structures — all schema validation and binding into the simulation
+    // model is hand-written (particlesim.yaml.YamlLoader), the same "own the sandbox
+    // boundary, don't lean on a general framework" choice already made for the expression
+    // parser (§4.1) rather than a data-binding library like Jackson.
+    implementation("org.yaml:snakeyaml:2.2")
     testImplementation(kotlin("test"))
 }
 
