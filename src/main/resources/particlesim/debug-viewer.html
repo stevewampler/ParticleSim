@@ -16,11 +16,17 @@
     padding: 6px 10px; border-radius: 4px; border: none; cursor: pointer;
     display: none;
   }
+  #meshEdgesToggle {
+    position: fixed; top: 44px; right: 8px; z-index: 1;
+    font: 12px/1.4 monospace; color: #fff; background: rgba(0,0,0,0.5);
+    padding: 4px 8px; border-radius: 4px; display: none; align-items: center; gap: 6px;
+  }
 </style>
 </head>
 <body>
 <div id="status">connecting…</div>
 <button id="returnToScripted">return to scripted camera</button>
+<label id="meshEdgesToggle"><input type="checkbox" id="meshEdgesCheckbox"> show mesh edges</label>
 <script type="importmap">
 {
   "imports": {
@@ -35,6 +41,13 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const statusEl = document.getElementById("status");
 const returnToScriptedEl = document.getElementById("returnToScripted");
+const meshEdgesToggleEl = document.getElementById("meshEdgesToggle");
+const meshEdgesCheckboxEl = document.getElementById("meshEdgesCheckbox");
+let showMeshEdges = false;
+meshEdgesCheckboxEl.addEventListener("change", () => {
+  showMeshEdges = meshEdgesCheckboxEl.checked;
+  for (const overlay of meshEdgeOverlays) overlay.visible = showMeshEdges;
+});
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x111111);
@@ -106,11 +119,27 @@ scene.add(lines);
 // §10.2 surface meshes (shaded solid or wireframe) and arrow-sampled field forces — pooled
 // like dots/lines, grown/shrunk to match each frame's declared count rather than rebuilt from
 // scratch every frame.
-const solidMeshMaterial = () => new THREE.MeshStandardMaterial({ color: 0x3388ff, side: THREE.DoubleSide, roughness: 0.85 });
+//
+// polygonOffset on the solid material pushes its depth values slightly back so anything
+// coplanar with it (the structural-spring lines, and the optional edge overlay below) renders
+// cleanly on top instead of z-fighting — without it, a solid mesh sharing exact vertex
+// positions with a LineSegments object flickers unpredictably as the camera or the mesh's own
+// shape changes, which got a lot more visible once dragging could deform the surface unevenly.
+const solidMeshMaterial = () => new THREE.MeshStandardMaterial({
+  color: 0x3388ff, side: THREE.DoubleSide, roughness: 0.85,
+  polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+});
 const wireframeMeshMaterial = () => new THREE.MeshBasicMaterial({ color: 0x3388ff, wireframe: true });
 let meshObjects = []; // THREE.Mesh[], each carrying userData.triangleVertexIds for picking
 let meshGroup = new THREE.Group();
 scene.add(meshGroup);
+
+// A viewer-local "show mesh edges" toggle, independent of the server's own per-mesh wireframe
+// flag (which chooses solid-vs-wireframe-only rendering) — this overlays a wireframe on top of
+// an otherwise-solid mesh, the usual way to let someone see the triangulation without losing
+// the shading. Uses the same edges every frame's geometry has, so it's just as pooled/rebuilt.
+const edgeOverlayMaterial = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 });
+let meshEdgeOverlays = []; // THREE.LineSegments[], one per mesh, parallel to meshObjects
 
 const ARROW_COLOR = 0xffaa33;
 let arrowObjects = []; // THREE.ArrowHelper[]
@@ -210,10 +239,16 @@ function applyFrame(frame) {
     const obj = new THREE.Mesh(new THREE.BufferGeometry(), solidMeshMaterial());
     meshGroup.add(obj);
     meshObjects.push(obj);
+    const overlay = new THREE.LineSegments(new THREE.BufferGeometry(), edgeOverlayMaterial);
+    overlay.visible = showMeshEdges;
+    meshGroup.add(overlay);
+    meshEdgeOverlays.push(overlay);
   }
   while (meshObjects.length > frame.meshes.length) {
     meshGroup.remove(meshObjects.pop());
+    meshGroup.remove(meshEdgeOverlays.pop());
   }
+  meshEdgesToggleEl.style.display = frame.meshes.length > 0 ? "flex" : "none";
   frame.meshes.forEach((meshDecl, i) => {
     const obj = meshObjects[i];
     obj.geometry.dispose();
@@ -221,6 +256,10 @@ function applyFrame(frame) {
     obj.geometry = built.geometry;
     obj.userData.triangleVertexIds = built.triangleVertexIds;
     obj.material = meshDecl.wireframe ? wireframeMeshMaterial() : solidMeshMaterial();
+
+    const overlay = meshEdgeOverlays[i];
+    overlay.geometry.dispose();
+    overlay.geometry = new THREE.WireframeGeometry(built.geometry);
   });
 
   // Arrow-sampled field forces (§10.2): one ArrowHelper per sample, pooled the same way.
@@ -239,7 +278,10 @@ function applyFrame(frame) {
     arrow.position.set(sample.origin.x, sample.origin.y, sample.origin.z);
     if (length > 1e-9) {
       arrow.setDirection(dir.normalize());
-      arrow.setLength(length, Math.min(0.3, length * 0.3), Math.min(0.15, length * 0.15));
+      // Head sized as a modest fraction of the shaft, capped small in absolute terms too -
+      // the previous 0.3/0.15 caps were close to a third of a typical arrow's own length,
+      // reading as an oversized arrowhead rather than a thin shaft with a point.
+      arrow.setLength(length, Math.min(0.12, length * 0.2), Math.min(0.06, length * 0.1));
       arrow.visible = true;
     } else {
       arrow.visible = false; // a zero-length arrow has no defined direction to draw
