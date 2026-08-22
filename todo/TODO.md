@@ -1611,6 +1611,38 @@ real prerequisite, not just unstarted — see the note below.
       (`FixedPosition`-constrained) read exactly `0.0` m/s, cloth-only
       particles read `0.03`–`6.97` m/s under wind — a real, physically
       sane spread, not placeholder data. Full suite now 263 green.
+- [x] **Color legend**: a small panel (bottom-right) shows the blue→orange
+      gradient and what its two ends mean, appearing only when a
+      `colorBy` gradient is actually active anywhere in the scene.
+      **No protocol change needed** — `BinaryFrame`'s connections already
+      carry a resolved `r,g,b` per connection, so "is a gradient active"
+      is detected purely client-side: any connection whose color isn't
+      exactly `Color.DEFAULT_LINE`'s RGB (`isDefaultLineColor` in
+      `debug-viewer.html`, mirroring the Kotlin constant's exact values).
+      **A real, explicitly-flagged limitation**: this heuristic is sound
+      *today* only because exactly one `colorBy` variant exists
+      (`BREAK_PROXIMITY`) — the wire carries no per-connection tag saying
+      *which* colorBy produced a color, just the resolved RGB. If a
+      second variant (`stretch`/`force` magnitude, both already noted as
+      deferred in Phase 9) is ever added, "not the default color" stops
+      meaning "breakProximity specifically," and this needs to become
+      variant-aware (which gradient, which two labels) — documented
+      directly in the code, not left to be rediscovered later.
+      **Verified two ways, since no current demo exercises breakProximity
+      coloring live** (`FlagDebugDemo` reverted it, per Phase 9's own
+      notes above): a new `ColorRampTest` proves `blueOrange`'s output
+      never coincides with `DEFAULT_LINE` at any sampled point — not by
+      merely checking they're different values, but by confirming
+      `DEFAULT_LINE`'s blue channel (1.0) exceeds either gradient
+      endpoint's (0.698 max), which bounds the whole interpolated segment
+      below it, so nothing on the gradient can ever collide with the
+      "uncolored" case the legend needs to distinguish from. Separately,
+      a live server-side WebSocket check against a running
+      `FlagDebugDemo` confirmed the negative case for real: all 202
+      structural connections decode as exactly `Color.DEFAULT_LINE`, so
+      the legend would correctly stay hidden — the positive case (does it
+      actually *appear* when it should) remains unverified by an actual
+      colored demo or a human in a browser. Full suite now 264 green.
 - [ ] Time controls (pause, speed multiplier, step-once) — already
       specified in §9.1, not yet built anywhere; this is the UI surface
       for it

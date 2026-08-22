@@ -73,6 +73,23 @@
   #objectPanel .noRenderer { color: #888; font-style: italic; }
   #objectPanel .objectInfo { color: #9f9; margin-top: 2px; }
   #objectPanel .objectInspect { color: #9cf; margin-top: 2px; white-space: pre-line; }
+  #colorLegend {
+    position: fixed; bottom: 8px; right: 8px; z-index: 1;
+    font: 12px/1.5 monospace; color: #ddd; background: rgba(0,0,0,0.55);
+    padding: 8px 10px; border-radius: 4px; display: none;
+  }
+  #colorLegend h4 {
+    margin: 0 0 5px; font-size: 10px; color: #9cf; font-weight: normal;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  /* Matches particlesim.render.ColorRamp.blueOrange's Okabe-Ito palette exactly (0,114,178) ->
+     (230,159,0) - a visual constant, not derived from live data, so it's fine to hardcode here
+     rather than compute it in JS from values that never change at runtime. */
+  #colorLegendBar {
+    width: 160px; height: 10px; border-radius: 3px;
+    background: linear-gradient(to right, rgb(0,114,178), rgb(230,159,0));
+  }
+  #colorLegendLabels { display: flex; justify-content: space-between; font-size: 10px; margin-top: 3px; color: #bbb; }
 </style>
 </head>
 <body>
@@ -113,6 +130,11 @@
       <button id="saveBookmarkBtn">save</button>
     </div>
   </section>
+</div>
+<div id="colorLegend">
+  <h4>break proximity</h4>
+  <div id="colorLegendBar"></div>
+  <div id="colorLegendLabels"><span>0 · at rest</span><span>1 · about to break</span></div>
 </div>
 <script type="importmap">
 {
@@ -258,6 +280,26 @@ scene.add(dots);
 // (or the server's default line blue when nothing overrides it) instead of one uniform color.
 const lineMaterial = new THREE.LineBasicMaterial({ vertexColors: true });
 let lines = new THREE.LineSegments(new THREE.BufferGeometry(), lineMaterial);
+
+// --- Color legend (§10.3) -----------------------------------------------------------------
+// "Whenever a colorBy gradient is active anywhere in the scene" - there's no explicit per-
+// connection tag on the wire saying *which* colorBy produced a color (BinaryFrame's connections
+// just carry a resolved r,g,b), so activity is detected the same way a person would notice it:
+// any connection whose color isn't the uncolored default. That's a sound heuristic today because
+// exactly one colorBy variant exists (BREAK_PROXIMITY, §10.2) - if a second one is ever added,
+// this needs to become variant-aware (which gradient, which two labels) rather than assuming
+// "not the default color" always means breakProximity specifically.
+const colorLegendEl = document.getElementById("colorLegend");
+const DEFAULT_LINE_COLOR = { r: 0x33 / 255, g: 0x88 / 255, b: 0xff / 255 }; // mirrors Color.DEFAULT_LINE
+
+function isDefaultLineColor(color) {
+  return color.r === DEFAULT_LINE_COLOR.r && color.g === DEFAULT_LINE_COLOR.g && color.b === DEFAULT_LINE_COLOR.b;
+}
+
+function updateColorLegend(frame) {
+  const active = frame.connections.some((c) => !isDefaultLineColor(c.color));
+  colorLegendEl.style.display = active ? "block" : "none";
+}
 scene.add(lines);
 
 // §10.2 surface meshes (shaded solid or wireframe) and arrow-sampled field forces — pooled
@@ -389,6 +431,7 @@ function applyFrame(frame) {
   lines.geometry = new THREE.BufferGeometry();
   lines.geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   lines.geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  updateColorLegend(frame);
 
   // Surface meshes (§10.2): rebuilt every frame (positions move every step) but the pool of
   // THREE.Mesh objects itself is grown/shrunk, not recreated, matching the dots/lines pattern.
