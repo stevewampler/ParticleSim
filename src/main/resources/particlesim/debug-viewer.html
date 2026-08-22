@@ -57,6 +57,13 @@ window.addEventListener("resize", () => {
 scene.add(new THREE.GridHelper(20, 20, 0x444444, 0x222222));
 scene.add(new THREE.AxesHelper(1));
 
+// Lighting for §10.2's shaded surface meshes — MeshBasicMaterial (dots, wireframe meshes)
+// doesn't need this, but a solid MeshStandardMaterial surface would render pure black without it.
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+sunLight.position.set(5, 10, 7);
+scene.add(sunLight);
+
 // --- Camera: scripted (engine-evaluated, §10.1) vs. manual (viewer-local orbit) -----------
 // Both drive the *same* camera object; only one writes to it on any given frame, decided by
 // cameraMode, so they never fight each other. OrbitControls stays enabled at all times so its
@@ -80,9 +87,11 @@ returnToScriptedEl.addEventListener("click", () => {
   returnToScriptedEl.style.display = "none";
 });
 
-// Every particle as a dot, every pairwise force as a line (§10.2 --render-all) — no colliders
-// or surfaces yet since neither exists before Phase 4/5.
-const dotGeometry = new THREE.SphereGeometry(0.06, 8, 6);
+// Every particle as a dot by default (§10.2 --render-all); a particle with a declared sphere
+// radius is the *same* dot mesh just scaled up (spheres are what dots already are, geometrically),
+// and a particle listed in a frame's visibleIds-exclusion is skipped entirely — see applyFrame.
+const BASE_DOT_RADIUS = 0.06;
+const dotGeometry = new THREE.SphereGeometry(BASE_DOT_RADIUS, 8, 6);
 const dotMaterial = new THREE.MeshBasicMaterial({ color: 0xffcc33 });
 const draggedDotMaterial = new THREE.MeshBasicMaterial({ color: 0xff4444 });
 let dots = new THREE.Group();
@@ -94,7 +103,49 @@ const lineMaterial = new THREE.LineBasicMaterial({ vertexColors: true });
 let lines = new THREE.LineSegments(new THREE.BufferGeometry(), lineMaterial);
 scene.add(lines);
 
+// §10.2 surface meshes (shaded solid or wireframe) and arrow-sampled field forces — pooled
+// like dots/lines, grown/shrunk to match each frame's declared count rather than rebuilt from
+// scratch every frame.
+const solidMeshMaterial = () => new THREE.MeshStandardMaterial({ color: 0x3388ff, side: THREE.DoubleSide, roughness: 0.85 });
+const wireframeMeshMaterial = () => new THREE.MeshBasicMaterial({ color: 0x3388ff, wireframe: true });
+let meshObjects = []; // THREE.Mesh[], each carrying userData.triangleVertexIds for picking
+let meshGroup = new THREE.Group();
+scene.add(meshGroup);
+
+const ARROW_COLOR = 0xffaa33;
+let arrowObjects = []; // THREE.ArrowHelper[]
+let arrowGroup = new THREE.Group();
+scene.add(arrowGroup);
+
 let latestStep = 0;
+
+// Builds one mesh's geometry with *shared* (indexed) vertices, not one unconnected triangle
+// per face — so computeVertexNormals() averages normals across adjacent faces for smooth
+// shading, rather than every triangle getting its own flat facet. Returns null (skip this
+// mesh entirely this frame) if any referenced particle isn't in the current frame.
+function buildMeshGeometry(meshDecl, byId) {
+  const localIndexOf = new Map();
+  const positions = [];
+  const indices = [];
+  const triangleVertexIds = [];
+  for (const tri of meshDecl.triangles) {
+    const a = byId.get(tri.a), b = byId.get(tri.b), c = byId.get(tri.c);
+    if (!a || !b || !c) continue; // an endpoint isn't alive this frame - omit, don't zero-fill
+    for (const [id, p] of [[tri.a, a], [tri.b, b], [tri.c, c]]) {
+      if (!localIndexOf.has(id)) {
+        localIndexOf.set(id, positions.length / 3);
+        positions.push(p.x, p.y, p.z);
+      }
+    }
+    indices.push(localIndexOf.get(tri.a), localIndexOf.get(tri.b), localIndexOf.get(tri.c));
+    triangleVertexIds.push([tri.a, tri.b, tri.c]);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return { geometry, triangleVertexIds };
+}
 
 function applyFrame(frame) {
   latestStep = frame.step;
@@ -113,19 +164,27 @@ function applyFrame(frame) {
     }
   }
 
-  while (dots.children.length < frame.particles.length) {
+  const byId = new Map();
+  frame.particles.forEach((p) => byId.set(p.id, p));
+  const sphereRadii = new Map(frame.spheres.map((s) => [s.id, s.radius]));
+  // null (the default, every pre-existing demo) = every particle gets a dot; otherwise only
+  // the listed ids do — §10.2's "the individual cloth particles have no renderer of their own".
+  const visible = frame.visibleIds ? frame.particles.filter((p) => frame.visibleIds.has(p.id)) : frame.particles;
+
+  while (dots.children.length < visible.length) {
     dots.add(new THREE.Mesh(dotGeometry, dotMaterial));
   }
-  while (dots.children.length > frame.particles.length) {
+  while (dots.children.length > visible.length) {
     dots.remove(dots.children[dots.children.length - 1]);
   }
-  const byId = new Map();
-  frame.particles.forEach((p, i) => {
+  visible.forEach((p, i) => {
     const dot = dots.children[i];
     dot.position.set(p.x, p.y, p.z);
     dot.userData.particleId = p.id;
     dot.material = p.id === draggedParticleId ? draggedDotMaterial : dotMaterial;
-    byId.set(p.id, p);
+    const radius = sphereRadii.get(p.id);
+    const scale = radius ? radius / BASE_DOT_RADIUS : 1;
+    dot.scale.setScalar(scale);
   });
 
   // Resolve+filter before allocating: a connection whose endpoint id isn't in this frame
@@ -144,16 +203,63 @@ function applyFrame(frame) {
   lines.geometry = new THREE.BufferGeometry();
   lines.geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   lines.geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+  // Surface meshes (§10.2): rebuilt every frame (positions move every step) but the pool of
+  // THREE.Mesh objects itself is grown/shrunk, not recreated, matching the dots/lines pattern.
+  while (meshObjects.length < frame.meshes.length) {
+    const obj = new THREE.Mesh(new THREE.BufferGeometry(), solidMeshMaterial());
+    meshGroup.add(obj);
+    meshObjects.push(obj);
+  }
+  while (meshObjects.length > frame.meshes.length) {
+    meshGroup.remove(meshObjects.pop());
+  }
+  frame.meshes.forEach((meshDecl, i) => {
+    const obj = meshObjects[i];
+    obj.geometry.dispose();
+    const built = buildMeshGeometry(meshDecl, byId);
+    obj.geometry = built.geometry;
+    obj.userData.triangleVertexIds = built.triangleVertexIds;
+    obj.material = meshDecl.wireframe ? wireframeMeshMaterial() : solidMeshMaterial();
+  });
+
+  // Arrow-sampled field forces (§10.2): one ArrowHelper per sample, pooled the same way.
+  while (arrowObjects.length < frame.arrows.length) {
+    const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(), 1, ARROW_COLOR);
+    arrowGroup.add(arrow);
+    arrowObjects.push(arrow);
+  }
+  while (arrowObjects.length > frame.arrows.length) {
+    arrowGroup.remove(arrowObjects.pop());
+  }
+  frame.arrows.forEach((sample, i) => {
+    const arrow = arrowObjects[i];
+    const dir = new THREE.Vector3(sample.vector.x, sample.vector.y, sample.vector.z);
+    const length = dir.length();
+    arrow.position.set(sample.origin.x, sample.origin.y, sample.origin.z);
+    if (length > 1e-9) {
+      arrow.setDirection(dir.normalize());
+      arrow.setLength(length, Math.min(0.3, length * 0.3), Math.min(0.15, length * 0.15));
+      arrow.visible = true;
+    } else {
+      arrow.visible = false; // a zero-length arrow has no defined direction to draw
+    }
+  });
 }
 
 // --- Binary frame decoding (§9.1) ---------------------------------------------------------
-// Mirrors particlesim.debug.BinaryFrame's layout exactly (little-endian throughout): f64 t,
-// i64 step, i32 particleCount, particleCount * {i32 id, f64 x, f64 y, f64 z}, i32
-// connectionCount, connectionCount * {i32 a, i32 b, f64 r, f64 g, f64 b}, u8 hasCamera, and
-// if set: 9x f64 (position, lookAt, up).
+// Mirrors particlesim.debug.BinaryFrame's layout exactly (little-endian throughout) - see
+// that class's own doc comment for the full field-by-field layout.
 function decodeFrame(buffer) {
   const view = new DataView(buffer);
   let offset = 0;
+  const readVec = () => {
+    const x = view.getFloat64(offset, true); offset += 8;
+    const y = view.getFloat64(offset, true); offset += 8;
+    const z = view.getFloat64(offset, true); offset += 8;
+    return { x, y, z };
+  };
+
   const t = view.getFloat64(offset, true); offset += 8;
   const step = Number(view.getBigInt64(offset, true)); offset += 8;
   const particleCount = view.getInt32(offset, true); offset += 4;
@@ -176,17 +282,48 @@ function decodeFrame(buffer) {
     connections[i] = { a, b, color: { r, g, b: bl } };
   }
   const hasCamera = view.getUint8(offset); offset += 1;
-  let camera = null;
-  if (hasCamera) {
-    const readVec = () => {
-      const x = view.getFloat64(offset, true); offset += 8;
-      const y = view.getFloat64(offset, true); offset += 8;
-      const z = view.getFloat64(offset, true); offset += 8;
-      return { x, y, z };
-    };
-    camera = { position: readVec(), lookAt: readVec(), up: readVec() };
+  const cam = hasCamera ? { position: readVec(), lookAt: readVec(), up: readVec() } : null;
+
+  const sphereCount = view.getInt32(offset, true); offset += 4;
+  const spheres = new Array(sphereCount);
+  for (let i = 0; i < sphereCount; i++) {
+    const id = view.getInt32(offset, true); offset += 4;
+    const radius = view.getFloat64(offset, true); offset += 8;
+    spheres[i] = { id, radius };
   }
-  return { t, step, particles, connections, camera };
+
+  const meshCount = view.getInt32(offset, true); offset += 4;
+  const meshes = new Array(meshCount);
+  for (let i = 0; i < meshCount; i++) {
+    const wireframe = view.getUint8(offset) !== 0; offset += 1;
+    const triangleCount = view.getInt32(offset, true); offset += 4;
+    const triangles = new Array(triangleCount);
+    for (let j = 0; j < triangleCount; j++) {
+      const a = view.getInt32(offset, true); offset += 4;
+      const b = view.getInt32(offset, true); offset += 4;
+      const c = view.getInt32(offset, true); offset += 4;
+      triangles[j] = { a, b, c };
+    }
+    meshes[i] = { wireframe, triangles };
+  }
+
+  const arrowCount = view.getInt32(offset, true); offset += 4;
+  const arrows = new Array(arrowCount);
+  for (let i = 0; i < arrowCount; i++) {
+    arrows[i] = { origin: readVec(), vector: readVec() };
+  }
+
+  const hasVisibleIds = view.getUint8(offset) !== 0; offset += 1;
+  let visibleIds = null;
+  if (hasVisibleIds) {
+    const visibleCount = view.getInt32(offset, true); offset += 4;
+    visibleIds = new Set();
+    for (let i = 0; i < visibleCount; i++) {
+      visibleIds.add(view.getInt32(offset, true)); offset += 4;
+    }
+  }
+
+  return { t, step, particles, connections, camera: cam, spheres, meshes, arrows, visibleIds };
 }
 
 let socket = null;
@@ -210,12 +347,14 @@ function connect() {
 connect();
 
 // --- Interactive drag (§9.4) --------------------------------------------------------------
-// Picking is resolved entirely here (raycast against the currently-rendered dots) — the
-// engine never needs to know about cameras or screen coordinates, only the resulting 3D
-// target position. Only meaningful for a live engine attached over this WebSocket; a demo
-// that doesn't wire DebugServer's onTextMessage just never receives these and nothing happens.
-// Drag messages are still sent as JSON text (a separate, low-frequency channel from the
-// binary per-frame stream) — see DragMessage's own doc comment.
+// Picking is resolved entirely here — the engine never needs to know about cameras or screen
+// coordinates, only the resulting 3D target position. Raycasts against both the visible dots
+// *and* any surface meshes, since a particle with no dot of its own (§10.2: mesh-only
+// rendering) still needs to be pickable — hitting a mesh face resolves to whichever of its
+// three vertex particles is nearest the hit point. Only meaningful for a live engine attached
+// over this WebSocket; a demo that doesn't wire DebugServer's onTextMessage just never
+// receives these and nothing happens. Drag messages are still sent as JSON text (a separate,
+// low-frequency channel from the binary per-frame stream) — see DragMessage's own doc comment.
 
 const raycaster = new THREE.Raycaster();
 const pointerNdc = new THREE.Vector2();
@@ -234,26 +373,53 @@ function pointerToNdc(event) {
   );
 }
 
+// Resolves a raycaster hit (against either a dot or a mesh face) to a (particleId, point) pair.
+// For a mesh hit, `hit.face.{a,b,c}` are the *local* vertex indices of the hit triangle, in
+// the same a/b/c order buildMeshGeometry recorded into triangleVertexIds for that same
+// triangle — so pairing them positionally (not searching for a matching dot object) is exact,
+// not a guess, and works even for a vertex that has no dot of its own (§10.2 mesh-only render).
+function pickParticle() {
+  const hits = raycaster.intersectObjects([...dots.children, ...meshObjects]);
+  if (hits.length === 0) return null;
+  const hit = hits[0];
+  if (hit.object.userData.particleId !== undefined) {
+    return { particleId: hit.object.userData.particleId, point: hit.point };
+  }
+  const vertexIds = hit.object.userData.triangleVertexIds?.[hit.faceIndex];
+  if (!vertexIds || !hit.face) return null;
+  const posAttr = hit.object.geometry.attributes.position;
+  const localIndices = [hit.face.a, hit.face.b, hit.face.c];
+  let nearestId = null;
+  let nearestDist = Infinity;
+  localIndices.forEach((localIndex, i) => {
+    const vertex = new THREE.Vector3().fromBufferAttribute(posAttr, localIndex).applyMatrix4(hit.object.matrixWorld);
+    const dist = vertex.distanceTo(hit.point);
+    if (dist < nearestDist) { nearestDist = dist; nearestId = vertexIds[i]; }
+  });
+  return nearestId === null ? null : { particleId: nearestId, point: hit.point };
+}
+
 renderer.domElement.addEventListener("pointerdown", (event) => {
   pointerToNdc(event);
   raycaster.setFromCamera(pointerNdc, camera);
-  const hit = raycaster.intersectObjects(dots.children)[0];
-  if (!hit) return;
+  const picked = pickParticle();
+  if (!picked) return;
 
   // A drag beats an orbit — stop OrbitControls' own gesture handling for this pointer so it
   // doesn't also start panning the camera while a particle is being dragged.
   event.stopPropagation();
 
-  draggedParticleId = hit.object.userData.particleId;
-  hit.object.material = draggedDotMaterial;
+  draggedParticleId = picked.particleId;
+  const draggedDot = dots.children.find((d) => d.userData.particleId === draggedParticleId);
+  if (draggedDot) draggedDot.material = draggedDotMaterial;
 
   // Drag plane: through the picked point, facing the camera — the standard way to turn a 2D
   // mouse position into a 3D target without the user having to separately control depth.
   const cameraForward = new THREE.Vector3();
   camera.getWorldDirection(cameraForward);
-  dragPlane.setFromNormalAndCoplanarPoint(cameraForward, hit.point);
+  dragPlane.setFromNormalAndCoplanarPoint(cameraForward, picked.point);
 
-  send({ type: "drag_start", particleId: draggedParticleId, step: latestStep, x: hit.point.x, y: hit.point.y, z: hit.point.z });
+  send({ type: "drag_start", particleId: draggedParticleId, step: latestStep, x: picked.point.x, y: picked.point.y, z: picked.point.z });
   renderer.domElement.setPointerCapture(event.pointerId);
 }, { capture: true });
 

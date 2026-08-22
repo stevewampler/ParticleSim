@@ -895,7 +895,7 @@ this project has used since Phase 5.
       for pandas/Spark-style tooling) (§9.2)
 
 ## Phase 9 — Full visualization
-- [~] Camera: scripted (engine-evaluated) + manual (viewer-local) (§10.1).
+- [x] Camera: scripted (engine-evaluated) + manual (viewer-local) (§10.1).
       First sub-pass of Phase 9 — camera picked first since the frame
       protocol needs a camera field before renderer declarations (next
       sub-pass) have anything meaningful to add camera-relative info to.
@@ -937,15 +937,17 @@ this project has used since Phase 5.
       live (wind-blown) position, not a fixed point. Actual visual
       quality in a browser (does the orbit look smooth, is the flag
       framed well) is still unconfirmed by a human.
-      **Not done**: manual/viewer-local camera mode and the "interacting
-      with the viewport switches to manual, an explicit action returns to
-      scripted" toggle — deliberately deferred, since there's no orbit
-      control in the viewer yet for "manual" to mean anything; that's the
-      web-viewer-upgrade sub-pass, not this one.
-- [~] Renderers: particle/surface (dot/sphere/mesh) — the real opt-in
+      **Manual/viewer-local camera mode landed later, in the web-viewer
+      sub-pass** (below) once orbit controls actually existed for
+      "manual" to mean something — see that bullet for the scripted-vs-
+      manual toggle itself. Marking this bullet done now that both
+      halves exist.
+- [x] Renderers: particle/surface (dot/sphere/mesh) — the real opt-in
       system; Phase 3's debug-render override stays available as a
-      permanent fallback alongside it, not replaced (§10.2)
-- [~] Renderers: force (arrows for fields, lines w/ colorblind-safe
+      permanent fallback alongside it, not replaced (§10.2). Wired end to
+      end in this phase's fifth sub-pass — see the notes under the "force
+      renderers" bullet below, which covers this phase's work as a whole.
+- [x] Renderers: force (arrows for fields, lines w/ colorblind-safe
       breakProximity gradient for springs/dampers) (§10.2). Second
       sub-pass of Phase 9 — **declaration types and computation logic
       only, proven with unit tests; not yet wired into any wire protocol
@@ -995,12 +997,12 @@ this project has used since Phase 5.
       mean anything against), so they need their own design pass rather
       than being guessed at here. N-body/custom-force renderers are
       `[stretch]` per the spec itself.
-- [~] Web viewer (WebGL/three.js) + binary WebSocket protocol, full
+- [x] Web viewer (WebGL/three.js) + binary WebSocket protocol, full
       orbit/picking/camera controls — sole first-class viewer, upgrading
       from Phase 3's bare-bones renderer (§9.1, §10). Third sub-pass of
-      Phase 9. **Binary protocol + orbit controls done and server-side
-      verified; real mesh/sphere/arrow/colored-line rendering consuming
-      the previous sub-pass's renderer declarations is NOT done** — see
+      Phase 9 (mesh/sphere/arrow/colored-line rendering landed in the
+      fourth and fifth sub-passes below). Binary protocol + orbit
+      controls done and server-side verified — see
       below.
       **`particlesim.debug.BinaryFrame`**: replaces `DebugFrame`'s JSON
       text entirely (deleted, along with its test — genuinely unused
@@ -1090,15 +1092,68 @@ this project has used since Phase 5.
       201 and stayed there) — an unplanned but welcome extra proof that
       `MeshSprings`' per-edge breaking still works correctly under this
       wiring.
-      **Still not done**: `ParticleRenderer` (sphere/radius sizing),
-      `SurfaceRenderer` (shaded/wireframe mesh), and `ArrowRenderer`
-      (field-force sampling) remain declared types with computation logic
-      but no wire-protocol or viewer wiring — the wire format would need
-      per-particle style/radius, mesh triangle indices, and arrow sample
-      data added, plus (for particles/surfaces specifically) a worked
-      example that opts OUT of debug-render-all's implicit dot rendering,
-      which none of the existing demos do. Real remaining scope, not an
-      oversight.
+      **Fifth sub-pass: everything else wired — `ParticleRenderer`
+      (sphere sizing), `SurfaceRenderer` (shaded mesh), `ArrowRenderer`
+      (field sampling), and a dot-visibility filter.** Phase 9 is now
+      fully wired end to end, not just declared.
+      **`BinaryFrame` gained three more sections** (spheres `{i32 id,
+      f64 radius}`, meshes `{u8 wireframe, i32 triangleCount, triangles}`,
+      arrows `{f64 ox,oy,oz, f64 vx,vy,vz}`) plus an optional
+      `visibleIds` filter (`u8 flag, [i32 count, ids]`) — `null` (every
+      demo before this) draws every particle as a dot, unchanged;
+      non-null draws *only* the listed ids, letting a particle with no
+      renderer of its own (§10.2: "the individual cloth particles have
+      no renderer of their own — the mesh already shows them") stay
+      invisible as a standalone dot while still traveling in the base
+      particle list for mesh-vertex/line-endpoint lookups. All four
+      additions are pre-resolved data in `BinaryFrame.encode`'s
+      parameters (sphere radii, `SurfaceRenderer` triangle lists, sampled
+      `ArrowSample`s) — the encoder never evaluates a renderer
+      declaration itself, matching the existing `lineColors` pattern.
+      **`FlagDebugDemo` now implements the requirements doc's own
+      *extended* flag example almost exactly**: the cloth surface renders
+      as a shaded mesh (`SurfaceRenderer(scenario.triangles)`), the pole
+      particles render as small spheres (`poleSphereRadii`, radius 0.03)
+      so the anchor stays visible, wind gets an arrow renderer sampled
+      around the flag's footprint (`ArrowRenderer` over `Wind`, which
+      already implemented `UniformFieldForce` from the previous
+      sub-pass), and `visibleIds = poleIds` hides the cloth particles'
+      own dots since the mesh already shows them. Wind's raw ~6-8 m/s
+      magnitude is scaled ×0.15 purely for this demo's arrow *display* —
+      a presentation choice made in the demo, not a change to
+      `ArrowSampling`'s actual physical output.
+      **Picking survives mesh-only rendering**: with cloth particles
+      invisible as dots, the viewer's raycaster now also intersects
+      surface mesh objects, resolving a mesh-face hit to whichever of
+      its three vertex particles is nearest the click point
+      (`pickParticle` in `debug-viewer.html`, using the raycast hit's own
+      local face-vertex indices paired positionally with the triangle's
+      recorded particle ids — not a search/guess). Mesh geometry itself
+      is built with *shared* (indexed) vertices per unique particle id,
+      not one disconnected triangle per face, so `computeVertexNormals()`
+      produces smooth per-vertex shading instead of flat per-facet
+      shading.
+      **Verified server-side**: sampled a live `FlagDebugDemo` frame and
+      confirmed every number was sane, not just present — exactly 8
+      pole spheres all at radius 0.03, exactly 1 mesh with exactly 182
+      triangles (the closed-form correct count for an 8×14 grid:
+      `(8-1)*(14-1)*2`), exactly 8 visible ids (matching the pole count
+      precisely), and 36 arrow samples all sharing one vector (wind is
+      spatially uniform today, so every sample *should* match — and did).
+      **Still unverified**: the actual visual result and interaction feel
+      in a real browser (does the mesh shade convincingly, do arrows read
+      as wind, does mesh-face picking feel as precise as dot-picking) —
+      Chrome automation wasn't available in this environment for any of
+      Phase 9's client-side work, a standing caveat repeated across every
+      sub-pass here, not new to this one.
+      **Deferred, documented, not silently dropped**: N-body/custom-force
+      renderers (`[stretch]` per the spec itself), `stretch`/`force`
+      colorBy variants (no single cross-`PairwiseForce`-type definition,
+      per the previous sub-pass's note), spatially-varying arrow fields
+      (blocked on `UniformFieldForce` gaining real position-dependence,
+      itself blocked on a concrete scenario needing gusty/spatial wind),
+      and YAML renderer declarations (same deferred-to-a-second-pass
+      status as every other post-Phase-7 YAML gap).
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

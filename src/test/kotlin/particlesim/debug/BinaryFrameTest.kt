@@ -2,8 +2,11 @@ package particlesim.debug
 
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
+import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.SurfaceRenderer
+import particlesim.surface.Triangle
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -72,6 +75,79 @@ class BinaryFrameTest {
             listOf(DecodedConnection(a, b, red), DecodedConnection(b, c, Color.DEFAULT_LINE)),
             decoded.connections,
         )
+    }
+
+    @Test
+    fun `round-trips sphere radii`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+        val b = store.create(position = Vector3.ZERO)
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = listOf(a, b), connections = emptyList(),
+            sphereRadii = mapOf(a to 0.5),
+        )
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(listOf(DecodedSphere(a, 0.5)), decoded.spheres, "only a has a declared radius")
+    }
+
+    @Test
+    fun `round-trips meshes, including the wireframe flag`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+        val b = store.create(position = Vector3.ZERO)
+        val c = store.create(position = Vector3.ZERO)
+        val mesh = SurfaceRenderer(triangles = listOf(Triangle(a, b, c)), wireframe = true)
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = listOf(a, b, c), connections = emptyList(),
+            meshes = listOf(mesh),
+        )
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(listOf(DecodedMesh(wireframe = true, triangles = listOf(Triangle(a, b, c)))), decoded.meshes)
+    }
+
+    @Test
+    fun `round-trips arrow samples`() {
+        val store = ParticleStore()
+        val samples = listOf(
+            ArrowSample(origin = Vector3(1.0, 0.0, 0.0), vector = Vector3(0.0, 1.0, 0.0)),
+            ArrowSample(origin = Vector3(2.0, 0.0, 0.0), vector = Vector3(0.0, 2.0, 0.0)),
+        )
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(),
+            arrowSamples = samples,
+        )
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(samples, decoded.arrows)
+    }
+
+    @Test
+    fun `visibleIds is null by default, meaning every demo built before this is unaffected`() {
+        val store = ParticleStore()
+        val id = store.create(position = Vector3.ZERO)
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(id), connections = emptyList())
+
+        assertEquals(null, BinaryFrame.decode(buffer).visibleIds)
+    }
+
+    @Test
+    fun `an explicit visibleIds set round-trips exactly`() {
+        val store = ParticleStore()
+        val cloth = store.create(position = Vector3.ZERO)
+        val pole = store.create(position = Vector3.ZERO)
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = listOf(cloth, pole), connections = emptyList(),
+            visibleIds = setOf(pole),
+        )
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(setOf(pole), decoded.visibleIds, "only the pole particle should be marked visible as a standalone dot")
     }
 
     @Test

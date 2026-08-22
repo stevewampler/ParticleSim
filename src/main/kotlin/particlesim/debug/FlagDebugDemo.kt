@@ -6,18 +6,20 @@ import particlesim.examples.buildFlag
 import particlesim.physics.Constraint
 import particlesim.physics.DragConstraint
 import particlesim.physics.Integrator
+import particlesim.physics.Wind
+import particlesim.render.ArrowRenderer
+import particlesim.render.ArrowSampling
 import particlesim.render.CameraFunction
 import particlesim.render.CameraPose
 import particlesim.render.ColorRamp
 import particlesim.render.SceneQueryImpl
+import particlesim.render.SurfaceRenderer
 import kotlin.math.cos
 import kotlin.math.sin
 
 /**
  * A visible run of §7.3's flag worked example through Phase 3's debug renderer: `./gradlew
- * runFlagDemo`, then open the URL it prints. Only structural-edge lines are drawn (not
- * shear/bend) — those are diagonal/skip-vertex connections that would clutter a debug
- * wireframe view without adding to its readability as "a flag".
+ * runFlagDemo`, then open the URL it prints.
  *
  * Also §10.1's first worked example: a scripted camera orbiting the cloth's centroid while
  * looking at the free corner (farthest from the pole, so the most visually dynamic point) —
@@ -27,16 +29,22 @@ import kotlin.math.sin
  * be grabbed and pulled, same as the spring-chain's, but here it demonstrates propagation
  * through a whole sheet instead of a line.
  *
- * And §10.2's `breakProximity` line-renderer coloring — almost exactly the requirements doc's
- * own extended flag example ("in a strong enough gust you'll see the cloth redden right at the
- * seam that's about to tear"). `buildFlag`'s structural springs are infinite-threshold (never
- * break) by default for every other caller (the golden-file tests need that exact, unchanged
- * behavior); this demo alone opts into a finite one purely to have something worth coloring.
+ * And §10.2's full renderer-declaration set — almost exactly the requirements doc's own
+ * *extended* flag example: "the flag surface itself renders as a shaded mesh, the pole-edge
+ * particles render as small spheres so the anchor is visible, and the wind force gets an
+ * arrow renderer sampled around the flag. The individual cloth particles have no renderer of
+ * their own — the mesh already shows them — but the structural springs do get a
+ * `breakProximity`-colored line renderer." `visibleIds` is what makes the cloth particles
+ * mesh-only: only the pole group is in it, so cloth particles carry position data (for the
+ * mesh's vertices and the structural lines) without ever drawing their own dot. Picking still
+ * works on mesh-only particles — the viewer's raycaster hits mesh faces too, resolving to
+ * whichever vertex is nearest the hit point (see debug-viewer.html's `pickParticle`).
  */
 fun main() {
     val structuralBreakThreshold = 0.02 // ~13% of restLength (spacing=0.15) - tune by watching it, not guessing
     val scenario = buildFlag(rows = 8, cols = 14, structuralBreakThreshold = structuralBreakThreshold)
     val structural = scenario.meshSprings[0]
+    val wind = scenario.forces.filterIsInstance<Wind>().single()
     val flagTip = scenario.grid.last().last()
     val scene = SceneQueryImpl(scenario.store, scenario.groups)
     val camera = CameraFunction { t, s ->
@@ -45,6 +53,16 @@ fun main() {
             lookAt = s.position(flagTip),
         )
     }
+
+    val poleIds = scenario.groups.membersOf("pole")
+    val poleSphereRadii = poleIds.associateWith { 0.03 }
+    val clothMesh = SurfaceRenderer(scenario.triangles, wireframe = false)
+    // A modest region around the flag's own footprint (x: 0..~2.1, y: 0..~-1.2) at a resolution
+    // sparse enough not to clutter a flag this size with dozens of overlapping arrows.
+    val windArrows = ArrowRenderer(wind, regionMin = Vector3(-0.5, -2.0, -1.0), regionMax = Vector3(2.5, 0.5, 1.0), resolution = 1.0)
+    // Wind's raw m/s magnitude (~6-8) would draw arrows several times the flag's own size;
+    // scaled down purely for this demo's display, not a claim about the physical value itself.
+    val arrowVisualScale = 0.15
 
     val dragQueue = DragMessageQueue()
     val renderer = DebugRenderer(onTextMessage = { text ->
@@ -88,11 +106,16 @@ fun main() {
         }
         val withProximity = structural.activeConnectionsWithBreakProximity(scenario.store)
         val lineColors = withProximity.associate { (a, b, proximity) -> (a to b) to ColorRamp.blueOrange(proximity) }
+        val arrowSamples = ArrowSampling.sample(windArrows, t).map { it.copy(vector = it.vector * arrowVisualScale) }
         renderer.broadcast(
             t, step, scenario.store, allIds,
             connections = withProximity.map { (a, b, _) -> a to b },
             camera = camera.evaluate(t, scene),
             lineColors = lineColors,
+            sphereRadii = poleSphereRadii,
+            meshes = listOf(clothMesh),
+            arrowSamples = arrowSamples,
+            visibleIds = poleIds,
         )
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)

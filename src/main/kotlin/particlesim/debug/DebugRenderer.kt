@@ -1,16 +1,20 @@
 package particlesim.debug
 
 import particlesim.core.ParticleStore
+import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.SurfaceRenderer
 
 /**
- * The debug-render-all viewer entry point (§10.2's `--render-all`): starts the viewer's HTTP
- * page and WebSocket stream, and broadcasts a [BinaryFrame] each time the caller's physics
- * loop calls [broadcast]. Every particle draws as a dot, every connection line passed in as a
- * line — there's no renderer-declaration mechanism wired in here (§10.2's real opt-in system
- * exists as `particlesim.render` types, but nothing consumes them over the wire yet), and
- * colliders/surfaces aren't in `--render-all` yet.
+ * The debug-render-all viewer entry point (§10.2's `--render-all` and, now, the real opt-in
+ * renderer system too — one wire format serves both): starts the viewer's HTTP page and
+ * WebSocket stream, and broadcasts a [BinaryFrame] each time the caller's physics loop calls
+ * [broadcast]. Every particle draws as a dot and every connection as a plain-blue line by
+ * default; a caller opts into §10.2's declared renderers (sphere sizing, shaded/wireframe
+ * meshes, arrow-sampled fields, `colorBy`-driven line colors, or hiding a particle's own dot
+ * entirely) via this method's trailing parameters, all defaulted to "off" so every demo built
+ * before this needs zero changes.
  */
 class DebugRenderer(
     private val webSocketPort: Int = 8887,
@@ -34,8 +38,14 @@ class DebugRenderer(
         connections: List<Pair<Int, Int>>,
         camera: CameraPose? = null,
         lineColors: Map<Pair<Int, Int>, Color> = emptyMap(),
+        sphereRadii: Map<Int, Double> = emptyMap(),
+        meshes: List<SurfaceRenderer> = emptyList(),
+        arrowSamples: List<ArrowSample> = emptyList(),
+        visibleIds: Set<Int>? = null,
     ) {
-        wsServer.broadcastFrame(BinaryFrame.encode(t, step, store, ids, connections, camera, lineColors))
+        wsServer.broadcastFrame(
+            BinaryFrame.encode(t, step, store, ids, connections, camera, lineColors, sphereRadii, meshes, arrowSamples, visibleIds),
+        )
     }
 
     fun stop() {
