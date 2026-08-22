@@ -15,10 +15,14 @@ class ViewerHttpServer(port: Int) {
     private val server = HttpServer.create(InetSocketAddress(port), 0)
 
     init {
-        val page = javaClass.getResourceAsStream("/particlesim/debug-viewer.html")
-            ?.readBytes()
-            ?: error("missing bundled resource particlesim/debug-viewer.html")
+        // Re-read from the classpath on every request rather than caching at startup: this is a
+        // dev/debug tool, and a JVM demo process can run for many minutes while the HTML itself
+        // is iterated on — re-reading means `./gradlew processResources` (seconds) picks up an
+        // edit instead of a full demo restart (a ~20s TIME_WAIT wait for the WebSocket port).
         server.createContext("/") { exchange ->
+            val page = javaClass.getResourceAsStream("/particlesim/debug-viewer.html")
+                ?.readBytes()
+                ?: error("missing bundled resource particlesim/debug-viewer.html")
             exchange.responseHeaders.add("Content-Type", "text/html; charset=utf-8")
             exchange.sendResponseHeaders(200, page.size.toLong())
             exchange.responseBody.use { it.write(page) }

@@ -1199,21 +1199,76 @@ Chrome automation wasn't available to this session):
   color.
 
 ## Phase 10 — Viewer UI (§10.3, new requirements)
-- [ ] Global toggles (grid, axes)
-- [ ] Outliner: persistent list of every group/force/constraint/collider/
-      surface, reachable regardless of current 3D visibility — the answer
-      to "how do I open an invisible object's panel"
-- [ ] Per-object panel: visibility toggles for whatever that object type
-      can render, plus its renderer-specific settings (§10.2)
-- [ ] Right-click a rendered object in the 3D view to open its panel
-      directly
-- [ ] Selection & inspection: live numeric readout for a selected object
-      (position/velocity, force magnitude, breakProximity, ...)
-- [ ] Color legend for whatever `colorBy` gradient (§10.2) is active
-- [ ] Stats overlay: particle count, step rate, physics-vs-wall-clock lag
+
+First sub-pass landed: the three viewer-local pieces that need zero wire-
+protocol change and no new engine-side naming/identity concept, all in
+`debug-viewer.html`. Everything past this point (outliner, per-object
+panels, right-click, selection/inspection, color legend) is blocked on a
+real prerequisite, not just unstarted — see the note below.
+
+- [x] Global toggles (grid, axes) — `gridHelper`/`axesHelper` promoted from
+      anonymous `scene.add(new THREE.GridHelper(...))` calls to named
+      consts so a checkbox's `change` listener can flip `.visible`
+      directly; no other state to keep in sync.
+- [x] Stats overlay: particle count, step rate, physics-vs-wall-clock lag
       (a user-visible readout of §9.1's drop-frames-not-physics pacing
-      policy)
-- [ ] Camera bookmarks: save/restore a handful of named manual views
+      policy). Two things worth recording since they're easy to get wrong:
+      **lag** is the *drift* between wall-clock-elapsed and sim-time-
+      elapsed since an anchor frame, not `now - t` — anchored fresh on
+      every `ws.onopen` (including reconnect-to-a-different-process), so a
+      viewer that attaches mid-run reads ~0 lag at that moment instead of
+      "however far into the run it is." **Step rate** is `Δstep/Δwallclock`
+      off the frame's own `step` counter, sampled roughly once a second —
+      deliberately not frames-received-per-second, which differs from the
+      true physics rate by exactly `stepsPerFrame` and would misreport
+      whenever rendered frames drop (by design, §9.1).
+- [x] Camera bookmarks: save/restore a handful of named manual views.
+      Session-only (in-memory `Map`, no persistence — nothing in §10.3
+      asks for cross-reload persistence and no other viewer state has it
+      either). Restoring one calls `enterManualCamera()` first — the
+      existing scripted/manual split (§10.1) only ever applies a scripted
+      pose while `cameraMode === "scripted"`, so setting the camera while
+      still scripted would just get overwritten by the very next frame,
+      a trap that's easy to hit by testing only from manual mode.
+- [x] **Dev-loop fix, not spec'd but needed to build the above sanely**:
+      `ViewerHttpServer` cached `debug-viewer.html`'s bytes once at
+      construction; changed to re-read from the classpath per request.
+      A demo process runs for minutes while the HTML itself gets
+      iterated on many times, and re-reading means `./gradlew
+      processResources` (well under a second) picks up an edit instead
+      of a full demo restart (~20s TIME_WAIT wait for the WebSocket
+      port to clear). Verified live: edited the page title, ran
+      `processResources` with the demo still running, `curl`'d the
+      unchanged-JVM server and got the new title back.
+      **Verification, honestly**: Chrome automation is still not actually
+      connected in this environment (`tabs_context_mcp` fails with
+      "Browser extension is not connected," checked twice before and
+      after this sub-pass) — the same standing limitation as all of
+      Phase 9's client-side work, not newly discovered. What *was*
+      verified: `node --check` on the extracted module script (valid
+      syntax), every `getElementById` call cross-checked against an
+      actual `id=` in the HTML (no null-reference typos), a live `curl`
+      against the running demo confirming the new markup is actually
+      served, and the full 238-test suite staying green (no engine code
+      changed except `ViewerHttpServer`). **Not verified**: whether the
+      panel is readable/usable, whether the lag/rate numbers look sane
+      against a real running demo, whether bookmark restore actually
+      feels right — all of that needs a human (or a working browser
+      connection) opening the page.
+- [ ] Outliner, per-object panels, right-click-to-open, selection &
+      inspection, color legend — **blocked on a real prerequisite, not
+      just next in line**: §10.3 wants these reachable for "every group,
+      named force, constraint, collider, and surface." Groups already
+      have names (`Groups`); `PlaneCollider` already takes a `name`; but
+      forces and surfaces have *no* name→object registry today —
+      renderers (§10.2) reference the actual Kotlin force/triangle-list
+      objects directly, confirmed still true reading Phase 9's own notes
+      above. Needs a naming/identity design pass across physics
+      declarations before any of this can be more than ad-hoc strings
+      hand-typed into the viewer — and it's the same registry YAML
+      renderer declarations (§10.2's own deferred gap) will eventually
+      need too, so it's worth doing once, deliberately, not improvised
+      here.
 - [ ] Time controls (pause, speed multiplier, step-once) — already
       specified in §9.1, not yet built anywhere; this is the UI surface
       for it

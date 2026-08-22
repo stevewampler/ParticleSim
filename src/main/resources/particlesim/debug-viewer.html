@@ -21,12 +21,55 @@
     font: 12px/1.4 monospace; color: #fff; background: rgba(0,0,0,0.5);
     padding: 4px 8px; border-radius: 4px; display: none; align-items: center; gap: 6px;
   }
+  #controlPanel {
+    position: fixed; bottom: 8px; left: 8px; z-index: 1;
+    font: 12px/1.5 monospace; color: #ddd; background: rgba(0,0,0,0.55);
+    padding: 8px 10px; border-radius: 4px; min-width: 170px;
+  }
+  #controlPanel h4 {
+    margin: 0 0 4px; font-size: 10px; color: #9cf; font-weight: normal;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  #controlPanel section { margin-bottom: 10px; }
+  #controlPanel section:last-child { margin-bottom: 0; }
+  #statsPanel { white-space: pre; color: #9f9; }
+  #bookmarkList { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
+  #bookmarkList .bookmarkRow { display: flex; gap: 4px; align-items: center; }
+  #bookmarkList button, #bookmarkForm button {
+    font: 11px monospace; cursor: pointer; background: rgba(255,255,255,0.1);
+    color: #ddd; border: 1px solid rgba(255,255,255,0.25); border-radius: 3px;
+  }
+  #bookmarkList .goBtn { flex: 1; text-align: left; padding: 2px 4px; }
+  #bookmarkForm { display: flex; gap: 4px; }
+  #bookmarkNameInput {
+    width: 90px; font: 11px monospace; background: rgba(255,255,255,0.1);
+    color: #ddd; border: 1px solid rgba(255,255,255,0.25); border-radius: 3px;
+  }
 </style>
 </head>
 <body>
 <div id="status">connecting…</div>
 <button id="returnToScripted">return to scripted camera</button>
 <label id="meshEdgesToggle"><input type="checkbox" id="meshEdgesCheckbox"> show mesh edges</label>
+<div id="controlPanel">
+  <section>
+    <h4>display</h4>
+    <label><input type="checkbox" id="gridToggle" checked> grid</label><br>
+    <label><input type="checkbox" id="axesToggle" checked> axes</label>
+  </section>
+  <section>
+    <h4>stats</h4>
+    <div id="statsPanel">–</div>
+  </section>
+  <section>
+    <h4>camera bookmarks</h4>
+    <div id="bookmarkList"></div>
+    <div id="bookmarkForm">
+      <input type="text" id="bookmarkNameInput" placeholder="name" maxlength="20">
+      <button id="saveBookmarkBtn">save</button>
+    </div>
+  </section>
+</div>
 <script type="importmap">
 {
   "imports": {
@@ -67,8 +110,14 @@ window.addEventListener("resize", () => {
 });
 
 // +Y up, right-handed (§11) — matches three.js's own default convention, so no axis remap.
-scene.add(new THREE.GridHelper(20, 20, 0x444444, 0x222222));
-scene.add(new THREE.AxesHelper(1));
+// Named (not anonymous) so §10.3's global toggles can flip .visible on them directly.
+const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
+scene.add(gridHelper);
+const axesHelper = new THREE.AxesHelper(1);
+scene.add(axesHelper);
+
+document.getElementById("gridToggle").addEventListener("change", (e) => { gridHelper.visible = e.target.checked; });
+document.getElementById("axesToggle").addEventListener("change", (e) => { axesHelper.visible = e.target.checked; });
 
 // Lighting for §10.2's shaded surface meshes — MeshBasicMaterial (dots, wireframe meshes)
 // doesn't need this, but a solid MeshStandardMaterial surface would render pure black without it.
@@ -98,6 +147,55 @@ controls.addEventListener("start", enterManualCamera);
 returnToScriptedEl.addEventListener("click", () => {
   cameraMode = "scripted";
   returnToScriptedEl.style.display = "none";
+});
+
+// --- Camera bookmarks (§10.3) -------------------------------------------------------------
+// Session-only (in-memory), not persisted across a page reload — nothing in §10.3 asks for
+// cross-session persistence, and viewer state today is generally ephemeral (mesh-edges toggle,
+// global display toggles above are the same). Restoring a bookmark must switch into manual mode
+// first: applyFrame only ever writes the scripted pose while cameraMode is "scripted" (see
+// above), so setting the camera here while still scripted would just get overwritten by the
+// very next frame.
+const bookmarkListEl = document.getElementById("bookmarkList");
+const bookmarkNameInputEl = document.getElementById("bookmarkNameInput");
+const bookmarks = new Map(); // name -> { position: THREE.Vector3, target: THREE.Vector3 }
+
+function goToBookmark(name) {
+  const bookmark = bookmarks.get(name);
+  if (!bookmark) return;
+  enterManualCamera(); // may set controls.target to lastScriptedLookAt - overwritten right below
+  camera.position.copy(bookmark.position);
+  controls.target.copy(bookmark.target);
+  controls.update();
+}
+
+function renderBookmarkList() {
+  bookmarkListEl.innerHTML = "";
+  for (const name of bookmarks.keys()) {
+    const row = document.createElement("div");
+    row.className = "bookmarkRow";
+    const goBtn = document.createElement("button");
+    goBtn.className = "goBtn";
+    goBtn.textContent = name;
+    goBtn.addEventListener("click", () => goToBookmark(name));
+    const deleteBtn = document.createElement("button");
+    deleteBtn.textContent = "×";
+    deleteBtn.title = `remove "${name}"`;
+    deleteBtn.addEventListener("click", () => { bookmarks.delete(name); renderBookmarkList(); });
+    row.append(goBtn, deleteBtn);
+    bookmarkListEl.appendChild(row);
+  }
+}
+
+document.getElementById("saveBookmarkBtn").addEventListener("click", () => {
+  const name = bookmarkNameInputEl.value.trim();
+  if (!name) return;
+  bookmarks.set(name, { position: camera.position.clone(), target: controls.target.clone() });
+  bookmarkNameInputEl.value = "";
+  renderBookmarkList();
+});
+bookmarkNameInputEl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") document.getElementById("saveBookmarkBtn").click();
 });
 
 // Every particle as a dot by default (§10.2 --render-all); a particle with a declared sphere
@@ -368,6 +466,58 @@ function decodeFrame(buffer) {
   return { t, step, particles, connections, camera: cam, spheres, meshes, arrows, visibleIds };
 }
 
+// --- Stats overlay (§10.3) ----------------------------------------------------------------
+// Particle count is a direct frame readout; step rate and lag both need a wall-clock anchor,
+// reset on every fresh connection (not just once ever) so reconnecting to a *different* demo
+// process - whose own `t`/`step` restart near zero - doesn't compare against a stale baseline
+// from the previous process and report a nonsensical lag/rate forever.
+const statsPanelEl = document.getElementById("statsPanel");
+let statsAnchorWallMs = null;
+let statsAnchorT = null;
+let statsRateSampleWallMs = null;
+let statsRateSampleStep = null;
+let statsStepRate = 0;
+
+function resetStats() {
+  statsAnchorWallMs = null;
+  statsAnchorT = null;
+  statsRateSampleWallMs = null;
+  statsRateSampleStep = null;
+  statsStepRate = 0;
+}
+
+function updateStats(frame) {
+  const nowMs = performance.now();
+  if (statsAnchorWallMs === null) {
+    statsAnchorWallMs = nowMs;
+    statsAnchorT = frame.t;
+    statsRateSampleWallMs = nowMs;
+    statsRateSampleStep = frame.step;
+  }
+
+  // Lag (§9.1's pacing policy, made visible): drift between wall-clock elapsed and sim-time
+  // elapsed since the anchor frame, not an absolute t-vs-wallclock difference - a viewer that
+  // *attaches* mid-run must read ~0 lag at that moment, not "however far into the run it is."
+  const wallElapsedS = (nowMs - statsAnchorWallMs) / 1000;
+  const simElapsedS = frame.t - statsAnchorT;
+  const lagS = wallElapsedS - simElapsedS;
+
+  // Step rate from Δstep/Δwallclock (the engine's own step counter), sampled roughly once a
+  // second - *not* frames-received-per-second, which differs from the true physics rate by
+  // exactly stepsPerFrame and would misreport whenever rendered frames drop (by design, §9.1).
+  const sinceSampleMs = nowMs - statsRateSampleWallMs;
+  if (sinceSampleMs >= 1000) {
+    statsStepRate = ((frame.step - statsRateSampleStep) / sinceSampleMs) * 1000;
+    statsRateSampleWallMs = nowMs;
+    statsRateSampleStep = frame.step;
+  }
+
+  statsPanelEl.textContent =
+    `particles: ${frame.particles.length}\n` +
+    `steps/s:   ${statsStepRate.toFixed(0)}\n` +
+    `lag:       ${lagS >= 0 ? "+" : ""}${lagS.toFixed(2)}s`;
+}
+
 let socket = null;
 
 function connect() {
@@ -376,7 +526,7 @@ function connect() {
   const ws = new WebSocket(`ws://${location.hostname}:8887`);
   ws.binaryType = "arraybuffer";
   socket = ws;
-  ws.onopen = () => { statusEl.textContent = "connected"; };
+  ws.onopen = () => { statusEl.textContent = "connected"; resetStats(); };
   ws.onclose = () => { statusEl.textContent = "disconnected — retrying…"; setTimeout(connect, 1000); };
   ws.onerror = () => ws.close();
   ws.onmessage = (event) => {
@@ -384,6 +534,7 @@ function connect() {
     const cameraTag = cameraMode === "manual" ? " [manual camera]" : "";
     statusEl.textContent = `t=${frame.t.toFixed(3)}  step=${frame.step}  particles=${frame.particles.length}${cameraTag}`;
     applyFrame(frame);
+    updateStats(frame);
   };
 }
 connect();
