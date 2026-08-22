@@ -24,6 +24,11 @@ class ViewerHttpServer(port: Int) {
                 ?.readBytes()
                 ?: error("missing bundled resource particlesim/debug-viewer.html")
             exchange.responseHeaders.add("Content-Type", "text/html; charset=utf-8")
+            // Same dev-loop reasoning as re-reading the file above: without this, a browser can
+            // silently serve a stale cached copy across a reload (no ETag/Last-Modified either,
+            // so there's nothing for it to revalidate against) - actively misleading during
+            // exactly the kind of edit-reload-retest cycle this server exists to support.
+            exchange.responseHeaders.add("Cache-Control", "no-store")
             exchange.sendResponseHeaders(200, page.size.toLong())
             exchange.responseBody.use { it.write(page) }
         }

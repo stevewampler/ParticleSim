@@ -1487,10 +1487,50 @@ real prerequisite, not just unstarted — see the note below.
       262 green.
       **Still separate, real future work**: right-click-to-open (only
       outliner-click is wired), selection & inspection's live numeric
-      readout (this panel's group particle count is a snapshot from
-      registry-rebuild time, not updated every frame), the color legend,
-      and a force-visibility toggle (needs the source-tag protocol
-      extension noted above).
+      readout, the color legend, and a force-visibility toggle (needs the
+      source-tag protocol extension noted above).
+- [x] **First real human browser testing of this feature — two findings,
+      both root-caused by reading the code, not guessed**:
+      1. **Toggling "cloth"/"pole" looked inconsistent.** Root cause: in
+         `Flag.kt`, every pole-edge particle is a member of *both* the
+         "cloth" group (added first, with the rest of the grid) *and*
+         the "pole" group (added after) — a pre-existing Phase 1 design
+         choice, not introduced by this feature. `FlagDebugDemo` also
+         sends `visibleIds = poleIds`, so cloth's other 104 members are
+         never drawn as dots regardless of any toggle. Net effect: both
+         checkboxes control the *same* 8 dots via the hide-toggle's union
+         rule, and whether "cloth" visibly does anything depends on
+         "pole"'s current state too — confusing, but not random.
+         **Fix (user chose "clarify the panel" over changing `Flag.kt`'s
+         group model or leaving it unexplained)**: the group panel now
+         shows a live `"N particle(s) — M drawable as a dot right now"`
+         line, so the gap between total membership and what's actually
+         eligible to draw is visible immediately instead of discovered by
+         confused clicking. Updates every frame via a *new, separate*
+         `updateGroupPanelInfo()` — deliberately touching only that text
+         node, never recreating the checkbox element the way a full
+         `renderObjectPanel()` rebuild would. Recreating the checkbox
+         every frame was considered and rejected: a WebSocket frame
+         arriving between a person's mousedown and mouseup could detach
+         the very checkbox the browser is mid-click on, turning an
+         occasional click into a silently lost one — a second, subtler
+         possible source of exactly the "sometimes works" symptom this
+         fix was meant to explain, not something to risk introducing.
+      2. **"cloth-mesh: show mesh" didn't hide everything visually
+         called "the mesh."** The grid-pattern lines that persisted are
+         the structural spring *connections* (`structural.activeConnections()`
+         in `FlagDebugDemo`) — a `Force`'s line rendering, entirely
+         separate from the `Surface`'s shaded mesh the toggle actually
+         controls. The structural force isn't named, so it has no
+         outliner entry and no toggle yet — exactly the already-documented
+         "forces: visibility toggle not yet available" gap, not a defect
+         in the surface toggle itself (which correctly hides only the
+         mesh, as designed). **User chose to leave this as a documented
+         gap** rather than extend scope now to name/tag forces.
+      Also fixed, surfaced by "confirm nothing's stale during testing":
+      `ViewerHttpServer` sent no cache headers at all, so a browser could
+      silently serve a stale cached copy of the page across a reload —
+      added `Cache-Control: no-store`, verified via `curl -D -`.
 - [ ] Time controls (pause, speed multiplier, step-once) — already
       specified in §9.1, not yet built anywhere; this is the UI surface
       for it
