@@ -1255,20 +1255,69 @@ real prerequisite, not just unstarted — see the note below.
       against a real running demo, whether bookmark restore actually
       feels right — all of that needs a human (or a working browser
       connection) opening the page.
+- [x] **Prerequisite closed**: name→object registry for forces and
+      surfaces. Two gaps, closed separately:
+      **Surfaces had no identity at all** — just a bare `List<Triangle>`
+      passed around, unlike `Force`/`Collider`, which already carried an
+      optional `name: String?`. New `particlesim.surface.Surface`
+      (`data class Surface(val triangles: List<Triangle>, val name:
+      String? = null)`) gives a mesh the same optional-name convention.
+      `SurfaceRenderer` now holds the `Surface` itself, not a raw
+      triangle list, specifically so the outliner can later answer "is
+      this named surface currently rendered?" by object identity rather
+      than two independently-built triangle lists that happen to match.
+      `Wind` deliberately keeps taking `List<Triangle>` unchanged — it
+      only ever acts on geometry and already has its own identity via
+      its own `name`, so it doesn't need to know about `Surface` at all.
+      **`SceneRegistry`** (`particlesim.render`): the actual registry —
+      `SceneRegistry.build(forces, surfaces)` filters to entries with a
+      non-null `name` (an unnamed force/surface still works physically,
+      it's just not individually reachable, the same "nothing shows up
+      unless it opts in" policy §10.2 already applies to renderers) and
+      returns `Map<String, Force>`/`Map<String, Surface>`, `LinkedHashMap`-
+      backed so outliner order matches scene-authored order rather than
+      hash order. Names are unique **within their own kind only** — a
+      force and a surface may share a name with zero ambiguity, since
+      the outliner lists them in separate sections; a duplicate *within*
+      one kind fails eagerly at `build()` (an ambiguous outliner entry is
+      an authoring mistake, not something to render silently-wrong).
+      Granularity is documented explicitly in the class doc: one
+      `MeshSprings` instance (hundreds of edges) registers as *one* named
+      force, matching §10.3's "a force's current magnitude" framing —
+      reaching a single edge within it needs a different mechanism this
+      registry deliberately doesn't attempt.
+      **`buildFlag` is the first real (not hypothetical) consumer**: its
+      cloth mesh is now a named `Surface` (`"cloth-mesh"`, deliberately
+      *not* reusing the cloth particle group's own `"cloth"` name — two
+      outliner entries both labeled `flag.cloth`, one a Group and one a
+      Surface, would look like a bug to anyone with no reason to know
+      groups and surfaces are different namespaces underneath) and its
+      `Wind` force is now named `"wind"`, both correctly re-namespaced
+      under an `instanceName` via the existing `ShapePlacement` mechanism
+      (`FlagTest`, 3 new tests).
+      **Verified two ways**: `SceneRegistryTest` (5 tests — named-only
+      filtering, duplicate-within-kind rejection, same-name-across-kinds
+      allowed, `LinkedHashMap` order preservation, empty input) plus a
+      live server-side check against a running `FlagDebugDemo` confirming
+      the `Surface` refactor changed nothing observable over the wire —
+      112 particles, 1 mesh at exactly 182 triangles, 8 spheres, 36
+      arrows, identical to Phase 9's own previously-verified numbers.
+      **Deliberately out of scope for this pass** (per its own framing —
+      a prerequisite design pass, not the outliner itself): `Constraint`
+      still has no `name` field at all (unlike `Force`/`Collider`), and
+      `Groups` has no way to enumerate *all* group names (only look up a
+      specific one) — both real gaps for a complete outliner, neither
+      blocking what forces/surfaces needed. Nothing here touches
+      `BinaryFrame`'s wire layout or `debug-viewer.html` — transmitting
+      the registry and actually building outliner UI is the next
+      sub-pass, not bundled into this one.
 - [ ] Outliner, per-object panels, right-click-to-open, selection &
-      inspection, color legend — **blocked on a real prerequisite, not
-      just next in line**: §10.3 wants these reachable for "every group,
-      named force, constraint, collider, and surface." Groups already
-      have names (`Groups`); `PlaneCollider` already takes a `name`; but
-      forces and surfaces have *no* name→object registry today —
-      renderers (§10.2) reference the actual Kotlin force/triangle-list
-      objects directly, confirmed still true reading Phase 9's own notes
-      above. Needs a naming/identity design pass across physics
-      declarations before any of this can be more than ad-hoc strings
-      hand-typed into the viewer — and it's the same registry YAML
-      renderer declarations (§10.2's own deferred gap) will eventually
-      need too, so it's worth doing once, deliberately, not improvised
-      here.
+      inspection, color legend — the forces/surfaces half of the
+      prerequisite above is done; still needed before this can start:
+      a `name` field on `Constraint` (mirroring `Force`/`Collider`) and a
+      way for `Groups` to enumerate every group name it holds, plus
+      extending `SceneRegistry` to cover those two kinds and wiring the
+      whole thing into the wire protocol and viewer.
 - [ ] Time controls (pause, speed multiplier, step-once) — already
       specified in §9.1, not yet built anywhere; this is the UI surface
       for it

@@ -66,7 +66,7 @@ fun main() {
 
     val poleIds = scenario.groups.membersOf("pole")
     val poleSphereRadii = poleIds.associateWith { 0.03 }
-    val clothMesh = SurfaceRenderer(scenario.triangles, wireframe = false)
+    val clothMesh = SurfaceRenderer(scenario.surface, wireframe = false)
     // A modest region around the flag's own footprint (x: 0..~2.1, y: 0..~-1.2) at a resolution
     // sparse enough not to clutter a flag this size with dozens of overlapping arrows.
     val windArrows = ArrowRenderer(wind, regionMin = Vector3(-0.5, -2.0, -1.0), regionMax = Vector3(2.5, 0.5, 1.0), resolution = 1.0)

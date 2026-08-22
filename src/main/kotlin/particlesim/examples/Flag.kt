@@ -12,7 +12,7 @@ import particlesim.physics.MeshSprings
 import particlesim.physics.UniformGravity
 import particlesim.physics.Wind
 import particlesim.surface.Grid
-import particlesim.surface.Triangle
+import particlesim.surface.Surface
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -34,7 +34,12 @@ data class FlagScenario(
     val constraints: List<Constraint>,
     /** `grid[row][col]` particle ids — row 0..rows-1, col 0 is the pole edge. */
     val grid: List<List<Int>>,
-    val triangles: List<Triangle>,
+    /** The cloth mesh, named (§10.3's name→object registry) rather than a bare `List<Triangle>` —
+     * deliberately a distinct local name from the cloth particle group's own "cloth", not the
+     * same string reused across the two namespaces: an outliner listing both a Group and a
+     * Surface labeled identically "flag.cloth" would look like a bug to someone who has no
+     * reason to know groups and surfaces are different namespaces underneath. */
+    val surface: Surface,
     val meshSprings: List<MeshSprings>,
 )
 
@@ -106,6 +111,7 @@ fun buildFlag(
         triangles,
         VectorExpr.of { t -> Vector3(6.0 + 2.0 * sin(t * 0.7), 0.3 * sin(t * 1.3), 0.8 * cos(t * 0.9)) },
         density = 1.2,
+        name = placement.name("wind"),
     )
     val gravity = UniformGravity(clothGroup, Vector3(0.0, -9.8, 0.0))
 
@@ -117,7 +123,7 @@ fun buildFlag(
         forces = listOf(gravity, wind, structural, shear, bend),
         constraints = constraints,
         grid = grid,
-        triangles = triangles,
+        surface = Surface(triangles, name = placement.name("cloth-mesh")),
         meshSprings = listOf(structural, shear, bend),
     )
 }

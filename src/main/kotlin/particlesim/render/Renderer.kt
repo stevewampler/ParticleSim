@@ -5,6 +5,7 @@ import particlesim.core.Vector3
 import particlesim.physics.Breakable
 import particlesim.physics.PairwiseForce
 import particlesim.physics.UniformFieldForce
+import particlesim.surface.Surface
 import particlesim.surface.Triangle
 
 /**
@@ -16,9 +17,10 @@ import particlesim.surface.Triangle
  *
  * Kotlin-DSL-first, same status as every other post-Phase-7 feature: renderers reference
  * groups/forces/surfaces directly (a group by name since [particlesim.core.Groups] already is
- * the universal selector; forces/surfaces as the actual Kotlin objects, since neither has a
- * name→object registry yet) rather than through YAML string lookups. YAML `renderers:` support
- * is a deferred second pass.
+ * the universal selector; forces/surfaces as the actual Kotlin objects — [SceneRegistry] gives
+ * *named* ones a place to be looked up by §10.3's outliner, but a renderer here still holds the
+ * object itself, not a string) rather than through YAML string lookups. YAML `renderers:`
+ * support is a deferred second pass.
  */
 sealed interface ParticleStyle {
     data object Dot : ParticleStyle
@@ -30,7 +32,13 @@ sealed interface ParticleStyle {
 
 data class ParticleRenderer(val group: String, val style: ParticleStyle = ParticleStyle.Dot)
 
-data class SurfaceRenderer(val triangles: List<Triangle>, val wireframe: Boolean = false)
+/**
+ * Holds the [Surface] itself, not just its `triangles`, so the outliner (§10.3) can answer
+ * "is this named surface currently rendered?" by identity — a correlation that's only possible
+ * if the renderer and the registry (§10.3's engine-side prerequisite) point at the same object,
+ * not two independently-built triangle lists that happen to match.
+ */
+data class SurfaceRenderer(val surface: Surface, val wireframe: Boolean = false)
 
 /** What a [LineRenderer]'s color maps from (§10.2). Only [BREAK_PROXIMITY] is implemented —
  * `stretch`/`force` magnitude coloring from the spec's own list is a deferred follow-up: unlike

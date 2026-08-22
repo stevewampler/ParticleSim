@@ -77,7 +77,7 @@ object BinaryFrame {
             CONNECTION_HEADER_SIZE + connections.size * CONNECTION_SIZE +
             CAMERA_FLAG_SIZE + (if (camera != null) CAMERA_SIZE else 0) +
             SPHERE_HEADER_SIZE + sphereRadii.size * SPHERE_SIZE +
-            MESH_HEADER_SIZE + meshes.sumOf { MESH_ENTRY_HEADER_SIZE + it.triangles.size * TRIANGLE_SIZE } +
+            MESH_HEADER_SIZE + meshes.sumOf { MESH_ENTRY_HEADER_SIZE + it.surface.triangles.size * TRIANGLE_SIZE } +
             ARROW_HEADER_SIZE + arrowSamples.size * ARROW_SIZE +
             VISIBLE_FLAG_SIZE + (if (visibleIds != null) VISIBLE_HEADER_SIZE + visibleIds.size * 4 else 0)
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
@@ -112,8 +112,8 @@ object BinaryFrame {
         buffer.putInt(meshes.size)
         for (mesh in meshes) {
             buffer.put(if (mesh.wireframe) 1 else 0)
-            buffer.putInt(mesh.triangles.size)
-            for (tri in mesh.triangles) {
+            buffer.putInt(mesh.surface.triangles.size)
+            for (tri in mesh.surface.triangles) {
                 buffer.putInt(tri.a); buffer.putInt(tri.b); buffer.putInt(tri.c)
             }
         }

@@ -6,6 +6,7 @@ import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
 import particlesim.render.SurfaceRenderer
+import particlesim.surface.Surface
 import particlesim.surface.Triangle
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -98,7 +99,7 @@ class BinaryFrameTest {
         val a = store.create(position = Vector3.ZERO)
         val b = store.create(position = Vector3.ZERO)
         val c = store.create(position = Vector3.ZERO)
-        val mesh = SurfaceRenderer(triangles = listOf(Triangle(a, b, c)), wireframe = true)
+        val mesh = SurfaceRenderer(surface = Surface(listOf(Triangle(a, b, c))), wireframe = true)
 
         val buffer = BinaryFrame.encode(
             t = 0.0, step = 0L, store = store, ids = listOf(a, b, c), connections = emptyList(),
