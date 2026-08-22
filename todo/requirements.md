@@ -248,11 +248,16 @@ balls needs to instantiate a shape more than once without their
 particles/groups colliding. That means every shape instantiation takes
 a **placement** (a position, and where relevant an orientation, applied
 to every particle/collider the shape creates) and an **instance name**
-used to namespace its internal group names (a flag's `cloth`/`pole`
-groups become e.g. `flag1.cloth`/`flag1.pole` for one instance and
-`flag2.cloth`/`flag2.pole` for another) — the same particle-by-stable-id
+used to namespace its internal group names, dotted (`"$instanceName.$local"`)
+— a flag's `cloth`/`pole` groups become `flag1.cloth`/`flag1.pole` for one
+instance and `flag2.cloth`/`flag2.pole` for another. No instance name
+(the default) leaves names unprefixed, exactly reproducing a shape's
+original single-instance behavior — the same particle-by-stable-id
 referencing already used everywhere else means nothing outside the shape
-needs to know its ids, only its namespaced group names.
+needs to know its ids, only its namespaced group names. Implemented as
+`ShapePlacement` (`particlesim.examples`), proven against two different
+shapes (`buildFlag`, `buildBallBounce`) sharing one scene
+(`ShapeCompositionTest`, `MultiShapeDebugDemo`).
 
 For YAML, this needs an actual **shape library/registry**: a named,
 versioned catalog of shape definitions (each itself expressible in the
@@ -1376,10 +1381,6 @@ wait for §9.2's real recording format to exist.
 
 ## 16. Open Questions (to resolve while iterating on this doc)
 
-- **§4.5 shape-instance namespacing**: `flag1.cloth`-style dotted group
-  names are illustrative, not decided — needs an actual convention before
-  more than one shape type exists, so the second shape built doesn't each
-  invent its own.
 - **§10.3 UI implementation approach**: whether the outliner/inspector/
   per-object panels are built as part of the three.js viewer page itself
   or as a separate control-panel layer (e.g. a small UI library

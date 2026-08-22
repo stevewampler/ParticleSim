@@ -21,6 +21,11 @@ import kotlin.math.sin
  * held together by structural/shear/bend springs (§7.1), and blown by time-varying wind
  * (§7.2) — exercises surfaces, constraints, structural springs, and variable field forces
  * together, as the spec calls for.
+ *
+ * Also §4.5's first shape-library proof: `buildFlag` accepts a shared `store`/`groups` and a
+ * `placement`, so more than one flag (or a flag alongside a ball-bounce, `buildBallBounce`) can
+ * coexist in one composed scene — see `ShapePlacement`'s own doc comment for the defaulting/
+ * namespacing rules.
  */
 data class FlagScenario(
     val store: ParticleStore,
@@ -52,23 +57,35 @@ fun buildFlag(
     spacing: Double = 0.15,
     // Infinite by default (never breaks) — matches this function's original, already-golden-
     // tested behavior exactly, so every existing caller (FlagGoldenTest, FlagYamlParityTest)
-    // is unaffected. FlagDebugDemo passes a finite value to demonstrate §10.2's breakProximity
-    // line-renderer coloring; nothing else needs to.
+    // is unaffected. An earlier version of FlagDebugDemo passed a finite value to demonstrate
+    // §10.2's breakProximity line-renderer coloring; reverted (see TODO.md) once combined with
+    // dragging, since a sudden reposition's overshoot broke edges even a generous threshold
+    // couldn't survive — kept as a parameter since the underlying mechanism is still real and
+    // tested, just not exercised by any current caller.
     structuralBreakThreshold: Double = Double.POSITIVE_INFINITY,
+    // §4.5's shape-library params: a shared store/groups (so more than one shape's particles
+    // can coexist with distinct ids in one scene) and a placement (offset + instance-name
+    // namespacing — see ShapePlacement's own doc comment). Defaults reproduce this function's
+    // original single-instance behavior exactly, so every existing caller/golden-file needed
+    // zero changes.
+    store: ParticleStore = ParticleStore(),
+    groups: Groups = Groups(),
+    placement: ShapePlacement = ShapePlacement(),
 ): FlagScenario {
-    val store = ParticleStore()
-    val groups = Groups()
     val massPerParticle = 0.005
+    val clothGroup = placement.name("cloth")
+    val poleGroup = placement.name("pole")
 
     val grid = (0 until rows).map { r ->
         (0 until cols).map { c ->
-            val id = store.create(position = Vector3(c * spacing, -r * spacing, 0.0), mass = ScalarExpr.of(massPerParticle))
-            groups.add("cloth", id)
+            val position = Vector3(c * spacing, -r * spacing, 0.0) + placement.offset
+            val id = store.create(position = position, mass = ScalarExpr.of(massPerParticle))
+            groups.add(clothGroup, id)
             id
         }
     }
     val poleEdge = grid.map { row -> row[0] }
-    poleEdge.forEach { groups.add("pole", it) }
+    poleEdge.forEach { groups.add(poleGroup, it) }
 
     val structural = MeshSprings(
         Grid.structuralEdges(grid), store,
@@ -90,9 +107,9 @@ fun buildFlag(
         VectorExpr.of { t -> Vector3(6.0 + 2.0 * sin(t * 0.7), 0.3 * sin(t * 1.3), 0.8 * cos(t * 0.9)) },
         density = 1.2,
     )
-    val gravity = UniformGravity("cloth", Vector3(0.0, -9.8, 0.0))
+    val gravity = UniformGravity(clothGroup, Vector3(0.0, -9.8, 0.0))
 
-    val constraints = listOf(FixedPosition.atCurrentPositions("pole", store, groups))
+    val constraints = listOf(FixedPosition.atCurrentPositions(poleGroup, store, groups))
 
     return FlagScenario(
         store = store,

@@ -1225,15 +1225,40 @@ Chrome automation wasn't available to this session):
       than the rest of this phase's read-only inspection
 
 ## Shape library (§4.5, new requirement) — not yet phased
-- [ ] Kotlin DSL: formalize the existing `buildFlag`/`buildBallBounce`/
-      `buildSparks`-style pattern into an actual composable `Shape`
-      concept — placement (position/orientation) applied to every
-      particle/collider a shape creates, plus an instance-name-based
-      namespacing convention for group names so two instances of the same
-      shape in one scene don't collide (§16 flags the exact naming
-      convention as still undecided)
-- [ ] `tire`, `flagpole` shapes (flag itself already exists as
-      `buildFlag`, just not yet reframed as a formal `Shape`)
+- [x] Kotlin DSL: `ShapePlacement` (`particlesim.examples`) — an
+      `offset: Vector3` and an optional `instanceName: String?`, resolving
+      a shape's local names via `name(local) = "$instanceName.$local"`
+      (unprefixed when `instanceName` is null). Position-only placement,
+      deliberately — no shape built so far has a meaning that changes
+      under rotation, so orientation is left out until something
+      concretely needs it (§4.5's own stated reasoning, not a gap found
+      later).
+      **`buildFlag`/`buildBallBounce` both refactored** to accept a
+      shared `store: ParticleStore = ParticleStore()`, `groups: Groups =
+      Groups()`, and `placement: ShapePlacement = ShapePlacement()` —
+      all three default to exactly the original single-instance,
+      fresh-store behavior, confirmed by rerunning `FlagGoldenTest`/
+      `FlagYamlParityTest` after the change rather than assuming the
+      defaults were harmless. `buildBallBounce`'s floor collider moves
+      and gets renamed with `placement` too, not just the ball itself —
+      each instance is a self-contained ball-and-its-own-floor.
+      **Proven, not just unit-tested**: `ShapeCompositionTest` (two flags
+      sharing a store get disjoint ids and correctly namespaced groups;
+      a flag and a ball-bounce step together for 100 steps with zero
+      cross-talk — the ball falls under its own gravity, the flag's pole
+      stays exactly fixed, neither force list affects the other's
+      particles) and `MultiShapeDebugDemo` (`./gradlew runMultiShapeDemo`
+      — two flags plus a ball-bounce in one live scene), verified
+      server-side against the running demo: exactly 121 particles
+      (2×60 + 1) and 208 structural connections (2×104, the exact
+      closed-form count for a 6×10 grid), the ball falling from its own
+      offset and settling at exactly `radius` above its own floor without
+      drifting in x/z.
+      **`buildSparks` not yet refactored** — deferred, not forgotten;
+      proving the pattern against two structurally-different shapes
+      (a static mesh vs. a single collidable particle) was enough to
+      validate it without touching every existing example.
+- [ ] `tire`, `flagpole` shapes — genuinely new shapes, not yet built
 - [ ] YAML shape library/registry — second pass, same status as every
       other post-Phase-7 YAML gap; needs the DSL side built first to know
       what a shape actually needs to parameterize
