@@ -1092,6 +1092,12 @@ this project has used since Phase 5.
       201 and stayed there) — an unplanned but welcome extra proof that
       `MeshSprings`' per-edge breaking still works correctly under this
       wiring.
+      **Later reverted** once drag was combined with this same demo (see
+      the "post-Phase-9 fixes" note near the end of this section) — a
+      finite structural break threshold and free-form dragging turned out
+      to be in real tension, not just a tuning problem. Left here as the
+      honest record of what was tried and why it didn't survive contact
+      with actual interactive use, not edited away.
       **Fifth sub-pass: everything else wired — `ParticleRenderer`
       (sphere sizing), `SurfaceRenderer` (shaded mesh), `ArrowRenderer`
       (field sampling), and a dot-visibility filter.** Phase 9 is now
@@ -1154,6 +1160,43 @@ this project has used since Phase 5.
       itself blocked on a concrete scenario needing gusty/spatial wind),
       and YAML renderer declarations (same deferred-to-a-second-pass
       status as every other post-Phase-7 YAML gap).
+
+**Post-Phase-9 fixes, from actually trying the finished viewer** (the
+first real human feedback on any of this phase's client-side work, since
+Chrome automation wasn't available to this session):
+- Wind's arrow heads were close to a third of the arrow's own length —
+  reduced the head length/width fractions and their absolute caps.
+- Added a viewer-local "show mesh edges" checkbox overlaying a wireframe
+  on the otherwise-solid cloth mesh — independent of `SurfaceRenderer`'s
+  own `wireframe` flag, which picks solid-vs-wireframe-only for a whole
+  mesh, not an overlay toggle.
+- "The flag stopped looking like a surface" while dragging was
+  z-fighting: the structural lines share exact vertex positions with the
+  solid mesh, and with no `polygonOffset` on the mesh material the two
+  flickered at the same depth — much more visible once dragging deformed
+  the surface unevenly. Fixed with `polygonOffset` on the solid material,
+  the standard fix for coplanar solid+line rendering.
+- **A real, more fundamental bug**: dragging still left the flag
+  *permanently* deformed even after the z-fighting fix, and the
+  structural-line pattern visibly changed shape — both traced to the
+  fourth sub-pass's finite `structuralBreakThreshold` (see above).
+  `MeshSprings`' structural damping is well under critical for its
+  stiffness/mass, so a sudden reposition — what dragging does every step
+  — causes real overshoot, not a smooth approach; that transiently spiked
+  displacement past thresholds that had looked safe watching wind alone
+  (0.02 already broke under wind by itself; 0.1, tried as a fix, still
+  broke under a deliberately modest, gradual drag). Since wind's own peak
+  displacement is tiny, any threshold loose enough to survive dragging's
+  overshoot makes wind's color contribution negligible anyway — chasing
+  a higher number wasn't going to resolve the tension. Reverted to no
+  finite threshold in this demo; verified by replaying the exact
+  aggressive drag that broke things before and confirming the flag now
+  settles back with all 202 connections intact. `breakProximity`
+  coloring itself remains real, implemented, and independently tested
+  (`MeshSpringsTest`, `ColorRampTest`) — just not exercised by this
+  particular demo anymore, since permanently tearing the flag from
+  ordinary dragging was a worse experience than never showing tension
+  color.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
