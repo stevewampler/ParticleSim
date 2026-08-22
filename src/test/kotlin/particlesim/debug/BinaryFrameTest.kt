@@ -111,7 +111,28 @@ class BinaryFrameTest {
         )
         val decoded = BinaryFrame.decode(buffer)
 
-        assertEquals(listOf(DecodedMesh(wireframe = true, triangles = listOf(Triangle(a, b, c)))), decoded.meshes)
+        assertEquals(
+            listOf(DecodedMesh(wireframe = true, triangles = listOf(Triangle(a, b, c)), name = "")),
+            decoded.meshes,
+            "an unnamed Surface decodes to an empty-string mesh name, not a missing field",
+        )
+    }
+
+    @Test
+    fun `a mesh's surface name round-trips, so the viewer can correlate a mesh back to its registry entry`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+        val b = store.create(position = Vector3.ZERO)
+        val c = store.create(position = Vector3.ZERO)
+        val mesh = SurfaceRenderer(surface = Surface(listOf(Triangle(a, b, c)), name = "cloth-mesh"), wireframe = false)
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = listOf(a, b, c), connections = emptyList(),
+            meshes = listOf(mesh),
+        )
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals("cloth-mesh", decoded.meshes.single().name)
     }
 
     @Test
@@ -183,7 +204,24 @@ class BinaryFrameTest {
         assertEquals(listOf("gravity"), decoded.forces)
         assertEquals(listOf("pole-anchor"), decoded.constraints)
         assertEquals(listOf("cloth-mesh"), decoded.surfaces)
-        assertEquals(listOf("cloth", "pole"), decoded.groups)
+        assertEquals(listOf("cloth", "pole"), decoded.groups.map { it.name })
+    }
+
+    @Test
+    fun `a group's current member ids round-trip alongside its name`() {
+        val store = ParticleStore()
+        val groups = Groups().apply { add("cloth", 1); add("cloth", 2); add("pole", 3) }
+        val registry = SceneRegistry.build(groups = groups)
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), registry = registry,
+        )
+        val decoded = BinaryFrame.decode(buffer).registry
+
+        assertEquals(
+            listOf(DecodedGroupEntry("cloth", setOf(1, 2)), DecodedGroupEntry("pole", setOf(3))),
+            decoded.groups,
+        )
     }
 
     @Test

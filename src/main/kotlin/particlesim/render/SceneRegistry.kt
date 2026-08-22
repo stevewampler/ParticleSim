@@ -18,9 +18,20 @@ import particlesim.surface.Surface
  * unless it opts in" policy §10.2 already applies to renderers themselves — so those three kinds
  * are filtered to named entries and exposed as `Map<String, T>`. A group has no such thing as
  * "unnamed": its name *is* its identity ([Groups] is keyed by name from the moment a member is
- * first added, per [Groups.names]), so every group it holds is collected, exposed as a plain
- * `Set<String>` rather than a map — there's no separate object to look up beyond the name and
- * whatever [Groups.membersOf] already answers with it.
+ * first added, per [Groups.names]), so every group it holds is collected, exposed as
+ * `Map<String, Set<Int>>` — name to current member ids, resolved eagerly at [build] time via
+ * [Groups.membersOf] rather than retaining the whole mutable [Groups] object, keeping this class
+ * a genuine read-only snapshot. This is what makes a group's per-object visibility toggle
+ * (§10.3) possible client-side: the viewer needs to know *which particles* a group's checkbox
+ * actually hides, not just that the group exists. **Cost note**: unlike the other three kinds
+ * (a handful of short strings), a group's member list is O(members) ints — cheap for the small
+ * named groups every current demo has, but worth remembering if a future large-N scenario names
+ * a group with thousands of members and rebroadcasts this every frame (§9.1's per-frame
+ * protocol resends the whole registry each time, same as `sphereRadii`/`meshes`/`arrowSamples`).
+ * A [SceneRegistry] built once and reused across many `broadcast` calls (as every current demo
+ * does) also means member-id snapshots go stale if group membership changes mid-run — not a
+ * concern for any demo today (none has emitters, Phase 6, still unbuilt), but a real gap once
+ * one does.
  *
  * **Granularity is "one [Force]/[Constraint] object," not one physical connection.**
  * [particlesim.physics.MeshSprings] is a single `Force` representing an entire mesh's worth of
@@ -44,7 +55,7 @@ class SceneRegistry private constructor(
     val forces: Map<String, Force>,
     val constraints: Map<String, Constraint>,
     val surfaces: Map<String, Surface>,
-    val groups: Set<String>,
+    val groups: Map<String, Set<Int>>,
 ) {
     companion object {
         fun build(
@@ -57,7 +68,11 @@ class SceneRegistry private constructor(
                 forces = uniqueByName(forces.filter { it.name != null }) { it.name!! },
                 constraints = uniqueByName(constraints.filter { it.name != null }) { it.name!! },
                 surfaces = uniqueByName(surfaces.filter { it.name != null }) { it.name!! },
-                groups = groups.names(),
+                // .toSet() copies: Groups.membersOf returns a live reference to its own internal
+                // mutable set (unlike Groups.names(), which already copies), so without this a
+                // "snapshot" here would silently keep tracking Groups' real-time membership
+                // instead of freezing it at build() - the opposite of what this class promises.
+                groups = groups.names().associateWith { name -> groups.membersOf(name).toSet() },
             )
 
         private fun <T> uniqueByName(items: List<T>, nameOf: (T) -> String): Map<String, T> {

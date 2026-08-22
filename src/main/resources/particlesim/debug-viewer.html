@@ -45,34 +45,54 @@
     width: 90px; font: 11px monospace; background: rgba(255,255,255,0.1);
     color: #ddd; border: 1px solid rgba(255,255,255,0.25); border-radius: 3px;
   }
-  #outliner {
+  #leftPanel {
     position: fixed; top: 44px; left: 8px; z-index: 1;
-    font: 12px/1.5 monospace; color: #ddd; background: rgba(0,0,0,0.55);
-    padding: 8px 10px; border-radius: 4px; max-width: 220px; max-height: 45vh; overflow-y: auto;
+    font: 12px/1.5 monospace; color: #ddd;
+    max-height: calc(100vh - 52px); overflow-y: auto;
+    display: flex; flex-direction: column; gap: 8px;
   }
-  #outliner h4 {
+  #outliner, #objectPanel {
+    background: rgba(0,0,0,0.55); padding: 8px 10px; border-radius: 4px; max-width: 220px;
+  }
+  #outliner h4, #objectPanel h4 {
     margin: 8px 0 2px; font-size: 10px; color: #9cf; font-weight: normal;
     text-transform: uppercase; letter-spacing: 0.05em;
   }
   #outliner h4:first-child { margin-top: 0; }
   #outliner ul { margin: 0 0 4px; padding: 0; list-style: none; }
-  #outliner li { padding: 1px 0; color: #ddd; overflow-wrap: break-word; }
-  #outliner .outlinerEmpty { color: #666; font-style: italic; }
+  #outliner li {
+    padding: 1px 3px; color: #ddd; overflow-wrap: break-word; cursor: pointer; border-radius: 2px;
+  }
+  #outliner li:hover { background: rgba(255,255,255,0.12); }
+  #outliner li.selected { background: rgba(80,140,220,0.4); color: #fff; }
+  #outliner .outlinerEmpty { color: #666; font-style: italic; padding: 1px 3px; }
+  #objectPanel { display: none; }
+  #objectPanel h4:first-child { margin-top: 0; }
+  #objectPanelTitle { color: #fff; font-weight: bold; margin-bottom: 4px; overflow-wrap: break-word; }
+  #objectPanel label { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+  #objectPanel .noRenderer { color: #888; font-style: italic; }
+  #objectPanel .objectInfo { color: #9f9; margin-top: 2px; }
 </style>
 </head>
 <body>
 <div id="status">connecting…</div>
 <button id="returnToScripted">return to scripted camera</button>
 <label id="meshEdgesToggle"><input type="checkbox" id="meshEdgesCheckbox"> show mesh edges</label>
-<div id="outliner">
-  <h4>groups</h4>
-  <div id="outlinerGroups"></div>
-  <h4>forces</h4>
-  <div id="outlinerForces"></div>
-  <h4>constraints</h4>
-  <div id="outlinerConstraints"></div>
-  <h4>surfaces</h4>
-  <div id="outlinerSurfaces"></div>
+<div id="leftPanel">
+  <div id="outliner">
+    <h4>groups</h4>
+    <div id="outlinerGroups"></div>
+    <h4>forces</h4>
+    <div id="outlinerForces"></div>
+    <h4>constraints</h4>
+    <div id="outlinerConstraints"></div>
+    <h4>surfaces</h4>
+    <div id="outlinerSurfaces"></div>
+  </div>
+  <div id="objectPanel">
+    <div id="objectPanelTitle"></div>
+    <div id="objectPanelBody"></div>
+  </div>
 </div>
 <div id="controlPanel">
   <section>
@@ -112,7 +132,9 @@ const meshEdgesCheckboxEl = document.getElementById("meshEdgesCheckbox");
 let showMeshEdges = false;
 meshEdgesCheckboxEl.addEventListener("change", () => {
   showMeshEdges = meshEdgesCheckboxEl.checked;
-  for (const overlay of meshEdgeOverlays) overlay.visible = showMeshEdges;
+  // Doesn't touch overlay.visible directly - applyFrame is this value's single writer, since it
+  // also has to factor in a per-surface hiddenSurfaces toggle (§10.3) that this listener has no
+  // way to know about. The next frame (at most ~16ms away) picks the new showMeshEdges value up.
 });
 
 const scene = new THREE.Scene();
@@ -319,7 +341,17 @@ function applyFrame(frame) {
   const sphereRadii = new Map(frame.spheres.map((s) => [s.id, s.radius]));
   // null (the default, every pre-existing demo) = every particle gets a dot; otherwise only
   // the listed ids do — §10.2's "the individual cloth particles have no renderer of their own".
-  const visible = frame.visibleIds ? frame.particles.filter((p) => frame.visibleIds.has(p.id)) : frame.particles;
+  const serverVisible = frame.visibleIds ? frame.particles.filter((p) => frame.visibleIds.has(p.id)) : frame.particles;
+  // §10.3's group visibility toggle: a particle is hidden if it belongs to any group a person
+  // has unchecked in the per-object panel, layered on top of (not instead of) the server's own
+  // decision above - see hiddenGroups' own doc comment for why that order matters.
+  const hiddenParticleIds = new Set();
+  for (const group of frame.registry.groups) {
+    if (hiddenGroups.has(group.name)) {
+      for (const id of group.memberIds) hiddenParticleIds.add(id);
+    }
+  }
+  const visible = hiddenParticleIds.size === 0 ? serverVisible : serverVisible.filter((p) => !hiddenParticleIds.has(p.id));
 
   while (dots.children.length < visible.length) {
     dots.add(new THREE.Mesh(dotGeometry, dotMaterial));
@@ -381,6 +413,13 @@ function applyFrame(frame) {
     const overlay = meshEdgeOverlays[i];
     overlay.geometry.dispose();
     overlay.geometry = new THREE.WireframeGeometry(built.geometry);
+
+    // §10.3's surface visibility toggle: meshDecl.name is "" for an unnamed Surface, which never
+    // matches anything in hiddenSurfaces (nothing unnamed is reachable in the outliner to hide
+    // it with), so this is a no-op for every mesh that existed before this feature.
+    const hiddenByToggle = meshDecl.name !== "" && hiddenSurfaces.has(meshDecl.name);
+    obj.visible = !hiddenByToggle;
+    overlay.visible = !hiddenByToggle && showMeshEdges;
   });
 
   // Arrow-sampled field forces (§10.2): one ArrowHelper per sample, pooled the same way.
@@ -436,6 +475,18 @@ function decodeFrame(buffer) {
     for (let i = 0; i < count; i++) names[i] = readString();
     return names;
   };
+  const readGroupList = () => {
+    const count = view.getInt32(offset, true); offset += 4;
+    const groups = new Array(count);
+    for (let i = 0; i < count; i++) {
+      const name = readString();
+      const memberCount = view.getInt32(offset, true); offset += 4;
+      const memberIds = new Set();
+      for (let j = 0; j < memberCount; j++) { memberIds.add(view.getInt32(offset, true)); offset += 4; }
+      groups[i] = { name, memberIds };
+    }
+    return groups;
+  };
 
   const t = view.getFloat64(offset, true); offset += 8;
   const step = Number(view.getBigInt64(offset, true)); offset += 8;
@@ -473,6 +524,7 @@ function decodeFrame(buffer) {
   const meshes = new Array(meshCount);
   for (let i = 0; i < meshCount; i++) {
     const wireframe = view.getUint8(offset) !== 0; offset += 1;
+    const name = readString(); // "" when the mesh's Surface is unnamed - never matches an outliner entry
     const triangleCount = view.getInt32(offset, true); offset += 4;
     const triangles = new Array(triangleCount);
     for (let j = 0; j < triangleCount; j++) {
@@ -481,7 +533,7 @@ function decodeFrame(buffer) {
       const c = view.getInt32(offset, true); offset += 4;
       triangles[j] = { a, b, c };
     }
-    meshes[i] = { wireframe, triangles };
+    meshes[i] = { wireframe, name, triangles };
   }
 
   const arrowCount = view.getInt32(offset, true); offset += 4;
@@ -500,14 +552,15 @@ function decodeFrame(buffer) {
     }
   }
 
-  // §10.3's outliner data (SceneRegistry) - four flat name lists, no per-frame numeric state
-  // attached (see BinaryFrame's own doc comment for why). Sent unconditionally, so a demo with
-  // nothing named just yields four empty arrays here, not a missing field.
+  // §10.3's outliner data (SceneRegistry) - name lists for forces/constraints/surfaces, plus
+  // current member ids for groups (needed for the group visibility toggle - see applyFrame's
+  // hiddenGroups handling). Sent unconditionally, so a demo with nothing named just yields empty
+  // arrays here, not a missing field.
   const registry = {
     forces: readNameList(),
     constraints: readNameList(),
     surfaces: readNameList(),
-    groups: readNameList(),
+    groups: readGroupList(),
   };
 
   return { t, step, particles, connections, camera: cam, spheres, meshes, arrows, visibleIds, registry };
@@ -565,22 +618,66 @@ function updateStats(frame) {
     `lag:       ${lagS >= 0 ? "+" : ""}${lagS.toFixed(2)}s`;
 }
 
-// --- Outliner (§10.3) -----------------------------------------------------------------------
+// --- Outliner & per-object panel (§10.3) --------------------------------------------------
 // A persistent, always-available list of every named group/force/constraint/surface, regardless
-// of what's currently rendered - the answer to "how do I reach an invisible object's settings"
-// once per-object panels exist (they don't yet: this is read-only, just the list itself). Skips
-// re-rendering the DOM when the registry's contents haven't changed since the last frame - names
-// are structurally static for a given run, so rebuilding four <ul>s 60 times a second for
-// unchanging data would be pure waste.
+// of what's currently rendered - the answer to "how do I reach an invisible object's settings."
+// Selecting an entry opens a shared panel below the list (§10.3: "selecting an entry opens the
+// same per-object panel a right-click would" - right-click-in-3D itself is still separate,
+// unstarted future work). Visibility toggles are only *real* for groups and surfaces this pass:
+// a group's members are already known (registry.groups' memberIds) and a mesh already carries
+// its surface's name (BinaryFrame's mesh entries), but a force's connections/arrow samples carry
+// no source tag yet, and a constraint has no renderer defined at all (§10.2) - both of those get
+// an informational note instead of a checkbox that would silently do nothing.
 const outlinerSections = {
   groups: document.getElementById("outlinerGroups"),
   forces: document.getElementById("outlinerForces"),
   constraints: document.getElementById("outlinerConstraints"),
   surfaces: document.getElementById("outlinerSurfaces"),
 };
-let lastRegistrySignature = null;
+const objectPanelEl = document.getElementById("objectPanel");
+const objectPanelTitleEl = document.getElementById("objectPanelTitle");
+const objectPanelBodyEl = document.getElementById("objectPanelBody");
 
-function renderNameList(container, names) {
+let lastRegistrySignature = null;
+let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [] };
+let selectedKind = null; // "groups" | "forces" | "constraints" | "surfaces"
+let selectedName = null;
+
+// Names of groups/surfaces a person has explicitly unchecked in the per-object panel. Composed
+// with (never replacing) whatever the server itself already decided - e.g. FlagDebugDemo sends
+// visibleIds=poleIds specifically to hide cloth dots because the mesh already shows them, and
+// leaving "cloth" checked here must not repaint those 112 dots back on top of the mesh. A
+// particle/mesh draws only if the server permits it *and* nothing here hides it - see applyFrame.
+const hiddenGroups = new Set();
+const hiddenSurfaces = new Set();
+
+// A plain JSON.stringify(registry) can't detect a group's membership changing, since Set doesn't
+// serialize meaningfully (every group would stringify to the same shape regardless of contents) -
+// so member ids are flattened into a sorted array first, specifically so this check stays
+// correct once something (a future emitter) actually changes group membership between frames.
+function registrySignature(registry) {
+  return JSON.stringify({
+    forces: registry.forces,
+    constraints: registry.constraints,
+    surfaces: registry.surfaces,
+    groups: registry.groups.map((g) => ({ name: g.name, memberIds: [...g.memberIds].sort((a, b) => a - b) })),
+  });
+}
+
+function updateSelectionHighlight() {
+  document.querySelectorAll("#outliner li[data-kind]").forEach((li) => {
+    li.classList.toggle("selected", li.dataset.kind === selectedKind && li.dataset.name === selectedName);
+  });
+}
+
+function selectObject(kind, name) {
+  selectedKind = kind;
+  selectedName = name;
+  updateSelectionHighlight();
+  renderObjectPanel();
+}
+
+function renderNameList(container, kind, names) {
   container.innerHTML = "";
   if (names.length === 0) {
     const empty = document.createElement("div");
@@ -593,19 +690,71 @@ function renderNameList(container, names) {
   for (const name of names) {
     const item = document.createElement("li");
     item.textContent = name;
+    item.dataset.kind = kind;
+    item.dataset.name = name;
+    item.addEventListener("click", () => selectObject(kind, name));
     list.appendChild(item);
   }
   container.appendChild(list);
 }
 
+function renderObjectPanel() {
+  if (selectedKind === null) {
+    objectPanelEl.style.display = "none";
+    return;
+  }
+  objectPanelEl.style.display = "block";
+  objectPanelTitleEl.textContent = selectedName;
+  objectPanelBodyEl.innerHTML = "";
+
+  const addNote = (text) => {
+    const note = document.createElement("div");
+    note.className = "noRenderer";
+    note.textContent = text;
+    objectPanelBodyEl.appendChild(note);
+  };
+  const addInfo = (text) => {
+    const info = document.createElement("div");
+    info.className = "objectInfo";
+    info.textContent = text;
+    objectPanelBodyEl.appendChild(info);
+  };
+  const addToggle = (labelText, hiddenSet) => {
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = !hiddenSet.has(selectedName);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) hiddenSet.delete(selectedName); else hiddenSet.add(selectedName);
+    });
+    label.append(checkbox, document.createTextNode(" " + labelText));
+    objectPanelBodyEl.appendChild(label);
+  };
+
+  if (selectedKind === "groups") {
+    addToggle("show particles", hiddenGroups);
+    const group = latestRegistry.groups.find((g) => g.name === selectedName);
+    addInfo(`${group ? group.memberIds.size : 0} particle(s)`);
+  } else if (selectedKind === "surfaces") {
+    addToggle("show mesh", hiddenSurfaces);
+  } else if (selectedKind === "forces") {
+    addNote("visibility toggle not yet available for forces");
+  } else if (selectedKind === "constraints") {
+    addNote("no renderer defined for constraints (§10.2)");
+  }
+}
+
 function updateOutliner(registry) {
-  const signature = JSON.stringify(registry);
+  latestRegistry = registry;
+  const signature = registrySignature(registry);
   if (signature === lastRegistrySignature) return;
   lastRegistrySignature = signature;
-  renderNameList(outlinerSections.groups, registry.groups);
-  renderNameList(outlinerSections.forces, registry.forces);
-  renderNameList(outlinerSections.constraints, registry.constraints);
-  renderNameList(outlinerSections.surfaces, registry.surfaces);
+  renderNameList(outlinerSections.groups, "groups", registry.groups.map((g) => g.name));
+  renderNameList(outlinerSections.forces, "forces", registry.forces);
+  renderNameList(outlinerSections.constraints, "constraints", registry.constraints);
+  renderNameList(outlinerSections.surfaces, "surfaces", registry.surfaces);
+  updateSelectionHighlight();
+  renderObjectPanel();
 }
 
 let socket = null;

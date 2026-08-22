@@ -1418,6 +1418,79 @@ real prerequisite, not just unstarted — see the note below.
       open, selection & inspection (live numeric readout), and the color
       legend are all real, separate pieces of §10.3 — this pass only
       gets names onto the screen, not interaction with them.
+- [x] **Per-object panels — scoped to what's actually wire-representable,
+      not all four kinds equally.** Outliner entries are now clickable;
+      clicking one opens a shared panel showing that object's name and,
+      for the two kinds where a real toggle is possible, a working
+      visibility checkbox. **Groups and surfaces got real toggles; forces
+      and constraints got an honest note instead of a fake one** — the
+      asymmetry is deliberate, not an oversight:
+      - **Groups**: `SceneRegistry.groups` changed from `Set<String>` to
+        `Map<String, Set<Int>>` (name → current member ids, resolved
+        eagerly at `build()` time). **Found a real bug while wiring
+        this**: `Groups.membersOf` returns a *live* reference to its own
+        internal mutable set (unlike `Groups.names()`, which already
+        copies) — the first version of this snapshot silently aliased
+        live data instead of freezing it, caught by a test that mutated
+        `Groups` after `build()` and expected the registry to be
+        unaffected. Fixed with an explicit `.toSet()` copy at the
+        `SceneRegistry` call site (not inside `membersOf` itself, which
+        is a hot path called every physics step — copying there would
+        cost real allocation for no benefit to its actual callers).
+      - **Surfaces**: `SurfaceRenderer` already held the `Surface` object
+        (from the earlier registry-design pass, specifically so this
+        correlation would exist) — a mesh's wire entry just needed its
+        surface's name added (`u8 wireframe, i32 nameLen, nameLen UTF-8
+        bytes, ...`; `""` when unnamed, collapsing with "no name" the
+        same way the registry section already does for an unnamed force).
+      - **Forces**: connections and arrow samples carry no source-force
+        tag on the wire — a real, separate protocol extension, not done
+        here. The panel shows "visibility toggle not yet available for
+        forces" instead of a checkbox that would do nothing.
+      - **Constraints**: §10.2 defines no constraint renderer at all —
+        there's nothing to toggle, not just nothing wired up yet. The
+        panel shows "no renderer defined for constraints (§10.2)".
+      **Composition, not replacement**: a group's checkbox intersects
+      with whatever the server's own `visibleIds` already decided — e.g.
+      `FlagDebugDemo` sends `visibleIds = poleIds` specifically to hide
+      cloth dots because the mesh already shows them, and leaving "cloth"
+      checked in the panel must not repaint those 112 dots on top of the
+      mesh. A particle draws only if the server permits it *and* nothing
+      in the panel hides it.
+      **Client-side correctness details**: the outliner's existing
+      "skip re-render when unchanged" check used a raw
+      `JSON.stringify(registry)` signature, which can't detect a group's
+      membership changing (`Set` doesn't serialize meaningfully) — fixed
+      by flattening member ids into a sorted array before signing, so
+      this stays correct once something (a future emitter) actually
+      changes membership between frames, not just today when it never
+      does. The mesh-edges-overlay checkbox listener no longer writes
+      `overlay.visible` directly — `applyFrame` is now its single writer,
+      since a mesh's overlay visibility depends on *both* that checkbox
+      and the new per-surface hide toggle, and two independent writers
+      to the same property would race.
+      **Verified three ways**: `BinaryFrameTest` (+3 — a mesh's surface
+      name round-trips, an unnamed surface decodes as `""` not a missing
+      field, a group's member ids round-trip alongside its name),
+      `SceneRegistryTest` (+2 — member ids resolve eagerly and survive a
+      `Groups` mutation afterward, group iteration order matches creation
+      order), and a live server-side WebSocket check against a running
+      `FlagDebugDemo` confirming the actual wire data (`mesh names=
+      [cloth-mesh]`, `mesh triangle counts=[182]`, `registry.groups=
+      [(cloth, 112), (pole, 8)]`) matches the scenario exactly. The usual
+      no-browser fallback otherwise (`node --check`, `getElementById`
+      cross-check, live `curl` of the new panel markup) — Chrome
+      automation is still not connected in this environment, checked
+      again before starting this piece, so whether clicking an outliner
+      entry actually opens the panel and whether the checkbox visibly
+      changes what's drawn remains unverified by a human. Full suite now
+      262 green.
+      **Still separate, real future work**: right-click-to-open (only
+      outliner-click is wired), selection & inspection's live numeric
+      readout (this panel's group particle count is a snapshot from
+      registry-rebuild time, not updated every frame), the color legend,
+      and a force-visibility toggle (needs the source-tag protocol
+      extension noted above).
 - [ ] Time controls (pause, speed multiplier, step-once) — already
       specified in §9.1, not yet built anywhere; this is the UI surface
       for it

@@ -41,11 +41,23 @@ class SceneRegistryTest {
     fun `every group is registered, named or not - a group has no unnamed form`() {
         val groups = Groups()
         groups.add("cloth", 1)
-        groups.add("pole", 2)
+        groups.add("cloth", 2)
+        groups.add("pole", 3)
 
         val registry = SceneRegistry.build(groups = groups)
 
-        assertEquals(setOf("cloth", "pole"), registry.groups)
+        assertEquals(mapOf("cloth" to setOf(1, 2), "pole" to setOf(3)), registry.groups)
+    }
+
+    @Test
+    fun `group member ids resolve eagerly at build time`() {
+        val groups = Groups()
+        groups.add("g", 1)
+        val registry = SceneRegistry.build(groups = groups)
+
+        groups.add("g", 2) // mutating Groups after build() must not retroactively change the snapshot
+
+        assertEquals(setOf(1), registry.groups["g"])
     }
 
     @Test
@@ -73,7 +85,7 @@ class SceneRegistryTest {
         assertEquals(force, registry.forces["wind"])
         assertEquals(constraint, registry.constraints["wind"])
         assertEquals(surface, registry.surfaces["wind"])
-        assertTrue(registry.groups.contains("wind"))
+        assertTrue(registry.groups.containsKey("wind"))
     }
 
     @Test
@@ -84,6 +96,16 @@ class SceneRegistryTest {
         val registry = SceneRegistry.build(forces = forces)
 
         assertEquals(names, registry.forces.keys.toList())
+    }
+
+    @Test
+    fun `group iteration order matches creation order too`() {
+        val groups = Groups()
+        listOf("zeta", "alpha", "mu", "beta").forEachIndexed { i, name -> groups.add(name, i) }
+
+        val registry = SceneRegistry.build(groups = groups)
+
+        assertEquals(listOf("zeta", "alpha", "mu", "beta"), registry.groups.keys.toList())
     }
 
     @Test
