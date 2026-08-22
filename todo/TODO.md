@@ -1198,6 +1198,46 @@ Chrome automation wasn't available to this session):
   ordinary dragging was a worse experience than never showing tension
   color.
 
+## Phase 10 — Viewer UI (§10.3, new requirements)
+- [ ] Global toggles (grid, axes)
+- [ ] Outliner: persistent list of every group/force/constraint/collider/
+      surface, reachable regardless of current 3D visibility — the answer
+      to "how do I open an invisible object's panel"
+- [ ] Per-object panel: visibility toggles for whatever that object type
+      can render, plus its renderer-specific settings (§10.2)
+- [ ] Right-click a rendered object in the 3D view to open its panel
+      directly
+- [ ] Selection & inspection: live numeric readout for a selected object
+      (position/velocity, force magnitude, breakProximity, ...)
+- [ ] Color legend for whatever `colorBy` gradient (§10.2) is active
+- [ ] Stats overlay: particle count, step rate, physics-vs-wall-clock lag
+      (a user-visible readout of §9.1's drop-frames-not-physics pacing
+      policy)
+- [ ] Camera bookmarks: save/restore a handful of named manual views
+- [ ] Time controls (pause, speed multiplier, step-once) — already
+      specified in §9.1, not yet built anywhere; this is the UI surface
+      for it
+- [ ] `[stretch]` Live parameter tweaking (viewer writes back into a
+      running force/constraint's numeric parameters) — deliberately kept
+      out of this phase's main scope; needs generalizing §9.4's
+      drag-target channel from "a position" to an arbitrary named
+      parameter edit, a materially bigger protocol/validation surface
+      than the rest of this phase's read-only inspection
+
+## Shape library (§4.5, new requirement) — not yet phased
+- [ ] Kotlin DSL: formalize the existing `buildFlag`/`buildBallBounce`/
+      `buildSparks`-style pattern into an actual composable `Shape`
+      concept — placement (position/orientation) applied to every
+      particle/collider a shape creates, plus an instance-name-based
+      namespacing convention for group names so two instances of the same
+      shape in one scene don't collide (§16 flags the exact naming
+      convention as still undecided)
+- [ ] `tire`, `flagpole` shapes (flag itself already exists as
+      `buildFlag`, just not yet reframed as a formal `Shape`)
+- [ ] YAML shape library/registry — second pass, same status as every
+      other post-Phase-7 YAML gap; needs the DSL side built first to know
+      what a shape actually needs to parameterize
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created
@@ -1212,7 +1252,17 @@ Chrome automation wasn't available to this session):
 - [ ] Implicit integration (§13.1)
 - [ ] Friction — static/kinetic (§12.5)
 - [ ] Continuous collision detection (§12.4)
-- [ ] Particle-vs-surface collision, surface self-collision (§12.4)
+- [ ] Particle-vs-surface collision, surface self-collision (§12.4) — no
+      longer purely speculative: the trampoline worked example just below
+      needs exactly this, so it has a concrete consumer now even though
+      it isn't scheduled
+- [ ] Trampoline worked example (§12.8, new requirement) — a taut,
+      stiffly-sprung surface with its rim pinned to a frame, a ball
+      bouncing on its actual (deformed) shape rather than a fixed-shape
+      collider's restitution. Blocked on the particle-vs-surface-collision
+      item directly above; everything else it needs (a surface with
+      structural springs, a pinned rim) already exists. Package as a
+      shape-library entry (above) once built.
 - [ ] Surface-vertex destruction / mesh repair (§14.3)
 - [ ] GPU compute (§9.3)
 - [ ] Interactive delete (§9.4, §14.2)

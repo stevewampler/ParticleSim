@@ -230,6 +230,41 @@ or force/mass logic that's awkward to express in the expression grammar.
 Both remain first-class; neither is meant to fall behind the other in
 capability.
 
+### 4.5 Shape library
+
+A **shape** is a reusable, parameterized scene fragment — particles,
+forces, constraints, surfaces, and colliders bundled as one unit and
+referenced by name when building a scene, rather than authored inline
+every time. A flag, a flagpole, a tire, a ball are all shapes: each is a
+self-contained little scenario (in the flag's case, literally §7.3's
+worked example) that a larger scene can drop in one or more copies of,
+at a chosen position, without re-describing its internals.
+
+For the Kotlin DSL, this is barely a new mechanism — it's what
+`buildFlag`/`buildBallBounce`/`buildSparks`-style functions already are
+(a function that returns a self-contained scenario fragment), just
+formalized enough to *compose*: a scene that wants three flags and two
+balls needs to instantiate a shape more than once without their
+particles/groups colliding. That means every shape instantiation takes
+a **placement** (a position, and where relevant an orientation, applied
+to every particle/collider the shape creates) and an **instance name**
+used to namespace its internal group names (a flag's `cloth`/`pole`
+groups become e.g. `flag1.cloth`/`flag1.pole` for one instance and
+`flag2.cloth`/`flag2.pole` for another) — the same particle-by-stable-id
+referencing already used everywhere else means nothing outside the shape
+needs to know its ids, only its namespaced group names.
+
+For YAML, this needs an actual **shape library/registry**: a named,
+versioned catalog of shape definitions (each itself expressible in the
+existing YAML grammar, parameterized the way a bulk-generation block
+already is, §4.2) that a scene's `shapes:` section can reference by name
+plus parameters plus placement. Kotlin-DSL-first, same status as every
+other YAML-side feature since Phase 7 (§4.4) — the DSL's function-based
+version is what gets built first; a formal YAML shape registry is a
+second pass once the DSL side has proven out what a shape actually needs
+to parameterize (a flag's rows/cols/spacing is obvious; a tire's
+parameters aren't decided yet).
+
 ## 5. Forces
 
 Forces are optional and composable — a simulation declares whichever set it
@@ -777,6 +812,67 @@ renderers:
 > enough gust you'll see the cloth redden right at the seam that's about
 > to tear (§5.4) before it actually does.
 
+### 10.3 Viewer UI
+
+Renderers (§10.2) decide *what* draws; this section is how a person
+actually controls and inspects that in the running viewer — global
+display toggles, per-object visibility, selection, and enough live
+readout to debug a scene without a separate tool.
+
+- **Global toggles**: scene aids not tied to any particular object —
+  the ground grid and axes (§10) — can be switched on/off independent of
+  everything else.
+- **An outliner**: a persistent, always-available list of every group,
+  named force, constraint, collider, and surface in the scene, regardless
+  of whether anything currently renders it. This is the answer to "how do
+  I reach an object's UI when it isn't visible" — right-click-in-3D (below)
+  only works on something already on screen, so a parallel list is what
+  makes an *invisible* force or an unrendered group's settings reachable
+  at all. Selecting an entry opens the same per-object panel a right-click
+  would.
+- **Per-object panel**: for a group, force, constraint, collider, or
+  surface — independent visibility toggles for whatever that object type
+  can render (a group's particles, a force's arrows/lines, a surface's
+  mesh), plus whatever renderer-specific settings apply (§10.2's `kind`,
+  `colorBy`, sphere-vs-dot, region/resolution for arrows). Reachable via
+  the outliner or via right-click.
+- **Right-click to open**: right-clicking a rendered object in the 3D
+  view opens its per-object panel directly, without going through the
+  outliner first — the fast path for something already visible.
+- **Selection & inspection**: selecting an object (via the 3D view or the
+  outliner) shows live numeric readout for it — a particle's position/
+  velocity, a force's current magnitude, a breakable connection's current
+  `breakProximity` — useful for debugging a scene without external
+  tooling.
+- **Color legend**: whenever a `colorBy` gradient (§10.2) is active
+  anywhere in the scene, a small legend shows what the gradient's two
+  ends mean, so "blue → orange" isn't something to memorize per scene.
+- **Stats overlay**: live particle count, step rate, and how far physics
+  time is lagging wall-clock time — the last of these is a direct,
+  user-visible readout of §9.1's pacing policy (frames drop before
+  physics ever coarsens), rather than a silent internal detail.
+- **Camera bookmarks**: save and return to a handful of named manual
+  camera views (§10.1) — e.g. top-down, side-on, following a group's
+  centroid — instead of re-orbiting from scratch every time.
+- **Time controls** (pause, speed multiplier, step-once) are already
+  specified in §9.1 but are UI surface, not just engine capability —
+  listed here as part of what this viewer needs to actually expose, not
+  a new requirement.
+- `[stretch]` **Live parameter tweaking**: editing a force/constraint's
+  numeric parameters (stiffness, wind strength, restitution, ...) from
+  its per-object panel, with the change taking effect immediately in the
+  running simulation. Deliberately deferred, and deliberately distinct
+  from everything else in this section: every other item here is the
+  viewer *reading* engine state, the same direction §9.1's state stream
+  already flows; this is the viewer *writing back*, which means
+  generalizing §9.4's drag-target channel (currently the only case of
+  viewer-to-engine input, and narrowly typed to "a position") into
+  something that can carry an arbitrary named parameter edit instead.
+  That's a materially bigger protocol and validation surface (what
+  happens to a running simulation when `stiffness` goes negative
+  mid-step?) than a read-only inspector, which is why it stays `[stretch]`
+  rather than bundled in with the rest of this UI.
+
 ## 11. Non-Functional Requirements
 
 - **Units**: SI throughout (meters, kg, seconds, Newtons); documented in one
@@ -875,7 +971,11 @@ main lever for performance.
 - **Particle vs. triangulated surface** (a particle colliding with a flag
   or cloth, rather than with a plane/box/sphere collider) is `[stretch]` —
   meaningfully harder (point-vs-triangle tests, deformable target) than
-  particle vs. static primitive.
+  particle vs. static primitive. No longer purely speculative: §12.8's
+  trampoline worked example needs exactly this, so it's the concrete
+  consumer that's been missing so far (the same "deferred until something
+  concretely needs it" pattern §5.2's wind position-dependence already
+  followed) — still not scheduled, but no longer a guess at future need.
 - **Surface self-collision** (cloth colliding with itself) is `[stretch]`
   and likely last in priority — expensive and only needed for
   heavily-folding cloth scenarios.
@@ -994,6 +1094,28 @@ and it reverses on its own the moment the particle is disturbed.
   is also a genuine performance win at scale (§9.3) beyond just fixing the
   jitter — a large pile of settled particles costs almost nothing once
   they're asleep.
+
+### 12.8 Worked example: a trampoline
+
+> A taut, roughly square surface (§7) — much stiffer structural springs
+> than the flag's, and its rim particles pinned to a fixed frame (§6)
+> instead of just one edge — sits horizontally a short drop below a ball
+> (§12.6's single collidable particle). The ball falls onto the trampoline
+> surface, the surface deforms downward under the impact, and its own
+> restoring spring force launches the ball back up — a bounce that comes
+> from the surface's actual deformation, not a fixed-shape collider's
+> restitution coefficient.
+
+This is the concrete scenario that promotes particle-vs-triangulated-
+surface collision (§12.4) out of pure speculation: the ball needs to
+collide with the trampoline's current (deformed) shape every step, not a
+static proxy shape standing in for it. Everything else the trampoline
+needs already exists once that lands — a surface (§7) with structural
+springs (§7.1) and a rim pinned via `FixedPosition` (§6) is the same
+mechanism the flag's pole edge already uses, and the ball itself is
+§12.6's worked example unchanged. A shape library entry (§4.5) for
+"trampoline" is the natural way to package it once built, the same as a
+flag or a ball would be.
 
 ## 13. Numerical Stability
 
@@ -1254,7 +1376,13 @@ wait for §9.2's real recording format to exist.
 
 ## 16. Open Questions (to resolve while iterating on this doc)
 
-None currently outstanding — the batch raised by an external review pass
-(see conversation history for the full critique) is fully resolved and
-folded into the relevant sections above. New questions get added here as
-they come up.
+- **§4.5 shape-instance namespacing**: `flag1.cloth`-style dotted group
+  names are illustrative, not decided — needs an actual convention before
+  more than one shape type exists, so the second shape built doesn't each
+  invent its own.
+- **§10.3 UI implementation approach**: whether the outliner/inspector/
+  per-object panels are built as part of the three.js viewer page itself
+  or as a separate control-panel layer (e.g. a small UI library
+  purpose-built for exactly this kind of live-scene-tree/property-panel
+  need) is unresolved — affects how much of §10.3 is "more JS in the
+  existing viewer" vs. a new piece of the stack.
