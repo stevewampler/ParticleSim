@@ -15,6 +15,11 @@ import particlesim.core.Vector3
  * implemented as [ConstantForce] in the accumulation pass instead.
  */
 interface Constraint {
+    /** Optional name (§10.3's name→object registry — same convention as [Force.name] and
+     * [particlesim.collision.Collider.name]): an unnamed constraint still applies normally,
+     * it's just not individually reachable via the outliner. */
+    val name: String?
+
     fun applyVelocity(store: ParticleStore, groups: Groups, t: Double) {}
     fun applyPosition(store: ParticleStore, groups: Groups, t: Double) {}
 }
@@ -30,8 +35,9 @@ class FixedPosition private constructor(
     private val group: String,
     private val position: Vector3?,
     private val perParticlePosition: Map<Int, Vector3>?,
+    override val name: String? = null,
 ) : Constraint {
-    constructor(group: String, position: Vector3) : this(group, position, null)
+    constructor(group: String, position: Vector3, name: String? = null) : this(group, position, null, name)
 
     override fun applyPosition(store: ParticleStore, groups: Groups, t: Double) {
         for (id in groups.membersOf(group)) {
@@ -42,13 +48,17 @@ class FixedPosition private constructor(
 
     companion object {
         /** Pins every current member of [group] to wherever it is right now, individually. */
-        fun atCurrentPositions(group: String, store: ParticleStore, groups: Groups): FixedPosition =
-            FixedPosition(group, null, groups.membersOf(group).associateWith { store.position(it) })
+        fun atCurrentPositions(group: String, store: ParticleStore, groups: Groups, name: String? = null): FixedPosition =
+            FixedPosition(group, null, groups.membersOf(group).associateWith { store.position(it) }, name)
     }
 }
 
 /** Pins every member of [group] to a constant [velocity] regardless of forces acting on it (§6). */
-class FixedVelocity(private val group: String, private val velocity: Vector3) : Constraint {
+class FixedVelocity(
+    private val group: String,
+    private val velocity: Vector3,
+    override val name: String? = null,
+) : Constraint {
     override fun applyVelocity(store: ParticleStore, groups: Groups, t: Double) {
         for (id in groups.membersOf(group)) {
             store.setVelocity(id, velocity)
@@ -74,6 +84,11 @@ class FixedVelocity(private val group: String, private val velocity: Vector3) : 
  * moving colliders already use (§12.5) rather than a second, parallel velocity-tracking path.
  */
 class DragConstraint(val particleId: Int, initialTarget: Vector3) : Constraint {
+    // Always unnamed, not a defaulted constructor param like every other Constraint here: a
+    // drag session is the ad hoc, freely-reassigned target described above, never something a
+    // scene author would look up by name via §10.3's outliner - exposing a name param would be
+    // dead API surface with no legitimate caller.
+    override val name: String? = null
     private var currentTarget = initialTarget
     private var previousTarget = initialTarget
     private var lastDt = 0.0

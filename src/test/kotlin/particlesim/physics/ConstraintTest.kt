@@ -100,4 +100,27 @@ class ConstraintTest {
         drag.updateTarget(Vector3(1.0, 0.5, 0.0), dt = 0.05)
         assertEquals(Vector3(0.0, 10.0, 0.0), drag.releaseVelocity())
     }
+
+    @Test
+    fun `name defaults to null and is threaded through both FixedPosition construction paths`() {
+        assertEquals(null, FixedPosition("g", Vector3.ZERO).name)
+        assertEquals("anchor", FixedPosition("g", Vector3.ZERO, name = "anchor").name)
+
+        val store = ParticleStore()
+        val groups = Groups()
+        groups.add("g", store.create())
+        assertEquals("pole", FixedPosition.atCurrentPositions("g", store, groups, name = "pole").name)
+        assertEquals(null, FixedPosition.atCurrentPositions("g", store, groups).name)
+    }
+
+    @Test
+    fun `FixedVelocity name defaults to null`() {
+        assertEquals(null, FixedVelocity("g", Vector3.ZERO).name)
+        assertEquals("driven", FixedVelocity("g", Vector3.ZERO, name = "driven").name)
+    }
+
+    @Test
+    fun `DragConstraint is always unnamed - a drag session is never scene-authored identity`() {
+        assertEquals(null, DragConstraint(0, Vector3.ZERO).name)
+    }
 }

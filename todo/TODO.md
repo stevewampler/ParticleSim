@@ -1311,13 +1311,38 @@ real prerequisite, not just unstarted — see the note below.
       `BinaryFrame`'s wire layout or `debug-viewer.html` — transmitting
       the registry and actually building outliner UI is the next
       sub-pass, not bundled into this one.
+- [x] **Prerequisite closed, second half**: `Constraint` gained a `name`
+      field (mirroring `Force`/`Collider`'s existing `name: String? =
+      null` convention exactly), and `Groups` gained `names(): Set<String>`.
+      `FixedPosition` and `FixedVelocity` both take an optional `name`
+      constructor param (threaded through `FixedPosition`'s two
+      construction paths — the public constructor and
+      `atCurrentPositions`, both tested separately so the threading isn't
+      just assumed). `DragConstraint` deliberately does *not* get a `name`
+      param — it's hardcoded `null`, since a drag session is the same ad
+      hoc, freely-reassigned-particle-to-particle target its own existing
+      doc comment already describes as deliberately not using a named
+      selector; exposing a name param would be dead API surface with no
+      legitimate caller.
+      **`Groups.names()`** returns every group that has ever had a member
+      added, whether or not it's currently non-empty — a group emptied
+      out via `remove`/`removeParticle` still appears, since there's no
+      separate "undeclare a group" operation and an outliner shouldn't
+      make a scene-authored group silently vanish just because its
+      current membership is temporarily zero.
+      **Verified**: 7 new tests (`GroupsTest` ×4, `ConstraintTest` ×3);
+      full suite now 253 green.
+      **Still not done**: `SceneRegistry` itself doesn't yet accept
+      constraints or a `Groups` instance — it only covers forces/surfaces
+      from the first half of this prerequisite. Extending it to all four
+      kinds, plus actually wiring the registry into the wire protocol and
+      viewer, is what the outliner item below still needs.
 - [ ] Outliner, per-object panels, right-click-to-open, selection &
-      inspection, color legend — the forces/surfaces half of the
-      prerequisite above is done; still needed before this can start:
-      a `name` field on `Constraint` (mirroring `Force`/`Collider`) and a
-      way for `Groups` to enumerate every group name it holds, plus
-      extending `SceneRegistry` to cover those two kinds and wiring the
-      whole thing into the wire protocol and viewer.
+      inspection, color legend — every kind now has a name/enumeration
+      story (`Force`/`Collider`/`Constraint.name`, `Groups.names()`,
+      `Surface.name`); still needed: extend `SceneRegistry` to cover
+      constraints and groups too (today it's forces/surfaces only), then
+      wire the whole thing into the wire protocol and viewer.
 - [ ] Time controls (pause, speed multiplier, step-once) — already
       specified in §9.1, not yet built anywhere; this is the UI surface
       for it

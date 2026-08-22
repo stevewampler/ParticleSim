@@ -55,4 +55,33 @@ class GroupsTest {
         assertFalse(groups.membersOf("g").contains(a))
         assertTrue(groups.membersOf("g").isEmpty())
     }
+
+    @Test
+    fun `names lists every group that has ever had a member added`() {
+        val groups = Groups()
+        groups.add("a", 1)
+        groups.add("b", 2)
+        assertEquals(setOf("a", "b"), groups.names())
+    }
+
+    @Test
+    fun `a group emptied via remove still appears in names`() {
+        val groups = Groups()
+        groups.add("g", 1)
+        groups.remove("g", 1)
+        assertEquals(setOf("g"), groups.names())
+    }
+
+    @Test
+    fun `a group emptied via removeParticle still appears in names`() {
+        val groups = Groups()
+        groups.add("g", 1)
+        groups.removeParticle(1)
+        assertEquals(setOf("g"), groups.names())
+    }
+
+    @Test
+    fun `a fresh Groups has no names`() {
+        assertTrue(Groups().names().isEmpty())
+    }
 }

@@ -34,4 +34,12 @@ class Groups {
 
     fun membersOf(group: String): Set<Int> = membersByGroup[group] ?: emptySet()
     fun groupsOf(id: Int): Set<String> = groupsById[id] ?: emptySet()
+
+    /** Every group name that has ever had a member added, whether or not it's currently
+     * non-empty (§10.3's outliner: a group's own declared existence should stay visible even
+     * if every particle in it has since moved to another group or been destroyed — the same
+     * way a named [particlesim.physics.Force] stays registered regardless of its current
+     * numeric value). A group with zero current members via [remove]/[removeParticle] still
+     * appears here; there's no separate "undeclare a group" operation. */
+    fun names(): Set<String> = membersByGroup.keys.toSet()
 }
