@@ -1560,6 +1560,57 @@ real prerequisite, not just unstarted — see the note below.
       panel in a real browser is for the human tester to confirm, same
       standing caveat as every other piece of this phase's client-side
       work.
+- [x] **Selection & inspection**: selecting a group or surface shows a
+      live numeric readout, updated every frame. Required a real
+      protocol extension first — `BinaryFrame` never transmitted velocity
+      at all, only position, even though §10.3 explicitly asks for "a
+      particle's position/velocity." Every particle now carries velocity
+      unconditionally (`PARTICLE_SIZE` 28 → 52 bytes; the most expensive
+      of this frame's per-particle additions so far, since it scales with
+      *every* particle, not just a named group's members the way the
+      registry section does — worth remembering for a future large-N
+      scenario). `DecodedParticle` gained a `velocity` field;
+      `ParticleStore.velocity(id)` (already existed, used elsewhere) is
+      the source.
+      **The readout itself is extended sensibly from "a particle" to
+      "whatever's actually selectable today"**, since there's no
+      individual-particle selection yet — only groups/surfaces/forces/
+      constraints:
+      - **Groups**: centroid position + average member speed, computed
+        client-side from the (now velocity-carrying) particle list
+        filtered to the group's member ids.
+      - **Surfaces**: triangle count + average speed across the mesh's
+        unique vertex ids (deduplicated from its triangle list, so a
+        shared vertex isn't counted — and therefore weighted — more than
+        once).
+      - **Forces/constraints**: still just the existing informational
+        note, now covering both the missing visibility toggle *and* the
+        missing inspection data with one honest sentence each — both are
+        blocked on the same missing wire piece (no source-tag on
+        connections/arrow samples for forces; no renderer at all for
+        constraints, §10.2).
+      **Same single-writer discipline as the earlier "N drawable" fix,
+      deliberately repeated**: `updateInspection()` updates only the
+      readout's own text node every frame, never recreating the checkbox
+      next to it — recreating an interactive element on a timer this
+      tight is exactly the class of bug (a WebSocket frame landing
+      between someone's mousedown and mouseup, detaching the checkbox
+      mid-click) already root-caused once this phase.
+      **Verified three ways**: `BinaryFrameTest` (+1 — a particle's
+      velocity round-trips alongside its position; the existing
+      particles-and-connections test updated to assert `Vector3.ZERO`
+      velocity explicitly rather than silently ignoring the new field),
+      the usual no-browser fallback (`node --check`, `getElementById`
+      cross-check, live `curl` confirming the new functions are served —
+      caught and fixed a self-inflicted verification bug along the way:
+      forgot to run `processResources` after editing the HTML before
+      starting the demo, so the first `curl` check reported 0 matches
+      against a stale build), and a live server-side WebSocket check
+      against a running `FlagDebugDemo` confirming actual physical
+      correctness, not just wire round-tripping: pole particles
+      (`FixedPosition`-constrained) read exactly `0.0` m/s, cloth-only
+      particles read `0.03`–`6.97` m/s under wind — a real, physically
+      sane spread, not placeholder data. Full suite now 263 green.
 - [ ] Time controls (pause, speed multiplier, step-once) — already
       specified in §9.1, not yet built anywhere; this is the UI surface
       for it

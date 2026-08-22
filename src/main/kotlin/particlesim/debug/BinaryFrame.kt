@@ -25,7 +25,7 @@ import java.nio.charset.StandardCharsets
  * f64  t
  * i64  step
  * i32  particleCount
- * particleCount * { i32 id, f64 x, f64 y, f64 z }
+ * particleCount * { i32 id, f64 x, f64 y, f64 z, f64 vx, f64 vy, f64 vz }
  * i32  connectionCount
  * connectionCount * { i32 a, i32 b, f64 r, f64 g, f64 b }
  * u8   hasCamera (0 or 1); if set: 9x f64 (position.xyz, lookAt.xyz, up.xyz)
@@ -59,6 +59,13 @@ import java.nio.charset.StandardCharsets
  * `has`-flag either) when its [SurfaceRenderer.surface] is unnamed — an empty name never matches
  * anything in the outliner, so the two states collapse harmlessly into one.
  *
+ * Every particle carries velocity alongside position — unconditionally, doubling the per-particle
+ * payload from 28 to 52 bytes, not opt-in — so that §10.3's selection & inspection ("a particle's
+ * position/velocity... live numeric readout") has something to read without a second wire
+ * section keyed by id. This is the more expensive of this frame's per-particle additions (it
+ * scales with every particle, not just a named group's members like the registry section does),
+ * worth remembering if a future large-N scenario ever needs to trim frame size.
+ *
  * [visibleIds], when supplied, is the *only* set of particles the viewer draws as a standalone
  * dot/sphere — every particle still travels in the main particle list (needed for connection
  * endpoints and mesh vertices regardless), but one with no renderer of its own (§10.2: "the
@@ -68,7 +75,7 @@ import java.nio.charset.StandardCharsets
  */
 object BinaryFrame {
     private const val HEADER_SIZE = 8 + 8 + 4 // t, step, particleCount
-    private const val PARTICLE_SIZE = 4 + 8 + 8 + 8 // id, x, y, z
+    private const val PARTICLE_SIZE = 4 + 8 + 8 + 8 + 8 + 8 + 8 // id, x, y, z, vx, vy, vz
     private const val CONNECTION_HEADER_SIZE = 4 // connectionCount
     private const val CONNECTION_SIZE = 4 + 4 + 8 + 8 + 8 // a, b, r, g, b
     private const val CAMERA_FLAG_SIZE = 1
@@ -117,8 +124,10 @@ object BinaryFrame {
         buffer.putInt(ids.size)
         for (id in ids) {
             val p = store.position(id)
+            val v = store.velocity(id)
             buffer.putInt(id)
             buffer.putDouble(p.x); buffer.putDouble(p.y); buffer.putDouble(p.z)
+            buffer.putDouble(v.x); buffer.putDouble(v.y); buffer.putDouble(v.z)
         }
         buffer.putInt(connections.size)
         for (connection in connections) {
@@ -191,7 +200,10 @@ object BinaryFrame {
             val x = buf.double
             val y = buf.double
             val z = buf.double
-            DecodedParticle(id, Vector3(x, y, z))
+            val vx = buf.double
+            val vy = buf.double
+            val vz = buf.double
+            DecodedParticle(id, Vector3(x, y, z), Vector3(vx, vy, vz))
         }
         val connectionCount = buf.int
         val connections = (0 until connectionCount).map {
@@ -282,7 +294,7 @@ object BinaryFrame {
     }
 }
 
-data class DecodedParticle(val id: Int, val position: Vector3)
+data class DecodedParticle(val id: Int, val position: Vector3, val velocity: Vector3)
 
 data class DecodedConnection(val a: Int, val b: Int, val color: Color)
 

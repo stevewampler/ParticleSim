@@ -33,9 +33,24 @@ class BinaryFrameTest {
 
         assertEquals(1.5, decoded.t)
         assertEquals(42L, decoded.step)
-        assertEquals(listOf(DecodedParticle(a, Vector3(1.0, 2.0, 3.0)), DecodedParticle(b, Vector3(-1.5, 0.25, 100.0))), decoded.particles)
+        assertEquals(
+            listOf(DecodedParticle(a, Vector3(1.0, 2.0, 3.0), Vector3.ZERO), DecodedParticle(b, Vector3(-1.5, 0.25, 100.0), Vector3.ZERO)),
+            decoded.particles,
+            "neither particle was given a velocity -> Vector3.ZERO",
+        )
         assertEquals(listOf(DecodedConnection(a, b, Color.DEFAULT_LINE)), decoded.connections, "no lineColors override -> the default line color")
         assertNull(decoded.camera)
+    }
+
+    @Test
+    fun `a particle's velocity round-trips alongside its position`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO, velocity = Vector3(4.0, -5.0, 6.5))
+
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(a), connections = emptyList())
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(Vector3(4.0, -5.0, 6.5), decoded.particles.single().velocity)
     }
 
     @Test
