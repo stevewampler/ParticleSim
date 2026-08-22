@@ -1258,7 +1258,41 @@ Chrome automation wasn't available to this session):
       proving the pattern against two structurally-different shapes
       (a static mesh vs. a single collidable particle) was enough to
       validate it without touching every existing example.
-- [ ] `tire`, `flagpole` shapes — genuinely new shapes, not yet built
+- [x] `tire`, `flagpole` shapes — two genuinely new shapes (not refactors
+      of an existing builder), both following the same `store`/`groups`/
+      `placement` trailing-params convention from the start.
+      **`buildTire`** (`particlesim.examples.Tire`): a closed ring of
+      `segments` particles (must be even, ≥4) lying flat in the X/Z plane,
+      held together by neighbor structural springs around the rim *and*
+      a "diameter" brace spring between each particle and its exact
+      opposite — neighbor-only springs offer almost no resistance to the
+      ring collapsing flat under gravity/impact, so the diameter braces
+      are load-bearing, not decorative. Dropped onto the ground via the
+      same `ParticleColliderRule`/`PlaneCollider` mechanism `buildBallBounce`
+      already uses, just applied to the whole rim group. Deliberately
+      doesn't roll or stand on edge — that needs friction/rotational
+      dynamics this engine doesn't have yet (§12.5's friction is
+      `[stretch]`).
+      **`buildFlagpole`** (`particlesim.examples.Flagpole`): a static
+      vertical line of particles pinned with `FixedPosition.atCurrentPositions`,
+      growing *upward* from `placement.offset` (offset is the pole's base,
+      not its top — chosen so a scene author plants it like a real pole).
+      Purely a visual/structural anchor; a `buildFlag` instance is lined up
+      alongside it by placement only, the two aren't physically connected.
+      **Verified, not just unit-tested**: `TireTest`/`FlagpoleTest` (10
+      tests — ring geometry, odd/too-few-segments rejection, offset
+      semantics, an 8000-step fall-and-settle integration test for the
+      tire, instance-name namespacing for both) all pass, and
+      `MultiShapeDebugDemo` was extended to compose a flagpole + flag
+      (flag's pole-edge starts exactly at the flagpole's top) with a tire
+      and the existing ball-bounce, all in one shared scene. Verified
+      server-side against the running demo: 136 particles (7 pole + 112
+      flag + 16 tire + 1 ball) and 224 connections (6 pole segments + 202
+      flag structural springs + 16 tire rim edges, both exact closed-form
+      counts), the flagpole's particles bit-identical across a multi-second
+      gap (a true fixed anchor), the tire settled at ~0.05 (its own
+      particle radius) above the ground, and the ball resting at exactly
+      its placed offset with no cross-talk between shapes.
 - [ ] YAML shape library/registry — second pass, same status as every
       other post-Phase-7 YAML gap; needs the DSL side built first to know
       what a shape actually needs to parameterize
