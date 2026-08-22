@@ -1337,12 +1337,30 @@ real prerequisite, not just unstarted — see the note below.
       from the first half of this prerequisite. Extending it to all four
       kinds, plus actually wiring the registry into the wire protocol and
       viewer, is what the outliner item below still needs.
+- [x] **Prerequisite closed, third half**: `SceneRegistry` now covers all
+      four outliner kinds — `build(forces, constraints, surfaces, groups)`.
+      Groups are collected differently from the other three, deliberately:
+      a `Force`/`Constraint`/`Surface` is *optionally* named and filtered
+      to named-only entries (`Map<String, T>`, same eager duplicate-name
+      rejection as before), but a group has no unnamed form at all — its
+      name *is* its identity in `Groups` from the moment a member is
+      first added — so every group is collected regardless, exposed as a
+      plain `Set<String>` (`registry.groups`) rather than a map, since
+      there's no separate object to look up beyond the name and whatever
+      `Groups.membersOf` already answers with it. No duplicate-name check
+      needed for groups either, for the same reason: `Groups` can't hold
+      two different things under one name by construction.
+      **Verified**: `SceneRegistryTest` extended to 6 tests (named-only
+      filtering now spans forces/constraints/surfaces together, groups
+      registered unconditionally, duplicate rejection checked for both
+      forces and constraints, same-name-across-all-four-kinds including a
+      group, insertion order, empty input across all four). Full suite
+      now 254 green.
 - [ ] Outliner, per-object panels, right-click-to-open, selection &
-      inspection, color legend — every kind now has a name/enumeration
-      story (`Force`/`Collider`/`Constraint.name`, `Groups.names()`,
-      `Surface.name`); still needed: extend `SceneRegistry` to cover
-      constraints and groups too (today it's forces/surfaces only), then
-      wire the whole thing into the wire protocol and viewer.
+      inspection, color legend — the full name→object registry
+      prerequisite is done (`SceneRegistry` covers forces, constraints,
+      surfaces, and groups); what's left is wiring it into the wire
+      protocol and building the actual viewer UI on top of it.
 - [ ] Time controls (pause, speed multiplier, step-once) — already
       specified in §9.1, not yet built anywhere; this is the UI surface
       for it
