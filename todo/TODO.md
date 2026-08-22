@@ -1356,11 +1356,68 @@ real prerequisite, not just unstarted — see the note below.
       forces and constraints, same-name-across-all-four-kinds including a
       group, insertion order, empty input across all four). Full suite
       now 254 green.
-- [ ] Outliner, per-object panels, right-click-to-open, selection &
-      inspection, color legend — the full name→object registry
-      prerequisite is done (`SceneRegistry` covers forces, constraints,
-      surfaces, and groups); what's left is wiring it into the wire
-      protocol and building the actual viewer UI on top of it.
+- [x] **Registry wired into the wire protocol, and a basic (read-only)
+      outliner landed in the viewer** — the transport half of what was
+      left above, plus the first real piece of §10.3's actual UI.
+      **`BinaryFrame`** gained a registry section: four name lists (forces,
+      constraints, surfaces, groups), each `i32 count` + that many
+      `{ i32 byteLen, UTF-8 bytes }` strings — the wire format's first use
+      of variable-length string data, everything before this being fixed-
+      size primitives. Deliberately **names only, no per-frame numeric
+      state** — a force's live magnitude already has a home if it has a
+      line/arrow renderer, and there's no per-object inspection readout
+      yet (a separate, later piece of §10.3) — so this section doesn't
+      try to carry both. Sent unconditionally like `sphereRadii`/`meshes`/
+      `arrowSamples` (no `has`-flag): an absent registry and an empty one
+      mean the same thing, so every demo built before this now pays 4
+      zero-valued `i32`s per frame rather than a new branch to skip.
+      `DebugRenderer.broadcast` gained a trailing `registry: SceneRegistry
+      = SceneRegistry.build()` param threading straight to `encode`.
+      **A real bug found and fixed along the way**: `Groups.names()`
+      returned `HashMap` key order, not creation order — silently
+      violating `SceneRegistry`'s own already-documented "stable, scene-
+      authored order, not hash order" guarantee for the other three
+      kinds. Caught by a wire round-trip test asserting a specific group
+      order (`assertEquals(listOf("cloth", "pole"), ...)` failed as
+      `[pole, cloth]`) — a `Set`-vs-`Set` comparison elsewhere had masked
+      it since `Set` equality ignores order. Fixed by switching `Groups`'
+      backing map to `LinkedHashMap`; regression test added directly to
+      `GroupsTest` so this can't quietly regress back to `HashMap` later.
+      **`buildFlag` gained one more name**: the pole `FixedPosition`
+      constraint is now `"pole-anchor"` (previously unnamed) — needed a
+      real named constraint to prove the registry's constraints kind
+      against an actual demo, not a synthetic test fixture.
+      **`FlagDebugDemo` is the real (not hypothetical) consumer**: builds
+      a `SceneRegistry` from `scenario.forces/constraints/surface/groups`
+      and passes it to `broadcast`.
+      **Viewer**: `debug-viewer.html`'s `decodeFrame` gained `readString`/
+      `readNameList` (via `TextDecoder`, mirroring `BinaryFrame.decode`
+      exactly) and a new `#outliner` panel (top-left) listing all four
+      kinds under labeled sections — read-only, no per-object panels/
+      right-click/selection/color-legend yet, all still separate future
+      work. Skips re-rendering its `<ul>`s when the registry's JSON-
+      stringified contents haven't changed frame-to-frame, since names
+      are structurally static for a run and rebuilding four lists 60
+      times a second for unchanging data would be pure waste.
+      **Verified three ways**: `BinaryFrameTest` (+3 — empty registry
+      round-trips as four empty lists, a populated one round-trips
+      correctly with unnamed entries excluded, non-ASCII UTF-8 bytes
+      round-trip exactly), a live server-side WebSocket check against a
+      running `FlagDebugDemo` confirming the *actual* decoded registry
+      off the wire (`forces=[wind]`, `constraints=[pole-anchor]`,
+      `surfaces=[cloth-mesh]`, `groups=[cloth, pole]`) matches exactly
+      what the scenario declares, and the usual no-browser fallback
+      (`node --check` on the extracted module script, every
+      `getElementById` cross-checked against a real `id=`, a live `curl`
+      confirming the new outliner markup is served). Chrome automation is
+      still not connected in this environment — checked again before
+      starting this piece — so whether the panel is actually readable/
+      usable in a browser remains unverified by a human. Full suite now
+      258 green.
+      **Deliberately not done here**: per-object panels, right-click-to-
+      open, selection & inspection (live numeric readout), and the color
+      legend are all real, separate pieces of §10.3 — this pass only
+      gets names onto the screen, not interaction with them.
 - [ ] Time controls (pause, speed multiplier, step-once) — already
       specified in §9.1, not yet built anywhere; this is the UI surface
       for it

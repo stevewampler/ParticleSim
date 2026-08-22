@@ -4,6 +4,7 @@ import particlesim.core.ParticleStore
 import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
 
 /**
@@ -42,9 +43,12 @@ class DebugRenderer(
         meshes: List<SurfaceRenderer> = emptyList(),
         arrowSamples: List<ArrowSample> = emptyList(),
         visibleIds: Set<Int>? = null,
+        registry: SceneRegistry = SceneRegistry.build(),
     ) {
         wsServer.broadcastFrame(
-            BinaryFrame.encode(t, step, store, ids, connections, camera, lineColors, sphereRadii, meshes, arrowSamples, visibleIds),
+            BinaryFrame.encode(
+                t, step, store, ids, connections, camera, lineColors, sphereRadii, meshes, arrowSamples, visibleIds, registry,
+            ),
         )
     }
 

@@ -115,7 +115,7 @@ fun buildFlag(
     )
     val gravity = UniformGravity(clothGroup, Vector3(0.0, -9.8, 0.0))
 
-    val constraints = listOf(FixedPosition.atCurrentPositions(poleGroup, store, groups))
+    val constraints = listOf(FixedPosition.atCurrentPositions(poleGroup, store, groups, name = placement.name("pole-anchor")))
 
     return FlagScenario(
         store = store,

@@ -11,7 +11,11 @@ package particlesim.core
  * membership onto the newcomer.
  */
 class Groups {
-    private val membersByGroup = HashMap<String, MutableSet<Int>>()
+    // LinkedHashMap, not a plain HashMap: [names] exposes this map's key order directly, and
+    // §10.3's outliner wants a stable, scene-authored order (the group first added to first)
+    // the same way SceneRegistry's own LinkedHashMap-backed force/constraint/surface maps
+    // already do - hash order would list groups in an arbitrary, run-dependent sequence.
+    private val membersByGroup = LinkedHashMap<String, MutableSet<Int>>()
     private val groupsById = HashMap<Int, MutableSet<String>>()
 
     fun add(group: String, id: Int) {
@@ -40,6 +44,9 @@ class Groups {
      * if every particle in it has since moved to another group or been destroyed — the same
      * way a named [particlesim.physics.Force] stays registered regardless of its current
      * numeric value). A group with zero current members via [remove]/[removeParticle] still
-     * appears here; there's no separate "undeclare a group" operation. */
+     * appears here; there's no separate "undeclare a group" operation. Iteration order matches
+     * the order groups were first created in, not hash order — the returned [Set] is a copy
+     * (via [LinkedHashMap], not a plain `HashMap`), so it stays valid even as this [Groups]
+     * instance is mutated afterward. */
     fun names(): Set<String> = membersByGroup.keys.toSet()
 }

@@ -1,10 +1,14 @@
 package particlesim.debug
 
+import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
+import particlesim.physics.FixedPosition
+import particlesim.physics.UniformGravity
 import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
 import particlesim.surface.Surface
 import particlesim.surface.Triangle
@@ -149,6 +153,50 @@ class BinaryFrameTest {
         val decoded = BinaryFrame.decode(buffer)
 
         assertEquals(setOf(pole), decoded.visibleIds, "only the pole particle should be marked visible as a standalone dot")
+    }
+
+    @Test
+    fun `an empty registry round-trips as four empty lists, unchanged from every demo built before this`() {
+        val store = ParticleStore()
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList())
+
+        val decoded = BinaryFrame.decode(buffer).registry
+        assertEquals(DecodedRegistry(), decoded)
+    }
+
+    @Test
+    fun `a populated registry round-trips names for every kind, unnamed entries excluded`() {
+        val store = ParticleStore()
+        val groups = Groups().apply { add("cloth", 1); add("pole", 2) }
+        val registry = SceneRegistry.build(
+            forces = listOf(UniformGravity("cloth", Vector3.ZERO, name = "gravity"), UniformGravity("cloth", Vector3.ZERO)),
+            constraints = listOf(FixedPosition("pole", Vector3.ZERO, name = "pole-anchor")),
+            surfaces = listOf(Surface(emptyList(), name = "cloth-mesh")),
+            groups = groups,
+        )
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), registry = registry,
+        )
+        val decoded = BinaryFrame.decode(buffer).registry
+
+        assertEquals(listOf("gravity"), decoded.forces)
+        assertEquals(listOf("pole-anchor"), decoded.constraints)
+        assertEquals(listOf("cloth-mesh"), decoded.surfaces)
+        assertEquals(listOf("cloth", "pole"), decoded.groups)
+    }
+
+    @Test
+    fun `registry names round-trip non-ASCII bytes exactly`() {
+        val store = ParticleStore()
+        val registry = SceneRegistry.build(surfaces = listOf(Surface(emptyList(), name = "flügel-mesh")))
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), registry = registry,
+        )
+        val decoded = BinaryFrame.decode(buffer).registry
+
+        assertEquals(listOf("flügel-mesh"), decoded.surfaces)
     }
 
     @Test

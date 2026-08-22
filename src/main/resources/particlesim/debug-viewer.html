@@ -45,12 +45,35 @@
     width: 90px; font: 11px monospace; background: rgba(255,255,255,0.1);
     color: #ddd; border: 1px solid rgba(255,255,255,0.25); border-radius: 3px;
   }
+  #outliner {
+    position: fixed; top: 44px; left: 8px; z-index: 1;
+    font: 12px/1.5 monospace; color: #ddd; background: rgba(0,0,0,0.55);
+    padding: 8px 10px; border-radius: 4px; max-width: 220px; max-height: 45vh; overflow-y: auto;
+  }
+  #outliner h4 {
+    margin: 8px 0 2px; font-size: 10px; color: #9cf; font-weight: normal;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  #outliner h4:first-child { margin-top: 0; }
+  #outliner ul { margin: 0 0 4px; padding: 0; list-style: none; }
+  #outliner li { padding: 1px 0; color: #ddd; overflow-wrap: break-word; }
+  #outliner .outlinerEmpty { color: #666; font-style: italic; }
 </style>
 </head>
 <body>
 <div id="status">connecting…</div>
 <button id="returnToScripted">return to scripted camera</button>
 <label id="meshEdgesToggle"><input type="checkbox" id="meshEdgesCheckbox"> show mesh edges</label>
+<div id="outliner">
+  <h4>groups</h4>
+  <div id="outlinerGroups"></div>
+  <h4>forces</h4>
+  <div id="outlinerForces"></div>
+  <h4>constraints</h4>
+  <div id="outlinerConstraints"></div>
+  <h4>surfaces</h4>
+  <div id="outlinerSurfaces"></div>
+</div>
 <div id="controlPanel">
   <section>
     <h4>display</h4>
@@ -390,6 +413,8 @@ function applyFrame(frame) {
 // --- Binary frame decoding (§9.1) ---------------------------------------------------------
 // Mirrors particlesim.debug.BinaryFrame's layout exactly (little-endian throughout) - see
 // that class's own doc comment for the full field-by-field layout.
+const utf8Decoder = new TextDecoder("utf-8");
+
 function decodeFrame(buffer) {
   const view = new DataView(buffer);
   let offset = 0;
@@ -398,6 +423,18 @@ function decodeFrame(buffer) {
     const y = view.getFloat64(offset, true); offset += 8;
     const z = view.getFloat64(offset, true); offset += 8;
     return { x, y, z };
+  };
+  const readString = () => {
+    const len = view.getInt32(offset, true); offset += 4;
+    const str = utf8Decoder.decode(new Uint8Array(buffer, offset, len));
+    offset += len;
+    return str;
+  };
+  const readNameList = () => {
+    const count = view.getInt32(offset, true); offset += 4;
+    const names = new Array(count);
+    for (let i = 0; i < count; i++) names[i] = readString();
+    return names;
   };
 
   const t = view.getFloat64(offset, true); offset += 8;
@@ -463,7 +500,17 @@ function decodeFrame(buffer) {
     }
   }
 
-  return { t, step, particles, connections, camera: cam, spheres, meshes, arrows, visibleIds };
+  // §10.3's outliner data (SceneRegistry) - four flat name lists, no per-frame numeric state
+  // attached (see BinaryFrame's own doc comment for why). Sent unconditionally, so a demo with
+  // nothing named just yields four empty arrays here, not a missing field.
+  const registry = {
+    forces: readNameList(),
+    constraints: readNameList(),
+    surfaces: readNameList(),
+    groups: readNameList(),
+  };
+
+  return { t, step, particles, connections, camera: cam, spheres, meshes, arrows, visibleIds, registry };
 }
 
 // --- Stats overlay (§10.3) ----------------------------------------------------------------
@@ -518,6 +565,49 @@ function updateStats(frame) {
     `lag:       ${lagS >= 0 ? "+" : ""}${lagS.toFixed(2)}s`;
 }
 
+// --- Outliner (§10.3) -----------------------------------------------------------------------
+// A persistent, always-available list of every named group/force/constraint/surface, regardless
+// of what's currently rendered - the answer to "how do I reach an invisible object's settings"
+// once per-object panels exist (they don't yet: this is read-only, just the list itself). Skips
+// re-rendering the DOM when the registry's contents haven't changed since the last frame - names
+// are structurally static for a given run, so rebuilding four <ul>s 60 times a second for
+// unchanging data would be pure waste.
+const outlinerSections = {
+  groups: document.getElementById("outlinerGroups"),
+  forces: document.getElementById("outlinerForces"),
+  constraints: document.getElementById("outlinerConstraints"),
+  surfaces: document.getElementById("outlinerSurfaces"),
+};
+let lastRegistrySignature = null;
+
+function renderNameList(container, names) {
+  container.innerHTML = "";
+  if (names.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "outlinerEmpty";
+    empty.textContent = "(none)";
+    container.appendChild(empty);
+    return;
+  }
+  const list = document.createElement("ul");
+  for (const name of names) {
+    const item = document.createElement("li");
+    item.textContent = name;
+    list.appendChild(item);
+  }
+  container.appendChild(list);
+}
+
+function updateOutliner(registry) {
+  const signature = JSON.stringify(registry);
+  if (signature === lastRegistrySignature) return;
+  lastRegistrySignature = signature;
+  renderNameList(outlinerSections.groups, registry.groups);
+  renderNameList(outlinerSections.forces, registry.forces);
+  renderNameList(outlinerSections.constraints, registry.constraints);
+  renderNameList(outlinerSections.surfaces, registry.surfaces);
+}
+
 let socket = null;
 
 function connect() {
@@ -526,7 +616,7 @@ function connect() {
   const ws = new WebSocket(`ws://${location.hostname}:8887`);
   ws.binaryType = "arraybuffer";
   socket = ws;
-  ws.onopen = () => { statusEl.textContent = "connected"; resetStats(); };
+  ws.onopen = () => { statusEl.textContent = "connected"; resetStats(); lastRegistrySignature = null; };
   ws.onclose = () => { statusEl.textContent = "disconnected — retrying…"; setTimeout(connect, 1000); };
   ws.onerror = () => ws.close();
   ws.onmessage = (event) => {
@@ -535,6 +625,7 @@ function connect() {
     statusEl.textContent = `t=${frame.t.toFixed(3)}  step=${frame.step}  particles=${frame.particles.length}${cameraTag}`;
     applyFrame(frame);
     updateStats(frame);
+    updateOutliner(frame.registry);
   };
 }
 connect();

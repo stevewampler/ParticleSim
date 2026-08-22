@@ -5,10 +5,12 @@ import particlesim.core.Vector3
 import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
 import particlesim.surface.Triangle
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.charset.StandardCharsets
 
 /**
  * Binary per-frame encoding (§9.1: "a WebSocket using a compact binary framing... since
@@ -34,7 +36,21 @@ import java.nio.ByteOrder
  * i32  arrowCount
  * arrowCount * { f64 ox, oy, oz, f64 vx, vy, vz }
  * u8   hasVisibleIdsFilter (0 or 1); if set: i32 visibleCount, visibleCount * i32 id
+ * i32  registryForceCount;      registryForceCount      * { i32 nameLen, nameLen UTF-8 bytes }
+ * i32  registryConstraintCount; registryConstraintCount * { i32 nameLen, nameLen UTF-8 bytes }
+ * i32  registrySurfaceCount;    registrySurfaceCount    * { i32 nameLen, nameLen UTF-8 bytes }
+ * i32  registryGroupCount;      registryGroupCount      * { i32 nameLen, nameLen UTF-8 bytes }
  * ```
+ *
+ * The registry section (§10.3's outliner prerequisite, [SceneRegistry]) carries *names only* —
+ * one flat list per kind, no per-frame numeric state (a force's live magnitude, a constraint's
+ * current target) attached. That data already has a home elsewhere in this same frame (a named
+ * force's line/arrow renderer, if it has one) or doesn't exist yet (there's no per-object
+ * inspection readout wired up yet — a separate, later piece of §10.3). Sent unconditionally
+ * (no `has`-flag, unlike `camera`/`visibleIds`) because an absent registry and an empty one mean
+ * the same thing here, matching how `sphereRadii`/`meshes`/`arrowSamples` already default to
+ * "present but zero-length" rather than a nullable flag — every demo built before this defaults
+ * to an empty [SceneRegistry] and pays 4 zero-valued `i32`s per frame, not a new branch to skip.
  *
  * [visibleIds], when supplied, is the *only* set of particles the viewer draws as a standalone
  * dot/sphere — every particle still travels in the main particle list (needed for connection
@@ -59,6 +75,8 @@ object BinaryFrame {
     private const val ARROW_SIZE = 8 * 6 // origin xyz, vector xyz
     private const val VISIBLE_FLAG_SIZE = 1
     private const val VISIBLE_HEADER_SIZE = 4
+    private const val REGISTRY_LIST_HEADER_SIZE = 4 // count, once per kind
+    private const val STRING_HEADER_SIZE = 4 // nameLen
 
     fun encode(
         t: Double,
@@ -72,6 +90,7 @@ object BinaryFrame {
         meshes: List<SurfaceRenderer> = emptyList(),
         arrowSamples: List<ArrowSample> = emptyList(),
         visibleIds: Set<Int>? = null,
+        registry: SceneRegistry = SceneRegistry.build(),
     ): ByteBuffer {
         val size = HEADER_SIZE + ids.size * PARTICLE_SIZE +
             CONNECTION_HEADER_SIZE + connections.size * CONNECTION_SIZE +
@@ -79,7 +98,9 @@ object BinaryFrame {
             SPHERE_HEADER_SIZE + sphereRadii.size * SPHERE_SIZE +
             MESH_HEADER_SIZE + meshes.sumOf { MESH_ENTRY_HEADER_SIZE + it.surface.triangles.size * TRIANGLE_SIZE } +
             ARROW_HEADER_SIZE + arrowSamples.size * ARROW_SIZE +
-            VISIBLE_FLAG_SIZE + (if (visibleIds != null) VISIBLE_HEADER_SIZE + visibleIds.size * 4 else 0)
+            VISIBLE_FLAG_SIZE + (if (visibleIds != null) VISIBLE_HEADER_SIZE + visibleIds.size * 4 else 0) +
+            nameListSize(registry.forces.keys) + nameListSize(registry.constraints.keys) +
+            nameListSize(registry.surfaces.keys) + nameListSize(registry.groups)
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
         buffer.putDouble(t)
@@ -129,6 +150,10 @@ object BinaryFrame {
         } else {
             buffer.put(0)
         }
+        putNameList(buffer, registry.forces.keys)
+        putNameList(buffer, registry.constraints.keys)
+        putNameList(buffer, registry.surfaces.keys)
+        putNameList(buffer, registry.groups)
 
         buffer.flip()
         return buffer
@@ -184,7 +209,13 @@ object BinaryFrame {
         } else {
             null
         }
-        return DecodedFrame(t, step, particles, connections, camera, spheres, meshes, arrows, visibleIds)
+        val registry = DecodedRegistry(
+            forces = getNameList(buf),
+            constraints = getNameList(buf),
+            surfaces = getNameList(buf),
+            groups = getNameList(buf),
+        )
+        return DecodedFrame(t, step, particles, connections, camera, spheres, meshes, arrows, visibleIds, registry)
     }
 
     private fun putVector(buffer: ByteBuffer, v: Vector3) {
@@ -192,6 +223,34 @@ object BinaryFrame {
     }
 
     private fun getVector(buffer: ByteBuffer): Vector3 = Vector3(buffer.double, buffer.double, buffer.double)
+
+    private fun stringSize(s: String) = STRING_HEADER_SIZE + s.toByteArray(StandardCharsets.UTF_8).size
+
+    private fun nameListSize(names: Collection<String>) =
+        REGISTRY_LIST_HEADER_SIZE + names.sumOf { stringSize(it) }
+
+    private fun putString(buffer: ByteBuffer, s: String) {
+        val bytes = s.toByteArray(StandardCharsets.UTF_8)
+        buffer.putInt(bytes.size)
+        buffer.put(bytes)
+    }
+
+    private fun putNameList(buffer: ByteBuffer, names: Collection<String>) {
+        buffer.putInt(names.size)
+        for (name in names) putString(buffer, name)
+    }
+
+    private fun getString(buffer: ByteBuffer): String {
+        val len = buffer.int
+        val bytes = ByteArray(len)
+        buffer.get(bytes)
+        return String(bytes, StandardCharsets.UTF_8)
+    }
+
+    private fun getNameList(buffer: ByteBuffer): List<String> {
+        val count = buffer.int
+        return (0 until count).map { getString(buffer) }
+    }
 }
 
 data class DecodedParticle(val id: Int, val position: Vector3)
@@ -201,6 +260,15 @@ data class DecodedConnection(val a: Int, val b: Int, val color: Color)
 data class DecodedSphere(val id: Int, val radius: Double)
 
 data class DecodedMesh(val wireframe: Boolean, val triangles: List<Triangle>)
+
+/** §10.3's outliner data — see [SceneRegistry] for what "named" means per kind and why groups
+ * are a plain list rather than paired with anything else. */
+data class DecodedRegistry(
+    val forces: List<String> = emptyList(),
+    val constraints: List<String> = emptyList(),
+    val surfaces: List<String> = emptyList(),
+    val groups: List<String> = emptyList(),
+)
 
 data class DecodedFrame(
     val t: Double,
@@ -212,4 +280,5 @@ data class DecodedFrame(
     val meshes: List<DecodedMesh> = emptyList(),
     val arrows: List<ArrowSample> = emptyList(),
     val visibleIds: Set<Int>? = null,
+    val registry: DecodedRegistry = DecodedRegistry(),
 )

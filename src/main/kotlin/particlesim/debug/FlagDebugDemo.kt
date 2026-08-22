@@ -12,6 +12,7 @@ import particlesim.render.ArrowSampling
 import particlesim.render.CameraFunction
 import particlesim.render.CameraPose
 import particlesim.render.SceneQueryImpl
+import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
 import kotlin.math.cos
 import kotlin.math.sin
@@ -73,6 +74,15 @@ fun main() {
     // Wind's raw m/s magnitude (~6-8) would draw arrows several times the flag's own size;
     // scaled down purely for this demo's display, not a claim about the physical value itself.
     val arrowVisualScale = 0.15
+    // §10.3's outliner data: this scenario's own named force (wind), named constraint (the pole
+    // anchor), named surface (the cloth mesh), and every group — all real, not hypothetical,
+    // since buildFlag names these itself now (§10.3's name→object registry prerequisite).
+    val registry = SceneRegistry.build(
+        forces = scenario.forces,
+        constraints = scenario.constraints,
+        surfaces = listOf(scenario.surface),
+        groups = scenario.groups,
+    )
 
     val dragQueue = DragMessageQueue()
     val renderer = DebugRenderer(onTextMessage = { text ->
@@ -123,6 +133,7 @@ fun main() {
             meshes = listOf(clothMesh),
             arrowSamples = arrowSamples,
             visibleIds = poleIds,
+            registry = registry,
         )
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)

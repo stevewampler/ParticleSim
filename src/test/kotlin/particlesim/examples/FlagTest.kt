@@ -23,21 +23,23 @@ class FlagTest {
     }
 
     @Test
-    fun `the surface and the wind force are named, distinctly from the cloth group`() {
+    fun `the surface, wind force, and pole constraint are all named, distinctly from the cloth group`() {
         val flag = buildFlag()
 
         assertEquals("cloth-mesh", flag.surface.name)
         val wind = flag.forces.filterIsInstance<Wind>().single()
         assertEquals("wind", wind.name)
+        assertEquals("pole-anchor", flag.constraints.single().name)
         assertNotNull(flag.surface.name)
     }
 
     @Test
-    fun `an instance name namespaces the surface and wind names too`() {
+    fun `an instance name namespaces the surface, wind, and constraint names too`() {
         val flag = buildFlag(placement = ShapePlacement(instanceName = "flag1"))
 
         assertEquals("flag1.cloth-mesh", flag.surface.name)
         val wind = flag.forces.filterIsInstance<Wind>().single()
         assertEquals("flag1.wind", wind.name)
+        assertEquals("flag1.pole-anchor", flag.constraints.single().name)
     }
 }

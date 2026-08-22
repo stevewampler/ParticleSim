@@ -84,4 +84,13 @@ class GroupsTest {
     fun `a fresh Groups has no names`() {
         assertTrue(Groups().names().isEmpty())
     }
+
+    @Test
+    fun `names preserves creation order, not hash order`() {
+        val groups = Groups()
+        val creationOrder = listOf("zeta", "alpha", "mu", "beta")
+        creationOrder.forEachIndexed { i, name -> groups.add(name, i) }
+
+        assertEquals(creationOrder, groups.names().toList())
+    }
 }
