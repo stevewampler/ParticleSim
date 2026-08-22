@@ -11,7 +11,6 @@ import particlesim.render.ArrowRenderer
 import particlesim.render.ArrowSampling
 import particlesim.render.CameraFunction
 import particlesim.render.CameraPose
-import particlesim.render.ColorRamp
 import particlesim.render.SceneQueryImpl
 import particlesim.render.SurfaceRenderer
 import kotlin.math.cos
@@ -32,17 +31,28 @@ import kotlin.math.sin
  * And §10.2's full renderer-declaration set — almost exactly the requirements doc's own
  * *extended* flag example: "the flag surface itself renders as a shaded mesh, the pole-edge
  * particles render as small spheres so the anchor is visible, and the wind force gets an
- * arrow renderer sampled around the flag. The individual cloth particles have no renderer of
- * their own — the mesh already shows them — but the structural springs do get a
- * `breakProximity`-colored line renderer." `visibleIds` is what makes the cloth particles
+ * arrow renderer sampled around the flag." `visibleIds` is what makes the cloth particles
  * mesh-only: only the pole group is in it, so cloth particles carry position data (for the
  * mesh's vertices and the structural lines) without ever drawing their own dot. Picking still
  * works on mesh-only particles — the viewer's raycaster hits mesh faces too, resolving to
  * whichever vertex is nearest the hit point (see debug-viewer.html's `pickParticle`).
+ *
+ * **No `breakProximity`-colored structural springs here**, unlike an earlier version of this
+ * demo — tried and reverted. `MeshSprings`' structural damping (1.0, well under critical for
+ * its stiffness/mass) means a sudden reposition — exactly what dragging does every step —
+ * causes real overshoot/ringing, not just a smooth approach to the new target; that overshoot
+ * transiently spiked displacement well past thresholds that looked safe from watching wind
+ * alone (0.02 broke under wind by itself; 0.1 still broke under a deliberately modest,
+ * gradual drag). Raising the threshold further would have kept "surviving drag" and "showing
+ * wind-driven color" in tension indefinitely — wind's own peak displacement is tiny, so any
+ * threshold loose enough to survive dragging's overshoot makes wind's contribution negligible
+ * anyway. `MeshSprings.activeConnectionsWithBreakProximity` and `ColorRamp` are still fully
+ * implemented and tested independently (`MeshSpringsTest`, `ColorRampTest`) — this demo just
+ * doesn't lean on a finite threshold anymore, since permanently tearing the flag from ordinary
+ * dragging was a worse experience than never showing tension color.
  */
 fun main() {
-    val structuralBreakThreshold = 0.02 // ~13% of restLength (spacing=0.15) - tune by watching it, not guessing
-    val scenario = buildFlag(rows = 8, cols = 14, structuralBreakThreshold = structuralBreakThreshold)
+    val scenario = buildFlag(rows = 8, cols = 14)
     val structural = scenario.meshSprings[0]
     val wind = scenario.forces.filterIsInstance<Wind>().single()
     val flagTip = scenario.grid.last().last()
@@ -104,14 +114,11 @@ fun main() {
             t += FLAG_DT
             step++
         }
-        val withProximity = structural.activeConnectionsWithBreakProximity(scenario.store)
-        val lineColors = withProximity.associate { (a, b, proximity) -> (a to b) to ColorRamp.blueOrange(proximity) }
         val arrowSamples = ArrowSampling.sample(windArrows, t).map { it.copy(vector = it.vector * arrowVisualScale) }
         renderer.broadcast(
             t, step, scenario.store, allIds,
-            connections = withProximity.map { (a, b, _) -> a to b },
+            connections = structural.activeConnections(),
             camera = camera.evaluate(t, scene),
-            lineColors = lineColors,
             sphereRadii = poleSphereRadii,
             meshes = listOf(clothMesh),
             arrowSamples = arrowSamples,
