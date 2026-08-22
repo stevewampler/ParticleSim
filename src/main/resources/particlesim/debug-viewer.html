@@ -409,6 +409,7 @@ function applyFrame(frame) {
     const built = buildMeshGeometry(meshDecl, byId);
     obj.geometry = built.geometry;
     obj.userData.triangleVertexIds = built.triangleVertexIds;
+    obj.userData.surfaceName = meshDecl.name; // "" when unnamed - right-click resolves this to a panel
     obj.material = meshDecl.wireframe ? wireframeMeshMaterial() : solidMeshMaterial();
 
     const overlay = meshEdgeOverlays[i];
@@ -897,6 +898,35 @@ function endDrag(event) {
 }
 renderer.domElement.addEventListener("pointerup", endDrag);
 renderer.domElement.addEventListener("pointercancel", endDrag);
+
+// --- Right-click to open a per-object panel (§10.3) ---------------------------------------
+// "The fast path for something already visible" - the outliner's click-to-select still works
+// regardless, this is just a shortcut for whatever's already on screen. Reuses the same
+// raycast targets as drag/pick above, but resolves differently: a mesh hit opens *that* surface's
+// panel directly (unambiguous - a mesh belongs to exactly one Surface), while a dot hit opens
+// the most specific *group* containing that particle, since group membership can legitimately
+// overlap (a flag's pole-edge particles are members of both "cloth" and "pole") and the smaller,
+// more specific group is the more likely intended target of a click on it.
+renderer.domElement.addEventListener("contextmenu", (event) => {
+  event.preventDefault(); // this canvas has its own right-click action; never show the browser's menu
+  pointerToNdc(event);
+  raycaster.setFromCamera(pointerNdc, camera);
+  const hits = raycaster.intersectObjects([...dots.children, ...meshObjects]);
+  if (hits.length === 0) return;
+  const hit = hits[0];
+
+  if (hit.object.userData.particleId !== undefined) {
+    const particleId = hit.object.userData.particleId;
+    const candidates = latestRegistry.groups.filter((g) => g.memberIds.has(particleId));
+    if (candidates.length === 0) return; // not a member of any named group - nothing to open
+    candidates.sort((a, b) => a.memberIds.size - b.memberIds.size);
+    selectObject("groups", candidates[0].name);
+    return;
+  }
+
+  const surfaceName = hit.object.userData.surfaceName;
+  if (surfaceName) selectObject("surfaces", surfaceName); // "" (unnamed) has no panel to open
+});
 
 function animate() {
   requestAnimationFrame(animate);

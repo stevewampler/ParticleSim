@@ -1485,10 +1485,9 @@ real prerequisite, not just unstarted — see the note below.
       entry actually opens the panel and whether the checkbox visibly
       changes what's drawn remains unverified by a human. Full suite now
       262 green.
-      **Still separate, real future work**: right-click-to-open (only
-      outliner-click is wired), selection & inspection's live numeric
-      readout, the color legend, and a force-visibility toggle (needs the
-      source-tag protocol extension noted above).
+      **Still separate, real future work**: selection & inspection's live
+      numeric readout, the color legend, and a force-visibility toggle
+      (needs the source-tag protocol extension noted above).
 - [x] **First real human browser testing of this feature — two findings,
       both root-caused by reading the code, not guessed**:
       1. **Toggling "cloth"/"pole" looked inconsistent.** Root cause: in
@@ -1531,6 +1530,36 @@ real prerequisite, not just unstarted — see the note below.
       `ViewerHttpServer` sent no cache headers at all, so a browser could
       silently serve a stale cached copy of the page across a reload —
       added `Cache-Control: no-store`, verified via `curl -D -`.
+- [x] **Right-click-to-open**: right-clicking a rendered object in the 3D
+      view opens its per-object panel directly, no outliner click needed
+      — "the fast path for something already visible" (§10.3's own
+      framing). Reuses the same raycast targets §9.4's drag already picks
+      against (dots + mesh objects), but resolves differently depending
+      on what's hit:
+      - **A mesh hit** opens *that* surface's panel directly — unambiguous,
+        since a mesh belongs to exactly one `Surface` (`obj.userData.
+        surfaceName`, set alongside the existing `triangleVertexIds` when
+        each mesh's geometry is built). An unnamed mesh (`""`) has no
+        panel to open, so the click is a no-op, consistent with unnamed
+        objects being unreachable everywhere else in the outliner.
+      - **A dot hit** opens the *most specific* (smallest) named group
+        containing that particle, not just any containing group — group
+        membership can legitimately overlap (a flag's pole-edge particles
+        are members of both "cloth" and "pole"), and the smaller, more
+        specific group is the more likely intended target of a click
+        directly on it. A particle in no named group at all is a no-op.
+      `event.preventDefault()` on every `contextmenu` event regardless of
+      hit/miss — this canvas has its own right-click action, so the
+      browser's native menu never makes sense here, not just when
+      something's actually picked.
+      **Verified**: the usual no-browser fallback (`node --check`,
+      `getElementById` cross-check, live `curl` confirming the handler
+      and `surfaceName` tagging are served) plus the full Kotlin suite
+      staying green (262 — this change touches only `debug-viewer.html`,
+      no engine code). Whether right-clicking actually opens the correct
+      panel in a real browser is for the human tester to confirm, same
+      standing caveat as every other piece of this phase's client-side
+      work.
 - [ ] Time controls (pause, speed multiplier, step-once) — already
       specified in §9.1, not yet built anywhere; this is the UI surface
       for it
