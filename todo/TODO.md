@@ -357,18 +357,113 @@ items below for exactly what's deferred and why.
       directly — a reminder that "the physics looks wrong" and "the test's
       idealization doesn't match the fixture" are both worth checking
       before assuming which one is at fault.
-- [ ] Shared spatial partitioning (sized to collision granularity) — its
-      first real consumer, not the general execution engine (§9.3). Still
-      deferred even after particle-vs-particle collision landed below:
-      that system brute-forces its candidate pairs (same call already made
-      for `SurfaceCollisionSystem`), and nothing built so far has enough
-      particles/colliders at once to actually need a broad phase. Revisit
-      once a scenario's particle count makes O(n²) pairwise checks the
-      actual bottleneck, not before.
+- [x] Shared spatial partitioning for collision broad-phase (§9.3, §12.4) —
+      `particlesim.collision.SpatialGrid`, a uniform grid keyed by cell,
+      rebuilt fresh every call rather than incrementally maintained (cheap
+      here since positions move every step regardless, and it gets §9.3's
+      "must support insert/remove, not just a static t=0 build" for free —
+      an emitter spawn or a destroy since the last build is just reflected
+      in the next one). `ParticleCollisionSystem.candidatePairs` is its
+      first real consumer, replacing what used to be a brute-force `i<j` /
+      full-cross-product double loop, exactly the trigger this entry
+      previously named ("revisit once a scenario's particle count makes
+      O(n²) pairwise checks the actual bottleneck").
+
+      **Scoped to collision only, deliberately not `NBodyGravity`** — a
+      grid with cell size >= the largest possible contact distance is
+      *exact* for collision (two spheres can only overlap within that
+      distance, so nothing is ever missed), but gravity sums a contribution
+      from every pair with no cutoff; feeding it only grid-neighbor pairs
+      would silently drop every long-range term, changing the physics, not
+      just speeding it up. That's why §9.3 itself calls out Barnes-Hut
+      specifically for N-body gravity rather than a plain uniform grid —
+      genuinely different algorithm, a separate future item if gravity at
+      scale ever becomes the bottleneck, not bundled into this pass.
+
+      **Correctness is proven bit-for-bit, not just "produces a plausible
+      result"** — `SpatialGridRegressionTest` runs a mixed same-group/
+      cross-group scene through `resolve()` for 200 steps and asserts the
+      exact final positions/velocities match values captured from the
+      pre-grid brute-force implementation. This matters because `respond()`
+      mutates the store as it iterates, so *pair order* affects the result
+      whenever one particle has two simultaneous contacts in the same step
+      (floating-point addition isn't associative) — a scene sparse enough
+      that every contact is isolated would pass even with a broken sort, so
+      the regression scene deliberately packs 55 particles into a small
+      box (confirmed via scratch instrumentation: dozens of steps end up
+      with a particle in >= 2 simultaneous contacts) rather than using a
+      more "realistic," spread-out one. Fixed by sorting each particle's
+      grid-neighbor query back into ascending list-index order before
+      emitting pairs, reproducing the old double loop's `(i, j)` visitation
+      order exactly. `SpatialGridTest` covers the grid in isolation
+      (exactness at cell boundaries, negative coordinates, diagonal
+      neighbors, multiple occupants per cell).
+
+      **N-scaling, measured with a scratch benchmark (not shipped — timing
+      assertions are flaky)**: generating candidate pairs the old
+      brute-force way vs. a full grid-accelerated `resolve()` call (pair
+      generation + narrow phase + response together), same random scene,
+      JIT-warmed:
+
+      | N    | brute-force candidatePairs only | grid-accelerated resolve() |
+      |------|----------------------------------|------------------------------|
+      | 200  | ~250-320us                       | ~330-410us                   |
+      | 500  | ~600-820us                       | ~450-550us                   |
+      | 1000 | ~12-15ms                         | ~1.2ms                        |
+      | 2000 | ~22-25ms                         | ~2.4-3.9ms                    |
+      | 4000 | ~90-94ms                         | ~3.8-4.2ms                    |
+
+      Grid loses at very small N (constant overhead: 27 `Cell` allocations
+      and a hash lookup per neighbor query vs. brute force's trivial
+      pairwise checks) but the crossover is around N=500-1000, and by
+      N=4000 the grid is ~20x faster despite doing strictly more work per
+      call (narrow phase + response, not just pair generation). Not
+      revisited further (e.g. bit-packing cell coordinates into a `Long`
+      key instead of a data-class `Cell`) since nothing currently needs
+      more headroom than this.
+
+      Caveat on the table itself: the benchmark scales the scene's box size
+      by `sqrt(n/200)` to try to hold density constant, but that's the
+      2D formula in a 3D scene — density actually *drops* ~4.4x from N=200
+      to N=4000 (should have been `cbrt`). Brute force's column is
+      unaffected (it enumerates every pair regardless of geometry), so the
+      crossover point and the order-of-magnitude conclusion both survive,
+      but the grid column at N=4000 benefits from having fewer particles
+      per cell than a truly constant-density scene would show - the real
+      win at high, constant density is probably somewhat smaller than
+      ~20x, not larger.
+
+      **Concrete consumer**: `particlesim.debug.SpatialGridDebugDemo`
+      (`./gradlew runSpatialGridDemo`) — 2000 particles in a sealed,
+      zero-gravity box, deliberately *not* `ParticleCollisionDebugDemo`
+      scaled up (that demo's own doc comment already documents what a deep
+      pile does under this engine's single-pass-per-step resolution; a
+      sealed floating cloud stays permanently sparse relative to the box
+      volume instead, while still paying the same per-step candidate-
+      generation cost a pile would, since that cost doesn't depend on how
+      many pairs actually overlap). Verified live in Chrome at N=2000: runs
+      correctly for an extended period with no NaN/explosion artifacts,
+      restart rebuilds the exact same deterministic layout, double-click
+      delete correctly drops the live count (2000 -> 1999), no console
+      errors.
+
+      **What the live demo does *not* show, stated honestly**: it does not
+      hold 60fps real-time on the machine it was verified on. Checked
+      whether this was a broad-phase regression by running the completely
+      unmodified `ParticleCollisionDebugDemo` (18 particles, brute-force
+      scale) side by side — it shows the *same* ~75%-of-real-time "lag"
+      stat. Whatever that fixed per-frame ceiling actually is (not
+      profiled — orthogonal to this task), it exists identically at 18
+      particles and at 2000, so it isn't the thing this work was meant to
+      fix, and the benchmark table above is the real evidence for the
+      broad-phase win, not the on-screen frame rate.
 - [x] Particle-vs-particle collision (§12.4/§12.5, the two-body case) —
       `particlesim.collision.ParticleCollisionRule`/`ParticleCollisionSystem`.
-      Brute-force over each rule's candidate pairs (same "no spatial index
-      until a scenario needs one" call as `SurfaceCollisionSystem`) — the
+      Candidate pairs now come from `SpatialGrid` (see the shared
+      spatial-partitioning entry above) rather than the brute-force double
+      loop this originally shipped with — `SurfaceCollisionSystem` is
+      still brute-force, unchanged, since one ball against a few hundred
+      trampoline triangles doesn't need the same treatment. The
       same-group case (`groupB` defaults to `groupA`, e.g. "debris with
       each other") uses the triangular `i<j` pairing `NBodyGravity` already
       established to avoid double-counting; a cross-group rule assumes the

@@ -568,16 +568,21 @@ recorded run — same viewer, decoupled from live vs. recorded source.
     a free-list of reclaimed slots, to avoid unbounded array growth over a
     long-running emitter-heavy simulation.
 - Pairwise forces (N-body gravity, and naively, spring lookups) are O(n²)
-  without care. Spatial partitioning (uniform grid, octree, or Barnes-Hut
-  for N-body gravity specifically) is required to scale beyond a few
-  thousand particles `[stretch, but should be designed for from the start]`.
-  Collision detection (§12.4) reuses this same structure as **one unified
-  spatial index** rather than maintaining a second one, sized to the finer
-  granularity collision needs rather than gravity's typically-larger
-  interaction range — missing a collision pair would be a correctness bug,
-  while a suboptimal cell size for gravity is only a performance cost.
-  Revisit with two independently-tuned indices only if profiling shows this
-  is actually a bottleneck.
+  without care. **Collision** (§12.4) now has a uniform-grid broad phase
+  (`particlesim.collision.SpatialGrid`) — done, not `[stretch]`, since a
+  concrete scenario (`SpatialGridDebugDemo`, 2000 particles) made the
+  brute-force cost real. **N-body gravity does not share this structure**,
+  a deliberate revision of this section's original plan: a uniform grid is
+  *exact* for collision (a hard physical cutoff — two spheres can only
+  overlap within `radiusA + radiusB`, so cell size just needs to exceed
+  that and nothing is ever missed) but gravity sums a contribution from
+  every pair with no cutoff at all, so handing it only grid-neighbor pairs
+  would silently drop every long-range term — a correctness bug, not "a
+  suboptimal cell size," which is what this section originally assumed.
+  Accelerating gravity at scale therefore still needs its own structure —
+  Barnes-Hut (aggregating distant mass rather than dropping it) rather
+  than a second, differently-tuned grid — and remains `[stretch]`, not
+  attempted yet.
 - **Multi-threaded force accumulation, without sacrificing determinism**
   (§11): naive parallel reduction — multiple threads racing to add into a
   shared per-particle force accumulator — is not reproducible, since
@@ -998,10 +1003,14 @@ main lever for performance.
 
 ### 12.4 Detection
 
-- **Broad phase**: reuse the spatial partitioning structure from §9.3
-  (uniform grid / octree) rather than building a second one — the same
-  structure that accelerates N-body gravity should accelerate collision
-  candidate lookup.
+- **Broad phase**: a uniform grid (§9.3, `particlesim.collision.SpatialGrid`)
+  sized to the finer of the two group's contact radii — done for
+  particle-particle collision (`ParticleCollisionSystem`); `SurfaceCollisionSystem`
+  is still brute-force, since a single surface's triangle count hasn't
+  needed it yet. **Not** shared with N-body gravity — see §9.3's own note on
+  why a hard-cutoff grid isn't valid for gravity's unbounded interaction
+  range, a correction to this section's original "one structure serves
+  both" plan.
 - **Narrow phase**: sphere–sphere (particle–particle), sphere–plane,
   sphere–box, sphere–sphere-collider (particle–static sphere).
 - **Timing**: discrete, checked once per integration step by default —

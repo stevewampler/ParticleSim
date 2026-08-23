@@ -44,9 +44,10 @@ data class SurfaceCollisionRule(
  * barycentric blend of the triangle's three vertex velocities) instead of a rigid collider's.
  *
  * Narrow phase is brute-force over every triangle in the rule's surface, picking whichever one
- * penetrates deepest for a given particle (there is no broad-phase partitioning here — see
- * requirements.md §9.3/§12.4: shared spatial partitioning is for N-body/collision at real
- * scale, and one ball against a few hundred trampoline triangles doesn't need it). The contact
+ * penetrates deepest for a given particle (there is no broad-phase partitioning here —
+ * [particlesim.collision.SpatialGrid] accelerates [ParticleCollisionSystem]'s particle-particle
+ * broad phase per §9.3/§12.4, but one ball against a few hundred trampoline triangles doesn't
+ * need the same treatment; revisit if a surface-heavy scene ever does). The contact
  * normal points from the surface toward the particle regardless of which side it approached
  * from — deliberately two-sided, because a closest-point contact is inherently side-agnostic
  * (there is no well-defined "outward" face once the surface can deform through itself), not

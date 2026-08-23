@@ -52,9 +52,13 @@ data class ParticleCollisionRule(
  * [particlesim.physics.FixedPosition]/[particlesim.physics.FixedVelocity]/
  * [particlesim.physics.DragConstraint] currently pins, via [Constraint.pinnedIds].
  *
- * No broad phase (brute-force over each rule's candidate pairs) — same call made for
- * [SurfaceCollisionSystem]: a spatial index is deferred until a scenario has enough
- * particles/colliders to actually need one (§9.3), not built ahead of a concrete consumer.
+ * **Broad phase**: candidate pairs are generated via [SpatialGrid] (§9.3, §12.4) rather than a
+ * brute-force double loop — [ParticleCollisionDebugDemo] scaled to a few thousand particles is
+ * this structure's first real consumer, exactly the "revisit once a scenario's particle count
+ * makes O(n²) the actual bottleneck" trigger this was deliberately deferred behind. This is
+ * collision-only: [particlesim.physics.NBodyGravity] is not wired to this or any other spatial
+ * index, deliberately — see [SpatialGrid]'s own doc comment on why the same technique isn't
+ * valid for gravity's unbounded interaction range.
  */
 class ParticleCollisionSystem(
     private val rules: List<ParticleCollisionRule>,
@@ -66,7 +70,7 @@ class ParticleCollisionSystem(
         for (constraint in constraints) pinnedIds += constraint.pinnedIds(groups)
 
         for (rule in rules) {
-            for ((a, b) in candidatePairs(groups, rule)) {
+            for ((a, b) in candidatePairs(store, groups, rule)) {
                 val radiusA = store.radius(a) ?: continue
                 val radiusB = store.radius(b) ?: continue
                 val posA = store.position(a)
@@ -83,16 +87,74 @@ class ParticleCollisionSystem(
         }
     }
 
-    private fun candidatePairs(groups: Groups, rule: ParticleCollisionRule): List<Pair<Int, Int>> {
+    /**
+     * Grid-accelerated replacement for what used to be a brute-force `i<j` (same-group) /
+     * full-cross-product (cross-group) double loop. [SpatialGrid] only narrows *which* pairs are
+     * considered — completeness for the positions at the moment the grid is built is guaranteed
+     * by its cell-size contract (see its own doc comment) — but [respond] mutates the store as
+     * [resolve] iterates the pairs this returns, so a pair that only comes into contact *after*
+     * an earlier pair's penetration correction (never a candidate here, since the grid was built
+     * before that correction happened) is silently missed, where the old brute-force loop's
+     * live position re-read would occasionally have caught it. Accepted, not fixed - see
+     * [SpatialGrid]'s own doc comment. Independently of that gap, pair order still has to match
+     * the old brute-force order exactly for results to be identical whenever several contacts
+     * that *are* candidates involve the same particle in one step (see [SpatialGridRegressionTest]).
+     * That's why each particle's neighbor query result is sorted back into ascending list-index
+     * order before being emitted, rather than left in the grid's arbitrary bucket order: same-group
+     * emits `(i, j)` with `i < j` exactly like the old `for i; for j in i+1..size` did, and
+     * cross-group emits `(a, b)` with `b`'s membersB-index ascending for each `a` in turn, exactly
+     * like the old `for a; for b` did.
+     */
+    private fun candidatePairs(store: ParticleStore, groups: Groups, rule: ParticleCollisionRule): List<Pair<Int, Int>> {
         val membersA = groups.membersOf(rule.groupA).toList()
-        if (rule.groupA == rule.groupB) {
-            val pairs = ArrayList<Pair<Int, Int>>(membersA.size)
-            for (i in membersA.indices) for (j in i + 1 until membersA.size) pairs += membersA[i] to membersA[j]
-            return pairs
-        }
+        if (rule.groupA == rule.groupB) return sameGroupCandidates(store, membersA)
         val membersB = groups.membersOf(rule.groupB).toList()
-        val pairs = ArrayList<Pair<Int, Int>>(membersA.size * membersB.size)
-        for (a in membersA) for (b in membersB) if (a != b) pairs += a to b
+        return crossGroupCandidates(store, membersA, membersB)
+    }
+
+    private fun maxRadius(store: ParticleStore, ids: List<Int>): Double =
+        ids.maxOfOrNull { store.radius(it) ?: 0.0 } ?: 0.0
+
+    private fun sameGroupCandidates(store: ParticleStore, members: List<Int>): List<Pair<Int, Int>> {
+        // Twice the largest radius in play: two spheres can only overlap if their centers are
+        // within radiusA + radiusB of each other, and that sum is never more than 2 * the max.
+        val cellSize = 2.0 * maxRadius(store, members)
+        if (cellSize <= 0.0) return emptyList() // no member has a radius - nothing can ever overlap
+
+        val grid = SpatialGrid(cellSize)
+        val indexOf = HashMap<Int, Int>(members.size)
+        for ((i, id) in members.withIndex()) {
+            indexOf[id] = i
+            if ((store.radius(id) ?: 0.0) > 0.0) grid.insert(id, store.position(id))
+        }
+
+        val pairs = ArrayList<Pair<Int, Int>>()
+        for (i in members.indices) {
+            val a = members[i]
+            if ((store.radius(a) ?: 0.0) <= 0.0) continue
+            val js = grid.neighbors(store.position(a)).mapNotNull { indexOf[it] }.filter { it > i }.sorted()
+            for (j in js) pairs += a to members[j]
+        }
+        return pairs
+    }
+
+    private fun crossGroupCandidates(store: ParticleStore, membersA: List<Int>, membersB: List<Int>): List<Pair<Int, Int>> {
+        val cellSize = 2.0 * maxOf(maxRadius(store, membersA), maxRadius(store, membersB))
+        if (cellSize <= 0.0) return emptyList()
+
+        val grid = SpatialGrid(cellSize)
+        val indexOfB = HashMap<Int, Int>(membersB.size)
+        for ((i, id) in membersB.withIndex()) {
+            indexOfB[id] = i
+            if ((store.radius(id) ?: 0.0) > 0.0) grid.insert(id, store.position(id))
+        }
+
+        val pairs = ArrayList<Pair<Int, Int>>()
+        for (a in membersA) {
+            if ((store.radius(a) ?: 0.0) <= 0.0) continue
+            val js = grid.neighbors(store.position(a)).mapNotNull { indexOfB[it] }.filter { membersB[it] != a }.sorted()
+            for (j in js) pairs += a to membersB[j]
+        }
         return pairs
     }
 
