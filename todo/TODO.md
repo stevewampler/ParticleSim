@@ -2119,6 +2119,20 @@ real prerequisite, not just unstarted — see the note below.
       fixed during this same live testing pass, then re-verified stable
       afterward, including that ordinary dragging still worked correctly
       post-delete.
+      **Follow-up bug, from real user testing**: the restart button did
+      nothing in `DragDebugDemo`. Its `sceneControlQueue` handling used a
+      plain `if (message is SceneControlMessage.DeleteParticle)` rather
+      than an exhaustive `when`, so `Restart` (added to `SceneControlMessage`
+      earlier, for `ParticleCollisionDebugDemo`) silently fell through
+      unhandled — a real instance of the same "one missed wiring step,
+      no compiler error to catch it" class of bug the `ViewerInput`
+      consolidation above was built to prevent, just for a `when` branch
+      rather than a whole missing class. Fixed by rebuilding the chain
+      from scratch on `Restart` (fresh `ParticleStore`/`Groups`, same
+      pattern as `ParticleCollisionDebugDemo`'s own restart) and
+      switching to an exhaustive `when` so a future unhandled case can't
+      go quiet again. Verified live: clicked restart mid-run and
+      confirmed `t`/`step` actually reset to ~0 with the chain rebuilt.
 - [ ] Playback-fork-to-live: resume from nearest checkpoint, deterministic
       fast-forward to the exact target frame, then hand off to live input
       (§9.4, §9.5)

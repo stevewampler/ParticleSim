@@ -53,31 +53,40 @@ import particlesim.physics.UniformGravity
  *
  * Playback controls (pause/speed/step-once) via [ViewerInput], which also bundles the drag and
  * scene-control queues this demo actually uses — see that class's own doc comment for why every
- * debug demo shares one of these now instead of each hand-rolling its own `onTextMessage`.
+ * debug demo shares one of these now instead of each hand-rolling its own `onTextMessage`. The
+ * viewer's restart button rebuilds the whole chain from scratch (fresh `ParticleStore`/`Groups`,
+ * same as [ParticleCollisionDebugDemo]'s restart) — an earlier version of this demo's scene-
+ * control handling only matched `DeleteParticle` with a plain `if`, so `Restart` (and any future
+ * `SceneControlMessage` case) silently fell through and did nothing; switched to an exhaustive
+ * `when` so a case like that can't go quietly unhandled again.
  */
 fun main() {
-    val store = ParticleStore()
-    val groups = Groups()
-
     val linkCount = 12
     val spacing = 0.4
     val mass = 0.2
+    val stiffness = 80.0
+    val damping = 12.0 // above critical (2*sqrt(stiffness*mass) ~= 8.0) for the spring/damper pairs
+    val drag = Drag("chain", coefficient = 1.5) // damps bulk/pendulum-style motion Damper can't reach; a
+    // group-targeted force needs no rebuilding on restart, unlike everything below that holds
+    // particle ids directly.
+    val destruction = DestructionSystem() // stateless (just triggers/rules) - reused across restarts
+
+    // Everything below is rebuilt wholesale on restart - grouped as `var`s (not `val`s) for
+    // exactly that reason, all reassigned together in one place rather than mutated piecemeal
+    // (same pattern ParticleCollisionDebugDemo's own restart already established).
+    var store = ParticleStore()
+    var groups = Groups()
     var ids = (0 until linkCount).map { i ->
         store.create(position = Vector3(0.0, 4.0 - i * spacing, 0.0), mass = ScalarExpr.of(mass))
     }
-    val anchorId = ids.first()
+    var anchorId = ids.first()
     groups.add("anchor", anchorId)
     groups.add("chain", anchorId)
     ids.drop(1).forEach { groups.add("chain", it) }
-
-    val stiffness = 80.0
-    val damping = 12.0 // above critical (2*sqrt(stiffness*mass) ~= 8.0) for the spring/damper pairs
     var springs = ids.zipWithNext { a, b -> Spring(a, b, restLength = spacing, stiffness = stiffness) }
-    val dampers = ids.zipWithNext { a, b -> Damper(a, b, damping = damping) }
-    val drag = Drag("chain", coefficient = 1.5) // damps bulk/pendulum-style motion Damper can't reach
+    var dampers = ids.zipWithNext { a, b -> Damper(a, b, damping = damping) }
     var forces: List<Force> = listOf(UniformGravity("chain", Vector3(0.0, -9.8, 0.0)), drag) + springs + dampers
-    val fixedConstraints = listOf(FixedPosition("anchor", store.position(anchorId)))
-    val destruction = DestructionSystem()
+    var fixedConstraints = listOf(FixedPosition("anchor", store.position(anchorId)))
 
     val viewerInput = ViewerInput()
     val renderer = DebugRenderer(onTextMessage = viewerInput::onTextMessage)
@@ -96,19 +105,40 @@ fun main() {
     while (true) {
         val frameStart = System.nanoTime()
         for (message in viewerInput.sceneControlQueue.drainAll()) {
-            if (message is SceneControlMessage.DeleteParticle) {
-                // The pinned anchor can be deleted too - FixedPosition just becomes a no-op for
-                // a group with no members left in it, no special-casing needed (§10.3's
-                // collider removal already established this "let it happen" stance).
-                val result = destruction.resolve(store, groups, forces, t, dt, explicitIds = setOf(message.particleId))
-                if (result.destroyedIds.isNotEmpty()) {
-                    val destroyedSet = result.destroyedIds.toSet()
-                    ids = ids.filter { it !in destroyedSet }
-                    val danglingSet = result.danglingForces.toSet()
-                    forces = forces.filter { it !in danglingSet }
-                    springs = springs.filter { it !in danglingSet }
-                    if (activeDrag?.particleId in destroyedSet) activeDrag = null
+            when (message) {
+                is SceneControlMessage.DeleteParticle -> {
+                    // The pinned anchor can be deleted too - FixedPosition just becomes a no-op
+                    // for a group with no members left in it, no special-casing needed (§10.3's
+                    // collider removal already established this "let it happen" stance).
+                    val result = destruction.resolve(store, groups, forces, t, dt, explicitIds = setOf(message.particleId))
+                    if (result.destroyedIds.isNotEmpty()) {
+                        val destroyedSet = result.destroyedIds.toSet()
+                        ids = ids.filter { it !in destroyedSet }
+                        val danglingSet = result.danglingForces.toSet()
+                        forces = forces.filter { it !in danglingSet }
+                        springs = springs.filter { it !in danglingSet }
+                        if (activeDrag?.particleId in destroyedSet) activeDrag = null
+                    }
                 }
+                SceneControlMessage.Restart -> {
+                    store = ParticleStore()
+                    groups = Groups()
+                    ids = (0 until linkCount).map { i ->
+                        store.create(position = Vector3(0.0, 4.0 - i * spacing, 0.0), mass = ScalarExpr.of(mass))
+                    }
+                    anchorId = ids.first()
+                    groups.add("anchor", anchorId)
+                    groups.add("chain", anchorId)
+                    ids.drop(1).forEach { groups.add("chain", it) }
+                    springs = ids.zipWithNext { a, b -> Spring(a, b, restLength = spacing, stiffness = stiffness) }
+                    dampers = ids.zipWithNext { a, b -> Damper(a, b, damping = damping) }
+                    forces = listOf(UniformGravity("chain", Vector3(0.0, -9.8, 0.0)), drag) + springs + dampers
+                    fixedConstraints = listOf(FixedPosition("anchor", store.position(anchorId)))
+                    activeDrag = null
+                    t = 0.0
+                    step = 0L
+                }
+                is SceneControlMessage.RemoveCollider -> {} // this demo has no colliders
             }
         }
         repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) {
