@@ -54,7 +54,19 @@ import java.nio.charset.StandardCharsets
  *                    kind==0: f64 nx, ny, nz, f64 renderHalfSize
  *                    kind==1: f64 radius
  *                    kind==2: f64 hx, hy, hz }
+ * i32  eventCount
+ * eventCount * { u8 kind (0=forceBreak, 1=particleDestroyed, 2=particleSpawned),
+ *                kind==0: i32 nameLen, nameLen UTF-8 bytes
+ *                kind==1 or 2: i32 particleId }
  * ```
+ *
+ * The event section is §9.1's discrete-event channel ([SimEvent]) — everything above it in this
+ * frame is continuous state (this instant's values); events are "something happened between the
+ * previous frame and this one" and only appear the frame they happened, never resent. A caller
+ * passing multiple physics steps' worth of events into one [encode] call (every demo's frame
+ * covers `stepsPerFrame` steps, §9.1's pacing policy) is expected to have already collected them
+ * across all of that frame's steps — this layer doesn't itself batch per-step, it just encodes
+ * whatever list it's handed.
  *
  * The collider section is §10.2's "debug/`--render-all` mode... draws every collider as
  * wireframe" — [Collider] has no renderer-declaration equivalent of its own (unlike particles/
@@ -121,6 +133,12 @@ object BinaryFrame {
     private const val PLANE_KIND: Byte = 0
     private const val SPHERE_KIND: Byte = 1
     private const val BOX_KIND: Byte = 2
+    private const val EVENT_HEADER_SIZE = 4
+    private const val EVENT_KIND_SIZE = 1
+    private const val EVENT_PARTICLE_ID_SIZE = 4
+    private const val FORCE_BREAK_KIND: Byte = 0
+    private const val PARTICLE_DESTROYED_KIND: Byte = 1
+    private const val PARTICLE_SPAWNED_KIND: Byte = 2
 
     /** Half-extent of the finite quad drawn for an (infinite) [PlaneCollider] — a debug-render
      * choice, not a modeled property; see this file's own doc comment. */
@@ -140,6 +158,7 @@ object BinaryFrame {
         visibleIds: Set<Int>? = null,
         registry: SceneRegistry = SceneRegistry.build(),
         colliders: List<Collider> = emptyList(),
+        events: List<SimEvent> = emptyList(),
     ): ByteBuffer {
         val size = HEADER_SIZE + ids.size * PARTICLE_SIZE +
             CONNECTION_HEADER_SIZE + connections.size * CONNECTION_SIZE +
@@ -154,7 +173,8 @@ object BinaryFrame {
             VISIBLE_FLAG_SIZE + (if (visibleIds != null) VISIBLE_HEADER_SIZE + visibleIds.size * 4 else 0) +
             nameListSize(registry.forces.keys) + nameListSize(registry.constraints.keys) +
             nameListSize(registry.surfaces.keys) + groupListSize(registry.groups) +
-            COLLIDER_HEADER_SIZE + colliders.sumOf { colliderEntrySize(it) }
+            COLLIDER_HEADER_SIZE + colliders.sumOf { colliderEntrySize(it) } +
+            EVENT_HEADER_SIZE + events.sumOf { eventEntrySize(it) }
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
         buffer.putDouble(t)
@@ -233,6 +253,14 @@ object BinaryFrame {
                 is PlaneCollider -> { putVector(buffer, collider.unitNormal); buffer.putDouble(PLANE_RENDER_HALF_SIZE) }
                 is SphereCollider -> buffer.putDouble(collider.radius)
                 is BoxCollider -> putVector(buffer, collider.halfExtents)
+            }
+        }
+        buffer.putInt(events.size)
+        for (event in events) {
+            when (event) {
+                is SimEvent.ForceBreak -> { buffer.put(FORCE_BREAK_KIND); putString(buffer, event.name) }
+                is SimEvent.ParticleDestroyed -> { buffer.put(PARTICLE_DESTROYED_KIND); buffer.putInt(event.particleId) }
+                is SimEvent.ParticleSpawned -> { buffer.put(PARTICLE_SPAWNED_KIND); buffer.putInt(event.particleId) }
             }
         }
 
@@ -317,7 +345,16 @@ object BinaryFrame {
                 else -> error("unknown collider kind byte: $kind")
             }
         }
-        return DecodedFrame(t, step, particles, connections, camera, spheres, meshes, arrowGroups, visibleIds, registry, colliders)
+        val eventCount = buf.int
+        val events = (0 until eventCount).map {
+            when (val kind = buf.get()) {
+                FORCE_BREAK_KIND -> SimEvent.ForceBreak(getString(buf))
+                PARTICLE_DESTROYED_KIND -> SimEvent.ParticleDestroyed(buf.int)
+                PARTICLE_SPAWNED_KIND -> SimEvent.ParticleSpawned(buf.int)
+                else -> error("unknown event kind byte: $kind")
+            }
+        }
+        return DecodedFrame(t, step, particles, connections, camera, spheres, meshes, arrowGroups, visibleIds, registry, colliders, events)
     }
 
     private fun putVector(buffer: ByteBuffer, v: Vector3) {
@@ -341,6 +378,12 @@ object BinaryFrame {
             is BoxCollider -> 24
         }
         return COLLIDER_ENTRY_HEADER_SIZE + stringSize(collider.name ?: "") + shapeSize
+    }
+
+    private fun eventEntrySize(event: SimEvent): Int = EVENT_KIND_SIZE + when (event) {
+        is SimEvent.ForceBreak -> stringSize(event.name)
+        is SimEvent.ParticleDestroyed -> EVENT_PARTICLE_ID_SIZE
+        is SimEvent.ParticleSpawned -> EVENT_PARTICLE_ID_SIZE
     }
 
     private fun putString(buffer: ByteBuffer, s: String) {
@@ -430,4 +473,5 @@ data class DecodedFrame(
     val visibleIds: Set<Int>? = null,
     val registry: DecodedRegistry = DecodedRegistry(),
     val colliders: List<DecodedCollider> = emptyList(),
+    val events: List<SimEvent> = emptyList(),
 )

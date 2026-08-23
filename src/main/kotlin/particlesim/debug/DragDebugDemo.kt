@@ -49,7 +49,10 @@ import particlesim.physics.UniformGravity
  * physics actually sees) and `springs` (what the viewer draws as connecting lines), the same
  * cleanup mechanism §14.3 already established for lifetime/condition/collision-triggered
  * destroys, not a hand-rolled one-off for this demo. The result is two independently-hanging
- * pieces, not a chain that silently keeps simulating a phantom connection.
+ * pieces, not a chain that silently keeps simulating a phantom connection. Also emits a
+ * [SimEvent.ParticleDestroyed] into §9.1's discrete-event channel for each deleted id — a
+ * second, deliberately-triggered destroy consumer alongside [SparksDebugDemo]'s continuous one,
+ * proving the channel isn't specific to *how* a particle died.
  *
  * Playback controls (pause/speed/step-once) via [ViewerInput], which also bundles the drag and
  * scene-control queues this demo actually uses — see that class's own doc comment for why every
@@ -104,6 +107,7 @@ fun main() {
 
     while (true) {
         val frameStart = System.nanoTime()
+        val events = mutableListOf<SimEvent>()
         for (message in viewerInput.sceneControlQueue.drainAll()) {
             when (message) {
                 is SceneControlMessage.DeleteParticle -> {
@@ -118,6 +122,10 @@ fun main() {
                         forces = forces.filter { it !in danglingSet }
                         springs = springs.filter { it !in danglingSet }
                         if (activeDrag?.particleId in destroyedSet) activeDrag = null
+                        // §9.1's discrete-event channel: a second, user-triggered destroy
+                        // consumer alongside SparksDebugDemo's continuous one - confirms the
+                        // channel isn't tied to a specific *cause* of destruction.
+                        for (id in result.destroyedIds) events += SimEvent.ParticleDestroyed(id)
                     }
                 }
                 SceneControlMessage.Restart -> {
@@ -169,7 +177,7 @@ fun main() {
             t += dt
             step++
         }
-        renderer.broadcast(t, step, store, ids, springs.map { it.particleA to it.particleB })
+        renderer.broadcast(t, step, store, ids, springs.map { it.particleA to it.particleB }, events = events)
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)
     }

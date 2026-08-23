@@ -674,9 +674,93 @@ this project has used since Phase 5.
       the same way the flag did.
 
 ## Phase 8 — Full execution engine
-- [ ] Real-time interactive loop: full state stream contract (camera pose,
+- [x] Real-time interactive loop: full state stream contract (camera pose,
       events), bidirectional input, wall-clock pacing policy (drop frames,
-      never coarsen physics) — upgrades Phase 3's bare-bones stream (§9.1)
+      never coarsen physics) — upgrades Phase 3's bare-bones stream (§9.1).
+      Fulfilled incrementally rather than in one pass, which is why this
+      checkbox sat unchecked long after most of the pieces actually
+      landed: camera pose (Phase 9's scripted-camera work), bidirectional
+      input (§9.4's drag channel, §10.3's scene-control/time-control
+      channels), and wall-clock pacing (every debug demo's own frame
+      loop, §9.1) were already live. **The discrete-event channel
+      ("events") was the one genuinely missing piece** — see the new
+      entry immediately below for that work.
+- [x] Discrete-event channel for the interactive stream (§9.1: "each
+      frame of state carries continuous data... plus discrete events
+      (e.g. force breaks, §5.4, and particle spawn/destroy, §14.2)") —
+      the live viewer's wire protocol only ever carried continuous
+      per-frame state; a force breaking or a particle being destroyed
+      happened silently, indistinguishable from any other frame. Scoped
+      to the *interactive* half only — the batch recording format's own
+      discrete-event gap (§9.2, noted below under Batch/record mode)
+      is separate and still open.
+      **New `particlesim.debug.SimEvent`** (`ForceBreak(name)`,
+      `ParticleDestroyed(particleId)`, `ParticleSpawned(particleId)`),
+      reused directly for both encode and decode (no `Decoded*` twin,
+      unlike `Collider` — an event carries no engine behavior to strip
+      out, same reasoning `ArrowSample` already established). New
+      `BinaryFrame` wire section: `eventCount * {kind byte, then either
+      a name string or a particle id}`, appended after colliders.
+      Un-batched at this layer — `encode` just serializes whatever list
+      it's handed; the caller (every demo's own frame loop) is
+      responsible for collecting one frame's worth of events across
+      that frame's `stepsThisFrame` physics steps before broadcasting,
+      the same way meshes/arrow samples already get computed once per
+      frame from post-step state.
+      **`Emitter.update` now returns `EmitResult(spawnedIds,
+      evictedIds)`** instead of `Unit` — a small, additive signature
+      change (no existing call site used the old return value). Also
+      fixed a real latent bug surfaced while making this change: the
+      `STOP`-cap branch did a bare `return` mid-`while`, which would
+      have silently discarded any ids already spawned earlier in that
+      same `update` call the moment the cap was hit - now returns
+      `EmitResult(spawned, evicted)` so nothing collected so far is lost.
+      `EmitterTest` gained cases for both this correctness fix and the
+      `EVICT_OLDEST` spawn/evict correspondence, checking `store.contains`
+      on every returned id rather than trusting the counts alone.
+      **Two live consumers, chosen deliberately over touching a working
+      demo's physics behavior** (see below): `SparksDebugDemo` produces
+      spawn/destroy events *continuously* with no interaction needed —
+      its loop already calls `destruction.resolve`/`emitter.update`
+      every step, so wiring the channel in was purely additive.
+      `DragDebugDemo`'s existing interactive-delete path (§14.2) now also
+      emits a `ParticleDestroyed`, giving a second, user-triggered
+      consumer and confirming the channel isn't tied to *how* a particle
+      died.
+      **`ForceBreak` is defined and wire-tested (`BinaryFrameTest`) but
+      not yet emitted by any live demo** — deliberately deferred after
+      review, not an oversight: no interactive demo currently sets a
+      finite `breakThreshold` (`buildFlag`'s defaults to
+      `Double.POSITIVE_INFINITY`), and — a separate, real latent gap
+      found while investigating this — **no demo loop has ever captured
+      `Integrator.step`'s returned `StepResult` at all**, so the
+      "caller must remove a broken force from its active list" contract
+      that method's own doc comment describes has never actually been
+      discharged anywhere. Wiring a finite threshold into a demo (the
+      natural candidate is `DragDebugDemo`'s spring chain — drag hard
+      enough to snap a link) needs that removal logic to land in the
+      same change, not a bare event with no corresponding behavior fix;
+      left as a follow-on rather than bundling a demo behavior change
+      into the pass that proved the channel mechanism.
+      **Client-side**: a new "events" section in the existing
+      bottom-left control panel, a capped rolling log (last 20, newest
+      first, `EVENT_LOG_MAX`) so a continuously-spawning demo like Sparks
+      doesn't grow the log/DOM without bound. `frame.events` is this
+      frame's fresh list only (server never resends past events, see
+      `BinaryFrame`'s own doc comment) — appended, not replayed — so a
+      paused frame (zero physics steps) correctly contributes zero new
+      log lines instead of repeating the same entries every broadcast.
+      Reset alongside the stats panel on reconnect and on restart.
+      **Verified live in Chrome, checking correspondence not just
+      appearance** (a log that prints plausible-looking ids while wired
+      to the wrong list would look identical to a working one otherwise):
+      on `SparksDebugDemo`, paused and stepped through several frames,
+      confirming a "destroyed"/"spawned" pair appearing in the log
+      exactly matched the particle count staying net-unchanged between
+      those steps; on `DragDebugDemo`, double-clicked a chain link and
+      confirmed the log's new `particle N destroyed` line matched the
+      link that actually vanished (count dropped 12→11, chain visibly
+      split into two pieces). No console errors on either demo.
 - [~] Batch/record mode: sharded Arrow IPC File format, per-frame
       particle-id column, format version field (§9.2). **First sub-pass
       done** (recording only — no checkpoint/resume, no discrete-event
@@ -730,7 +814,10 @@ this project has used since Phase 5.
       prove it truly doesn't come up before checkpointing is built on top.
       **Not yet built**: discrete-event channel (breaks/spawn/destroy —
       needs a scenario that actually produces events, which ball-bounce
-      doesn't), checkpointing, resume.
+      doesn't), checkpointing, resume. The *interactive* stream's own
+      discrete-event channel is now built (see Phase 8's "Discrete-event
+      channel for the interactive stream" entry above) - this recording
+      format's gap is the separate batch/Arrow-IPC side, still open.
 - [x] Checkpointing: full-state snapshot at each shard boundary (group
       membership, broken connections, emitter accumulator+RNG state,
       t/step index), resume-from-checkpoint on crash (§9.5, §13.2).

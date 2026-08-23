@@ -105,6 +105,40 @@ class EmitterTest {
     }
 
     @Test
+    fun `EmitResult reports every id spawned and evicted this call, for the discrete-event channel`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        // rate * dt = 3.0 exactly, so each call below spawns exactly 3 - deterministic enough to
+        // assert "no eviction yet" on the first call and "every spawn evicts" on the second.
+        val e = emitter(rate = 3.0, maxAlive = 3, capPolicy = EmitterCapPolicy.EVICT_OLDEST)
+
+        val first = e.update(store, groups, t = 0.0, dt = 1.0) // fills to the cap, no room to evict yet
+        assertEquals(3, first.spawnedIds.size)
+        assertEquals(emptyList(), first.evictedIds)
+
+        val second = e.update(store, groups, t = 1.0, dt = 1.0) // at cap: every new spawn evicts the oldest
+        assertEquals(3, second.spawnedIds.size)
+        assertEquals(second.spawnedIds.size, second.evictedIds.size)
+        // Evicted ids must actually be gone and spawned ids must actually be present - a
+        // consumer turning these into SimEvents needs that correspondence to be real, not
+        // just plausible-looking counts.
+        for (id in second.evictedIds) assertTrue(!store.contains(id))
+        for (id in second.spawnedIds) assertTrue(store.contains(id))
+    }
+
+    @Test
+    fun `EmitResult spawnedIds is empty, not omitted, when the STOP cap blocks every spawn this call`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val e = emitter(rate = 1000.0, maxAlive = 2, capPolicy = EmitterCapPolicy.STOP)
+        e.update(store, groups, t = 0.0, dt = 1.0) // fills to the cap of 2
+
+        val blocked = e.update(store, groups, t = 1.0, dt = 1.0) // cap already full: nothing spawns
+        assertEquals(emptyList(), blocked.spawnedIds)
+        assertEquals(emptyList(), blocked.evictedIds)
+    }
+
+    @Test
     fun `an emitter's live count self-heals when particles are destroyed elsewhere`() {
         val store = ParticleStore()
         val groups = Groups()

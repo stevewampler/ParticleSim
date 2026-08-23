@@ -46,11 +46,12 @@ class DebugRenderer(
         visibleIds: Set<Int>? = null,
         registry: SceneRegistry = SceneRegistry.build(),
         colliders: List<Collider> = emptyList(),
+        events: List<SimEvent> = emptyList(),
     ) {
         wsServer.broadcastFrame(
             BinaryFrame.encode(
                 t, step, store, ids, connections, camera, lineColors, sphereRadii, meshes, arrowGroups, visibleIds, registry,
-                colliders,
+                colliders, events,
             ),
         )
     }

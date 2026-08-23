@@ -15,6 +15,12 @@ enum class EmitterCapPolicy {
     EVICT_OLDEST,
 }
 
+/** What one [Emitter.update] call actually did (§9.1's discrete-event channel needs this to turn
+ * spawns/evictions into [particlesim.debug.SimEvent]s) — both lists are ids this call created or
+ * removed itself, in the order it did so; [evictedIds] is only ever non-empty under
+ * [EmitterCapPolicy.EVICT_OLDEST], since [EmitterCapPolicy.STOP] never destroys anything. */
+data class EmitResult(val spawnedIds: List<Int>, val evictedIds: List<Int> = emptyList())
+
 /** Everything [Emitter.captureState]/[Emitter.restoreState] round-trip through a checkpoint
  * (§9.5) — see [Emitter.captureState]'s doc comment for what each field is for. */
 data class EmitterCheckpointState(
@@ -71,8 +77,10 @@ class Emitter(
     private val liveIds = ArrayDeque<Int>()
     private var atCap = false
 
-    fun update(store: ParticleStore, groups: Groups, t: Double, dt: Double) {
+    fun update(store: ParticleStore, groups: Groups, t: Double, dt: Double): EmitResult {
         liveIds.removeAll { !store.contains(it) }
+        val spawned = mutableListOf<Int>()
+        val evicted = mutableListOf<Int>()
 
         accumulator += rate.evaluate(t).coerceAtLeast(0.0) * dt
         while (accumulator >= 1.0) {
@@ -86,12 +94,13 @@ class Emitter(
                         // Don't let unspent budget pile up while blocked — otherwise clearing
                         // the cap later would release a burst instead of resuming the steady rate.
                         accumulator = accumulator.coerceAtMost(1.0)
-                        return
+                        return EmitResult(spawned, evicted)
                     }
                     EmitterCapPolicy.EVICT_OLDEST -> {
                         val oldest = liveIds.removeFirst()
                         store.destroy(oldest)
                         groups.removeParticle(oldest)
+                        evicted += oldest
                     }
                 }
             } else {
@@ -108,9 +117,11 @@ class Emitter(
             )
             groups.add(group, id)
             liveIds.addLast(id)
+            spawned += id
 
             accumulator -= 1.0
         }
+        return EmitResult(spawned, evicted)
     }
 
     /** Snapshots everything about this emitter that isn't recoverable from the static

@@ -33,6 +33,7 @@
   #controlPanel section { margin-bottom: 10px; }
   #controlPanel section:last-child { margin-bottom: 0; }
   #statsPanel { white-space: pre; color: #9f9; }
+  #eventLog { white-space: pre; color: #fc9; max-height: 110px; overflow-y: auto; }
   #bookmarkList { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
   #bookmarkList .bookmarkRow { display: flex; gap: 4px; align-items: center; }
   #bookmarkList button, #bookmarkForm button {
@@ -145,6 +146,10 @@
   <section>
     <h4>stats</h4>
     <div id="statsPanel">–</div>
+  </section>
+  <section>
+    <h4>events</h4>
+    <div id="eventLog">–</div>
   </section>
   <section>
     <h4>camera bookmarks</h4>
@@ -751,7 +756,24 @@ function decodeFrame(buffer) {
     }
   }
 
-  return { t, step, particles, connections, camera: cam, spheres, meshes, arrowGroups, visibleIds, registry, colliders };
+  // §9.1's discrete-event channel - "something happened between the previous frame and this
+  // one," only ever present the frame it happened (never resent), unlike everything above.
+  const eventCount = view.getInt32(offset, true); offset += 4;
+  const events = new Array(eventCount);
+  for (let i = 0; i < eventCount; i++) {
+    const kind = view.getUint8(offset); offset += 1;
+    if (kind === 0) {
+      events[i] = { kind: "forceBreak", name: readString() };
+    } else if (kind === 1) {
+      events[i] = { kind: "destroyed", particleId: view.getInt32(offset, true) };
+      offset += 4;
+    } else {
+      events[i] = { kind: "spawned", particleId: view.getInt32(offset, true) };
+      offset += 4;
+    }
+  }
+
+  return { t, step, particles, connections, camera: cam, spheres, meshes, arrowGroups, visibleIds, registry, colliders, events };
 }
 
 // --- Time controls (§9.1/§10.3) -----------------------------------------------------------
@@ -787,6 +809,7 @@ document.getElementById("stepOnceBtn").addEventListener("click", () => {
 document.getElementById("restartBtn").addEventListener("click", () => {
   send({ type: "restart" });
   resetStats();
+  resetEventLog();
 });
 
 document.querySelectorAll("#speedButtons button").forEach((btn) => {
@@ -852,6 +875,43 @@ function updateStats(frame) {
     `particles: ${frame.particles.length}\n` +
     `steps/s:   ${statsStepRate.toFixed(0)}\n` +
     `lag:       ${lagText}`;
+}
+
+// --- Discrete-event log (§9.1) ------------------------------------------------------------
+// A capped, rolling readout of frame.events (SparksDebugDemo produces these continuously;
+// DragDebugDemo's interactive delete produces them on demand) - a person watching the panel gets
+// a legible recent history instead of the raw per-frame list, which would otherwise vanish the
+// instant the next frame overwrote it. Newest first. Capped at EVENT_LOG_MAX so a
+// continuously-spawning demo (Sparks) doesn't grow this array, and the DOM text it's rendered
+// into, without bound for the life of the page.
+const EVENT_LOG_MAX = 20;
+const eventLogEl = document.getElementById("eventLog");
+let eventLogEntries = []; // oldest first internally; rendered reversed
+
+function resetEventLog() {
+  eventLogEntries = [];
+  eventLogEl.textContent = "–";
+}
+
+function eventLogText(e) {
+  if (e.kind === "forceBreak") return `force '${e.name || "(unnamed)"}' broke`;
+  if (e.kind === "destroyed") return `particle ${e.particleId} destroyed`;
+  return `particle ${e.particleId} spawned`;
+}
+
+// frame.events is this frame's fresh list only (never accumulated server-side - see
+// BinaryFrame's own doc comment), so appending it here is exactly "what happened since last
+// frame," not a replay - a paused frame runs zero physics steps and correctly carries zero
+// events, so pausing doesn't spam duplicate entries onto the log.
+function updateEventLog(frame) {
+  if (frame.events.length === 0) return;
+  for (const e of frame.events) {
+    eventLogEntries.push(`t=${frame.t.toFixed(3)}  ${eventLogText(e)}`);
+  }
+  if (eventLogEntries.length > EVENT_LOG_MAX) {
+    eventLogEntries.splice(0, eventLogEntries.length - EVENT_LOG_MAX);
+  }
+  eventLogEl.textContent = eventLogEntries.slice().reverse().join("\n");
 }
 
 // --- Outliner & per-object panel (§10.3) --------------------------------------------------
@@ -1164,7 +1224,7 @@ function connect() {
   const ws = new WebSocket(`ws://${location.hostname}:8887`);
   ws.binaryType = "arraybuffer";
   socket = ws;
-  ws.onopen = () => { statusEl.textContent = "connected"; resetStats(); lastRegistrySignature = null; };
+  ws.onopen = () => { statusEl.textContent = "connected"; resetStats(); resetEventLog(); lastRegistrySignature = null; };
   ws.onclose = () => { statusEl.textContent = "disconnected — retrying…"; setTimeout(connect, 1000); };
   ws.onerror = () => ws.close();
   ws.onmessage = (event) => {
@@ -1173,6 +1233,7 @@ function connect() {
     statusEl.textContent = `t=${frame.t.toFixed(3)}  step=${frame.step}  particles=${frame.particles.length}${cameraTag}`;
     applyFrame(frame);
     updateStats(frame);
+    updateEventLog(frame);
     updateOutliner(frame.registry);
   };
 }

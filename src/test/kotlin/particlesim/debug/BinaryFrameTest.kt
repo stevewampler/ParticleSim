@@ -326,6 +326,35 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `no events passed round-trips to an empty list, not an error`() {
+        val store = ParticleStore()
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList())
+        assertEquals(emptyList(), BinaryFrame.decode(buffer).events)
+    }
+
+    @Test
+    fun `all three event kinds round-trip, in order, alongside continuous frame data`() {
+        val store = ParticleStore()
+        val events = listOf(
+            SimEvent.ParticleSpawned(7),
+            SimEvent.ForceBreak("wind"),
+            SimEvent.ParticleDestroyed(3),
+            SimEvent.ForceBreak(""), // an unnamed force can still break - just not individually traceable
+        )
+
+        val buffer = BinaryFrame.encode(
+            t = 1.5, step = 42L, store = store, ids = emptyList(), connections = emptyList(),
+            events = events,
+        )
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(events, decoded.events)
+        // The event section doesn't clobber or get clobbered by the rest of the frame.
+        assertEquals(1.5, decoded.t)
+        assertEquals(42L, decoded.step)
+    }
+
+    @Test
     fun `decode does not consume the original buffer's position`() {
         val store = ParticleStore()
         val id = store.create(position = Vector3.ZERO)

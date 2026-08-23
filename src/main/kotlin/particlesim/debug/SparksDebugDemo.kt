@@ -15,6 +15,12 @@ import particlesim.physics.Integrator
  * Playback controls (pause/speed/step-once) via [ViewerInput] — every debug demo gets these
  * the same way now, see that class's own doc comment for why. Pausing freezes emission and
  * destruction along with physics, since both live inside the same `stepsThisFrame` loop.
+ *
+ * §9.1's discrete-event channel, first live consumer: this demo constantly spawns and destroys
+ * particles (a spark's lifetime always ends it, §14.2), so unlike every other demo it produces
+ * [SimEvent]s continuously with no interaction needed — the `events` list is rebuilt fresh each
+ * frame (never accumulated across frames) so a paused frame, which runs zero steps, correctly
+ * reports zero events instead of replaying the same ones every broadcast.
  */
 fun main() {
     val scenario = buildSparks()
@@ -32,14 +38,18 @@ fun main() {
     val frameNanos = 1_000_000_000L / framesPerSecond
     while (true) {
         val frameStart = System.nanoTime()
+        val events = mutableListOf<SimEvent>()
         repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) {
             integrator.step(scenario.store, scenario.groups, scenario.forces, emptyList(), t, SPARKS_DT)
-            scenario.destruction.resolve(scenario.store, scenario.groups, scenario.forces, t, SPARKS_DT)
-            scenario.emitter.update(scenario.store, scenario.groups, t, SPARKS_DT)
+            val destroyed = scenario.destruction.resolve(scenario.store, scenario.groups, scenario.forces, t, SPARKS_DT)
+            for (id in destroyed.destroyedIds) events += SimEvent.ParticleDestroyed(id)
+            val emitted = scenario.emitter.update(scenario.store, scenario.groups, t, SPARKS_DT)
+            for (id in emitted.spawnedIds) events += SimEvent.ParticleSpawned(id)
+            for (id in emitted.evictedIds) events += SimEvent.ParticleDestroyed(id)
             t += SPARKS_DT
             step++
         }
-        renderer.broadcast(t, step, scenario.store, scenario.store.liveIds(), emptyList())
+        renderer.broadcast(t, step, scenario.store, scenario.store.liveIds(), emptyList(), events = events)
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)
     }
