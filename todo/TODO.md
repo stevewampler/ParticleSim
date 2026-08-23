@@ -1807,17 +1807,62 @@ real prerequisite, not just unstarted — see the note below.
 - [ ] Implicit integration (§13.1)
 - [ ] Friction — static/kinetic (§12.5)
 - [ ] Continuous collision detection (§12.4)
-- [ ] Particle-vs-surface collision, surface self-collision (§12.4) — no
-      longer purely speculative: the trampoline worked example just below
-      needs exactly this, so it has a concrete consumer now even though
-      it isn't scheduled
-- [ ] Trampoline worked example (§12.8, new requirement) — a taut,
-      stiffly-sprung surface with its rim pinned to a frame, a ball
-      bouncing on its actual (deformed) shape rather than a fixed-shape
-      collider's restitution. Blocked on the particle-vs-surface-collision
-      item directly above; everything else it needs (a surface with
-      structural springs, a pinned rim) already exists. Package as a
-      shape-library entry (above) once built.
+- [x] Particle-vs-surface collision (§12.4) — promoted out of `[stretch]`
+      by the trampoline below. `particlesim.surface.Triangle.closestPoint`
+      (Ericson's region-test algorithm) finds the nearest point on a
+      triangle, including edges/vertices, and returns barycentric weights;
+      `particlesim.collision.SurfaceCollisionSystem` uses it each step
+      against a `Surface`'s *current* (deformed) vertex positions —
+      brute-force over every triangle (no broad-phase; one ball against a
+      few hundred triangles doesn't need it), picking whichever triangle
+      penetrates deepest. Reuses `ParticleColliderRule`'s exact
+      restitution/asymmetric-damping/rest-clamp formulas so a surface
+      contact feels like the same kind of bounce a static collider gives.
+      The genuinely new part: unlike a static `Collider` (infinite mass),
+      a surface's vertices are ordinary particles and must receive an
+      equal-and-opposite reaction impulse (`J = deltaRelVel /
+      (1/m_particle + sum(w_i^2/m_i))`, split across the three vertices by
+      barycentric weight `w_i`) — verified by a dedicated momentum-
+      conservation test against a free-floating, unpinned/unforced
+      triangle (asserting `sum(m*v)` unchanged by the impulse to 1e-9);
+      note a *pinned* vertex, e.g. the trampoline's rim, deliberately
+      breaks that conservation, since `FixedPosition.applyPosition`
+      discards whatever velocity the impulse just gave it every step —
+      correct for an anchored frame, just not a case that should be
+      asserted momentum-conserving. 16 new tests:
+      `TriangleClosestPointTest` (9, vertex/edge/face regions + a
+      moving-vertex case) and `SurfaceCollisionSystemTest` (7, including
+      the momentum test and a "deepest-of-several-triangles wins" case).
+      Surface *self*-collision (a mesh folding onto itself) is still not
+      implemented — out of scope for what the trampoline actually needs.
+- [x] Trampoline worked example (§12.8) — `particlesim.examples.buildTrampoline`:
+      a 10x10 taut mat (`TRAMPOLINE_DT = 5e-4`, structural/shear/bend
+      stiffness 2000/1000/200 — ten times the flag's — picked from
+      §13.1's `dt < 2*sqrt(m/k)` budget with ~12.6x margin, slightly more
+      conservative than the flag's own ~10x since a coupled mesh's true
+      bound runs tighter than the single-spring estimate), rim pinned via
+      `FixedPosition.atCurrentPositions` on every border row/column (not
+      just one edge like the flag's pole), and a ball dropped onto it via
+      `SurfaceCollisionSystem` — the surface's own per-step deformation is
+      what bounces the ball, not a fixed-shape collider. `TrampolineStabilityTest`
+      mirrors `FlagStabilityTest` (4 sim-seconds, no blow-up). `TrampolineBounceTest`
+      is the actual end-to-end claim: drops the ball, finds its deepest
+      penetration into the mat, and asserts it rebounds >0.15m above that
+      depth afterward — the one thing this worked example specifically
+      claims over reusing `buildBallBounce`'s static floor, and something
+      a broken collision wiring could still pass every isolated component
+      test while failing. Demo: `TrampolineDebugDemoKt` /
+      `./gradlew runTrampolineDemo`; verified server-side via a disposable
+      WebSocket script reading real engine state from a running instance —
+      observed the ball's actual height dip to -0.061m (mat deflecting
+      under impact) and rebound to +0.075m shortly after, a live bounce
+      matching the unit test's claim, not just a passing assertion in
+      isolation. Not verified in an actual browser (Chrome automation
+      unavailable in this environment, as with every other viewer feature
+      this phase) — the mesh should render as a shaded surface with the
+      rim shown as small spheres, same `visibleIds` pattern as the flag's
+      pole, but this has only been confirmed via the binary protocol, not
+      looked at.
 - [ ] Surface-vertex destruction / mesh repair (§14.3)
 - [ ] GPU compute (§9.3)
 - [ ] Interactive delete (§9.4, §14.2)

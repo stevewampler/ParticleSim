@@ -82,6 +82,13 @@ tasks.register<JavaExec>("runMultiShapeDemo") {
     mainClass.set("particlesim.debug.MultiShapeDebugDemoKt")
 }
 
+tasks.register<JavaExec>("runTrampolineDemo") {
+    group = "application"
+    description = "Runs §12.8's trampoline worked example (a ball bouncing off a deforming pinned-rim surface)."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("particlesim.debug.TrampolineDebugDemoKt")
+}
+
 kotlin {
     // Kotlin 2.0.20 doesn't support a JVM 23 bytecode target yet. Toolchain 23 + an
     // explicit JVM_22 compilerOptions target used to work around this, but Gradle's
