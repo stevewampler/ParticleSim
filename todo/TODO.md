@@ -1963,6 +1963,43 @@ real prerequisite, not just unstarted — see the note below.
       sole first-class target (§9.1, §10); reuses the same WebSocket
       protocol if ever built
 - [ ] Implicit integration (§13.1)
+- [ ] Lighting & materials (§10.2, new requirement) — configurable light
+      sources (ambient/directional/point) and per-object/per-group
+      material properties; today's renderer is flat/unlit with one fixed
+      appearance. Requested directly by the user, alongside the next two
+      items below, as "better control over the rendering of the scene."
+      No concrete scene has needed this yet — same "wait for a real
+      consumer" stance as every other stretch item here — but noted as a
+      real, user-requested direction rather than a hypothetical one.
+- [ ] Per-force arrow/line visibility toggle in the outliner (§10.3) — not
+      actually a new requirement: §10.3's per-object panel was already
+      specified to cover "a force's arrows/lines" the same way it already
+      covers a group's particles and a surface's mesh, it just never got
+      built for forces (Phase 10's outliner work only reached
+      groups/surfaces). The user's concrete ask — "show/hide the wind
+      vectors" on `FlagDebugDemo` — is exactly this gap's first real
+      consumer. Small, well-scoped: `FORCES` outliner entries already
+      list every named force, so this is "give the object panel a
+      show/hide toggle for a force with an arrow renderer," the same
+      `addToggle`/`hiddenSet` pattern groups and surfaces already use
+      client-side, plus threading that hidden-state through
+      `applyFrame`'s arrow-drawing loop server never needs to know about
+      (arrows are already computed and sent every frame regardless).
+- [ ] Per-entity-type UI modules, self-registered (§10.3, new
+      requirement) — the viewer's outliner/per-object-panel code is one
+      hardcoded implementation enumerating each kind (group/force/
+      constraint/collider/surface) by hand; the user wants each kind's UI
+      to be a self-contained module that registers itself with the
+      viewer instead, so adding a new visualizable kind is additive
+      rather than a change to shared dispatch code every other kind
+      already depends on. This is the biggest of the three asks in this
+      group — a real client-side architecture change, not a quick
+      addition — and would also be the natural foundation the other two
+      items above eventually plug into (a lighting/materials control
+      panel, a force's arrow-visibility toggle) rather than each being
+      one more hardcoded case. Deliberately not started alongside the
+      other two: worth designing once, deliberately, rather than
+      retrofitting mid-flight while still adding kinds one at a time.
 - [x] Friction — static/kinetic (§12.5) — promoted out of `[stretch]` the
       same way particle-vs-surface collision was: `ParticleCollisionDebugDemo`
       (Phase 5) turned up a concrete need. Without friction, a ball pile's

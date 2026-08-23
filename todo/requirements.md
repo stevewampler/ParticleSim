@@ -792,6 +792,21 @@ particles' `radius` by default), or a shaded/wireframe mesh for a surface.
 - N-body gravity and custom forces (§5.3) are lower priority / `[stretch]`
   — N-body isn't localized to a renderable pair (force exists between
   every pair), and custom forces don't have a defined shape yet.
+- `[stretch]` **Lighting & materials**: today's renderer draws flat/unlit
+  dots, spheres, and meshes with one fixed appearance. Configurable light
+  sources (ambient, directional, point — the standard three.js set, since
+  §9.1/§10 already commits to that as the sole first-class viewer) and
+  per-object/per-group material properties (base color, shininess/
+  opacity, or eventually a plugged-in shader) would let a scene actually
+  look considered rather than uniformly flat-shaded. These would be
+  additional renderer-adjacent declarations once built — e.g. a
+  scene-level `lights:` list, and a `material:` block alongside a
+  renderer's existing `kind`/`colorBy` — not a special case bolted on
+  outside the renderer system. Deferred the same way §5.2's spatially-
+  varying wind and §12.4's particle-vs-surface collision were: no scene
+  built so far has needed it, and designing a lighting/material system
+  ahead of a concrete visual target would be guessing at its shape rather
+  than responding to one.
 
 ```yaml
 renderers:
@@ -877,6 +892,24 @@ readout to debug a scene without a separate tool.
   happens to a running simulation when `stiffness` goes negative
   mid-step?) than a read-only inspector, which is why it stays `[stretch]`
   rather than bundled in with the rest of this UI.
+- `[stretch]` **Per-entity-type UI modules, self-registered**: everything
+  above (outliner sections, per-object panels) is described here by what
+  it shows, not how the viewer is built to show it — today that's one
+  hardcoded implementation enumerating each kind (group/force/constraint/
+  collider/surface) by hand, so introducing a new visualizable kind means
+  editing that shared dispatch. The alternative worth designing toward:
+  each entity kind's UI — its outliner section, its per-object panel
+  controls, its own visibility/rendering settings (including, once built,
+  §10.2's lighting/materials controls) — is a self-contained module that
+  registers itself with the viewer, so a new kind is additive (write and
+  register a module) rather than a change to shared code every other kind
+  already depends on. Not deferred because the idea is speculative — the
+  outliner/per-object-panel history already shows the current approach's
+  cost scales linearly with the number of kinds, which is exactly the
+  pressure this would relieve — but because a real plugin/registration
+  architecture is a bigger client-side redesign than any single kind's
+  UI, worth doing once, deliberately, rather than mid-flight while still
+  adding kinds one at a time.
 
 ## 11. Non-Functional Requirements
 
