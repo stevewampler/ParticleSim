@@ -1197,6 +1197,23 @@ function endDrag(event) {
 renderer.domElement.addEventListener("pointerup", endDrag);
 renderer.domElement.addEventListener("pointercancel", endDrag);
 
+// --- Double-click to delete a particle (§14.2's "explicit delete via the viewer, alongside
+// interactive dragging") ------------------------------------------------------------------
+// A third click gesture alongside drag (single click+move) and right-click (open panel) - a
+// deliberate, hard-to-trigger-by-accident action for something irreversible, the same
+// reasoning single vs. double click already carries in most desktop UIs. The two quick
+// pointerdown/pointerup pairs a dblclick is built from each start and immediately end a
+// no-op drag first (harmless - a drag released without ever moving throws with zero velocity,
+// per DragConstraint's own doc comment), so this only ever adds a delete on top, never replaces
+// the click handling above.
+renderer.domElement.addEventListener("dblclick", (event) => {
+  pointerToNdc(event);
+  raycaster.setFromCamera(pointerNdc, camera);
+  const picked = pickParticle();
+  if (!picked) return;
+  send({ type: "delete_particle", particleId: picked.particleId });
+});
+
 // --- Right-click to open a per-object panel (§10.3) ---------------------------------------
 // "The fast path for something already visible" - the outliner's click-to-select still works
 // regardless, this is just a shortcut for whatever's already on screen. Reuses the same

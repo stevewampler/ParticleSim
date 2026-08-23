@@ -2046,7 +2046,54 @@ real prerequisite, not just unstarted — see the note below.
       looked at.
 - [ ] Surface-vertex destruction / mesh repair (§14.3)
 - [ ] GPU compute (§9.3)
-- [ ] Interactive delete (§9.4, §14.2)
+- [x] Interactive delete (§9.4, §14.2) — §14.2's fourth destroy
+      mechanism ("explicit delete via the viewer, alongside interactive
+      dragging"), promoted out of `[stretch]`. `DestructionSystem.resolve`
+      gained an `explicitIds: Set<Int>` parameter (default empty, so
+      `SparksDebugDemo`'s existing lifetime/condition/collision-only call
+      site needed zero changes) — ids already gone are silently skipped,
+      same "already gone and just destroyed end up in the same place"
+      stance the rest of that class already takes. `SceneControlMessage`
+      gained a third case, `DeleteParticle`, alongside `RemoveCollider`/
+      `Restart` (grouped there rather than with `DragMessage` since a
+      delete has no per-step replay stamp and isn't part of that class's
+      Start/Move/End state machine). Client-side: double-click a particle
+      to delete it — a third, deliberately-hard-to-trigger-by-accident
+      click gesture alongside single-click-drag and right-click-to-open.
+      Wired into both `ParticleCollisionDebugDemo` (balls have no
+      pairwise forces, so this mostly exercises the basic mechanic) and
+      `DragDebugDemo` (the spring chain, where it actually matters:
+      deleting a middle link needs its two Spring/Damper connections
+      pruned from both `forces`, what physics sees, and `springs`, what
+      the viewer draws — reusing `DestructionSystem`'s existing
+      `danglingForces` reporting, §14.3's cleanup mechanism, rather than
+      a hand-rolled one-off).
+      **A real concurrency bug found and fixed via live browser
+      testing, not just unit tests**: a double-click's two constituent
+      clicks each start-and-immediately-end a no-op drag before the
+      delete itself fires. `SceneControlMessage`s drain once per
+      *frame*; `DragMessage`s drain once per physics *step* inside that
+      frame's repeat loop — so a stray queued `drag_start` for the
+      just-deleted id could still be sitting in the drag queue when the
+      frame's delete already ran, re-arming `activeDrag` against a dead
+      id and crashing the demo process (`IllegalArgumentException: no
+      such particle`) the moment the matching `drag_end` tried
+      `store.setVelocity` on it. Fixed by making `DragDebugDemo`'s own
+      drag handling defensive — `DragMessage.Start` now checks
+      `store.contains` before arming a drag, `DragMessage.End` checks it
+      before touching the store - the correct general fix for "an
+      interactive target can be deleted out from under an in-flight
+      gesture" once any destroy mechanism coexists with drag, not a
+      one-off patch for this specific race.
+      6 new tests (`SceneControlMessageTest` x2, `DestructionTest` x4).
+      Verified directly in a real Chrome browser: double-clicked a
+      middle chain link and watched it visibly split into two
+      independently-falling pieces (the severed lower segment, no
+      longer connected to anything above it, fell straight down past the
+      origin marker under gravity alone); the crash above was caught and
+      fixed during this same live testing pass, then re-verified stable
+      afterward, including that ordinary dragging still worked correctly
+      post-delete.
 - [ ] Playback-fork-to-live: resume from nearest checkpoint, deterministic
       fast-forward to the exact target frame, then hand off to live input
       (§9.4, §9.5)

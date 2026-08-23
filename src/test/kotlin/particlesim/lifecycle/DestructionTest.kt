@@ -123,6 +123,65 @@ class DestructionTest {
         assertTrue(result.danglingForces.isEmpty())
     }
 
+    // --- Explicit/interactive destroy (§14.2's fourth mechanism) ----------------------------
+
+    @Test
+    fun `an explicit id destroys that particle even with no lifetime, condition, or collision at all`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val id = store.create()
+        groups.add("g", id)
+        val system = DestructionSystem()
+
+        val result = system.resolve(store, groups, emptyList(), t = 0.0, dt = 0.1, explicitIds = setOf(id))
+
+        assertEquals(listOf(id), result.destroyedIds)
+        assertFalse(store.contains(id))
+        assertTrue(groups.membersOf("g").isEmpty())
+    }
+
+    @Test
+    fun `an explicit id for an already-dead particle is silently ignored, not an error`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val system = DestructionSystem()
+
+        val result = system.resolve(store, groups, emptyList(), t = 0.0, dt = 0.1, explicitIds = setOf(999))
+
+        assertTrue(result.destroyedIds.isEmpty())
+    }
+
+    @Test
+    fun `an explicit delete reports dangling pairwise forces exactly like any other destroy trigger`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val a = store.create()
+        val b = store.create()
+        groups.add("g", a); groups.add("g", b)
+        val spring = Spring(a, b, restLength = 1.0, stiffness = 10.0)
+        val system = DestructionSystem()
+
+        val result = system.resolve(store, groups, listOf(spring), t = 0.0, dt = 0.1, explicitIds = setOf(a))
+
+        assertEquals(listOf(a), result.destroyedIds)
+        assertEquals(listOf(spring), result.danglingForces)
+    }
+
+    @Test
+    fun `an explicit id and an unrelated destroy mechanism in the same step don't double-report`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val explicit = store.create()
+        val expired = store.create(lifetime = ScalarExpr.of(1.0), spawnTime = 0.0)
+        groups.add("g", explicit); groups.add("g", expired)
+        val system = DestructionSystem()
+
+        val result = system.resolve(store, groups, emptyList(), t = 1.0, dt = 0.1, explicitIds = setOf(explicit))
+
+        assertEquals(setOf(explicit, expired), result.destroyedIds.toSet())
+        assertEquals(2, result.destroyedIds.size)
+    }
+
     @Test
     fun `a particle matched by multiple destroy mechanisms in one step is only destroyed once`() {
         val store = ParticleStore()

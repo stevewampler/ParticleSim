@@ -20,6 +20,19 @@ class SceneControlMessageTest {
     }
 
     @Test
+    fun `parses delete_particle with its id`() {
+        assertEquals(
+            SceneControlMessage.DeleteParticle(42),
+            SceneControlMessage.parse("""{"type": "delete_particle", "particleId": 42}"""),
+        )
+    }
+
+    @Test
+    fun `rejects delete_particle with no particleId at all`() {
+        assertNull(SceneControlMessage.parse("""{"type": "delete_particle"}"""))
+    }
+
+    @Test
     fun `parses restart`() {
         assertEquals(SceneControlMessage.Restart, SceneControlMessage.parse("""{"type": "restart"}"""))
     }

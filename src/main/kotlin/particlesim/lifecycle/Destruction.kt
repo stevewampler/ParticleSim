@@ -52,12 +52,23 @@ class DestructionSystem(
     private val destroyConditions: List<DestroyCondition> = emptyList(),
     private val collisionDestroyRules: List<CollisionDestroyRule> = emptyList(),
 ) {
-    fun resolve(store: ParticleStore, groups: Groups, forces: List<Force>, t: Double, dt: Double): DestructionResult {
+    /** [explicitIds] is §14.2's fourth destroy mechanism — "explicit delete via the viewer,
+     * alongside interactive dragging (§9.4)" — a caller-driven trigger rather than one this
+     * class evaluates itself, the same way [particlesim.physics.DragConstraint] is driven by
+     * live viewer input rather than an expression. Silently ignores any id no longer alive
+     * (e.g. a delete click racing a lifetime expiry in the same step) rather than erroring —
+     * "already gone" and "just destroyed" end up in the same place either way. */
+    fun resolve(
+        store: ParticleStore, groups: Groups, forces: List<Force>, t: Double, dt: Double,
+        explicitIds: Set<Int> = emptySet(),
+    ): DestructionResult {
         for (collider in collisionDestroyRules.map { it.collider }.distinct()) {
             collider.advance(t, dt)
         }
 
         val toDestroy = LinkedHashSet<Int>()
+
+        for (id in explicitIds) if (store.contains(id)) toDestroy += id
 
         for (id in store.liveIds()) {
             val lifetime = store.lifetime(id)

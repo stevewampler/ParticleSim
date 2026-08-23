@@ -10,6 +10,7 @@ import particlesim.core.ParticleStore
 import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
 import particlesim.core.VectorExpr
+import particlesim.lifecycle.DestructionSystem
 import particlesim.physics.Integrator
 import particlesim.physics.UniformGravity
 import kotlin.random.Random
@@ -52,16 +53,20 @@ import kotlin.random.Random
  * debug-render-all wireframe) rather than invisible geometry the balls just mysteriously stop
  * at.
  *
- * **Removable colliders and restart**, via [SceneControlMessage]: the viewer's outliner lists
- * each collider by name with a "remove" action (this is *the* way to answer "what does the pile
- * do without the walls?" live, rather than needing a second demo binary just to try it), and a
- * "restart" button rebuilds the whole scenario from scratch — brand-new `ParticleStore`/`Groups`
- * (old particle ids from before a restart are meaningless, not reused) plus every collider
- * restored, not just the ones still standing. Both arrive on [DebugServer]'s WebSocket I/O
- * thread but are only ever *applied* on the physics loop's own thread via
- * [SceneControlMessageQueue.drainAll] — replacing `store`/`groups`/the live collider list out
- * from under a concurrently-running physics step would be a real race, not just untidy, the
- * same reasoning [DragMessageQueue] already established for per-particle input.
+ * **Removable colliders, interactive delete, and restart**, via [SceneControlMessage]: the
+ * viewer's outliner lists each collider by name with a "remove" action (this is *the* way to
+ * answer "what does the pile do without the walls?" live, rather than needing a second demo
+ * binary just to try it); double-clicking a ball in the 3D view deletes it outright (§14.2's
+ * "explicit delete via the viewer"), via the same [particlesim.lifecycle.DestructionSystem]
+ * every lifetime/condition/collision-triggered destroy already uses (§14.3's cleanup, reused
+ * rather than hand-rolled — balls have no pairwise forces to dangle, but the mechanism stays
+ * uniform); and a "restart" button rebuilds the whole scenario from scratch — brand-new
+ * `ParticleStore`/`Groups` (old particle ids from before a restart are meaningless, not reused)
+ * plus every collider restored, not just the ones still standing. All three arrive on
+ * [DebugServer]'s WebSocket I/O thread but are only ever *applied* on the physics loop's own
+ * thread via [SceneControlMessageQueue.drainAll] — replacing `store`/`groups`/the live collider
+ * list out from under a concurrently-running physics step would be a real race, not just
+ * untidy, the same reasoning [DragMessageQueue] already established for per-particle input.
  */
 private data class NamedColliderRule(val collider: PlaneCollider, val rule: ParticleColliderRule)
 
@@ -90,6 +95,10 @@ fun main() {
 
     val particleRule = ParticleCollisionRule(groupA = ballGroup, restitution = 0.6, compressionDamping = 1.0, staticFriction = 0.4, kineticFriction = 0.3)
     val particleCollisions = ParticleCollisionSystem(listOf(particleRule))
+    // No lifetime/condition/collision triggers - only ever driven by SceneControlMessage.DeleteParticle's
+    // explicitIds below. Balls have no pairwise forces to dangle, but reusing DestructionSystem
+    // keeps one cleanup mechanism everywhere (§14.3) rather than a second hand-rolled one here.
+    val destruction = DestructionSystem()
 
     val sceneControlQueue = SceneControlMessageQueue()
     val timeControl = TimeControl()
@@ -128,6 +137,10 @@ fun main() {
                 is SceneControlMessage.RemoveCollider -> {
                     liveColliderRules = liveColliderRules.filter { it.collider.name != message.name }
                     floorCollisions = CollisionSystem(liveColliderRules.map { it.rule })
+                }
+                is SceneControlMessage.DeleteParticle -> {
+                    val result = destruction.resolve(store, groups, listOf(gravity), t, dt, explicitIds = setOf(message.particleId))
+                    ids.removeAll(result.destroyedIds.toSet())
                 }
                 SceneControlMessage.Restart -> {
                     store = ParticleStore()
