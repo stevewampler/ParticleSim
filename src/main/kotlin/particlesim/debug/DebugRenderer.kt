@@ -2,9 +2,9 @@ package particlesim.debug
 
 import particlesim.collision.Collider
 import particlesim.core.ParticleStore
-import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.NamedArrowSamples
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
 
@@ -42,14 +42,14 @@ class DebugRenderer(
         lineColors: Map<Pair<Int, Int>, Color> = emptyMap(),
         sphereRadii: Map<Int, Double> = emptyMap(),
         meshes: List<SurfaceRenderer> = emptyList(),
-        arrowSamples: List<ArrowSample> = emptyList(),
+        arrowGroups: List<NamedArrowSamples> = emptyList(),
         visibleIds: Set<Int>? = null,
         registry: SceneRegistry = SceneRegistry.build(),
         colliders: List<Collider> = emptyList(),
     ) {
         wsServer.broadcastFrame(
             BinaryFrame.encode(
-                t, step, store, ids, connections, camera, lineColors, sphereRadii, meshes, arrowSamples, visibleIds, registry,
+                t, step, store, ids, connections, camera, lineColors, sphereRadii, meshes, arrowGroups, visibleIds, registry,
                 colliders,
             ),
         )

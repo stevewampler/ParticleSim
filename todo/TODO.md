@@ -1871,6 +1871,71 @@ real prerequisite, not just unstarted — see the note below.
       wider rollout" pattern (`TimeControl` did the same before spreading
       further) — no other demo currently has removable colliders or a
       restart affordance.
+- [x] Self-registering per-entity-type UI modules + per-force arrow
+      visibility toggle (§10.3, new requirement — promoted out of
+      `[stretch]` for a concrete first consumer, same pattern as friction
+      and removable colliders before it) — user asked for both "the
+      ability to show/hide the wind vectors on the flag demo" and, more
+      generally, for each entity kind's viewer UI to be "a self-contained
+      module that registers itself with the viewer" instead of one
+      hardcoded `if/else` dispatch every kind lives inside. Built both
+      together rather than either alone, using the wind toggle as the
+      new architecture's real first consumer instead of a toy example.
+      **Wire protocol change first**: `frame.arrows` was a flat
+      `List<ArrowSample>` with no source tag, so a "per-force" toggle
+      without one would really be "hide every arrow, mislabeled" the
+      moment a scene had two arrow-emitting forces — exactly the gap an
+      existing code comment already flagged ("needs a source-tag protocol
+      extension"). Added `particlesim.render.NamedArrowSamples(name,
+      samples)`; `BinaryFrame`'s arrow section is now grouped by force
+      name (`arrowGroupCount * {name, sampleCount, samples}`) instead of
+      one flat list — same `""`-for-unnamed convention `DecodedMesh`
+      already established, so an unnamed arrow-emitting force still draws
+      but isn't individually toggleable. `DebugRenderer.broadcast` and
+      `FlagDebugDemo` updated to the new `arrowGroups` param (`wind.name`
+      is `"wind"`, set by `buildFlag`). New `BinaryFrameTest` cases cover
+      a single named group, an empty default, and multiple groups
+      (including one unnamed) round-tripping independently.
+      **Client-side module registry**: `registerEntityKind(module)`
+      lets a kind declare `{kind, getNames(registry), renderPanel(),
+      updateLive()?}` and claims the outliner section the page's HTML
+      already declares for it (`#outlinerGroups`, `#outlinerForces`, …)
+      rather than building DOM from scratch — registering is purely
+      additive to what the page already renders, not a reshuffling of
+      section order/headers. `updateOutliner`/`renderObjectPanel` now
+      loop over registered modules instead of hardcoding every kind by
+      name.
+      **Scoped to two modules, not all five**, on advisor review before
+      writing code: migrating "groups" (a toggle *plus* live info text
+      *plus* live inspection — exercising every hook a module can have)
+      and "forces" (the actual new toggle) proves the shape without
+      risking three already-working panels (constraints/surfaces/
+      colliders) in one big-bang pass for no functional gain. Those three
+      stay on the pre-existing hardcoded `if/else` path in
+      `renderObjectPanel`/`updateOutliner` — genuinely unmigrated, not
+      secretly broken; noted here rather than left silently inconsistent.
+      A force's toggle is only real when it has arrow samples this frame
+      (`latestArrowGroups`) — a force with no arrow renderer (e.g. plain
+      uniform gravity) still gets the old informational note instead of a
+      checkbox that would silently do nothing.
+      **Verified live in Chrome** against a freshly relaunched
+      `FlagDebugDemo`: opened the "wind" force's panel (new, previously
+      just a note) and confirmed a "show arrows" checkbox appears;
+      unchecking it removed every wind arrow from the scene while the
+      cloth mesh, pole dots, and scripted camera kept rendering
+      unaffected (ruling out "hides everything" masquerading as "hides
+      arrows"); re-checking brought them back. Also re-verified the
+      migrated "groups" module (cloth's toggle + live "N drawable" text +
+      live centroid/avg-speed all updated correctly) and confirmed the
+      unmigrated surfaces/constraints panels still render exactly as
+      before (no regression from the module-lookup fallback path). No
+      console errors on a fresh page load or after interaction.
+- [ ] `[stretch]` Migrate constraints/surfaces/colliders to the
+      self-registering entity-kind module system above — deferred, not
+      forgotten; two real modules (groups, forces) already proved the
+      shape, so this is mechanical work with low risk/reward until a
+      third kind actually needs a module-specific behavior the shared
+      hardcoded path can't express.
 - [ ] `[stretch]` Live parameter tweaking (viewer writes back into a
       running force/constraint's numeric parameters) — deliberately kept
       out of this phase's main scope; needs generalizing §9.4's
@@ -1971,35 +2036,6 @@ real prerequisite, not just unstarted — see the note below.
       No concrete scene has needed this yet — same "wait for a real
       consumer" stance as every other stretch item here — but noted as a
       real, user-requested direction rather than a hypothetical one.
-- [ ] Per-force arrow/line visibility toggle in the outliner (§10.3) — not
-      actually a new requirement: §10.3's per-object panel was already
-      specified to cover "a force's arrows/lines" the same way it already
-      covers a group's particles and a surface's mesh, it just never got
-      built for forces (Phase 10's outliner work only reached
-      groups/surfaces). The user's concrete ask — "show/hide the wind
-      vectors" on `FlagDebugDemo` — is exactly this gap's first real
-      consumer. Small, well-scoped: `FORCES` outliner entries already
-      list every named force, so this is "give the object panel a
-      show/hide toggle for a force with an arrow renderer," the same
-      `addToggle`/`hiddenSet` pattern groups and surfaces already use
-      client-side, plus threading that hidden-state through
-      `applyFrame`'s arrow-drawing loop server never needs to know about
-      (arrows are already computed and sent every frame regardless).
-- [ ] Per-entity-type UI modules, self-registered (§10.3, new
-      requirement) — the viewer's outliner/per-object-panel code is one
-      hardcoded implementation enumerating each kind (group/force/
-      constraint/collider/surface) by hand; the user wants each kind's UI
-      to be a self-contained module that registers itself with the
-      viewer instead, so adding a new visualizable kind is additive
-      rather than a change to shared dispatch code every other kind
-      already depends on. This is the biggest of the three asks in this
-      group — a real client-side architecture change, not a quick
-      addition — and would also be the natural foundation the other two
-      items above eventually plug into (a lighting/materials control
-      panel, a force's arrow-visibility toggle) rather than each being
-      one more hardcoded case. Deliberately not started alongside the
-      other two: worth designing once, deliberately, rather than
-      retrofitting mid-flight while still adding kinds one at a time.
 - [x] Friction — static/kinetic (§12.5) — promoted out of `[stretch]` the
       same way particle-vs-surface collision was: `ParticleCollisionDebugDemo`
       (Phase 5) turned up a concrete need. Without friction, a ball pile's

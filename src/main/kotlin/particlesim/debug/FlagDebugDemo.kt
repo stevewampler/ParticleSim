@@ -11,6 +11,7 @@ import particlesim.render.ArrowRenderer
 import particlesim.render.ArrowSampling
 import particlesim.render.CameraFunction
 import particlesim.render.CameraPose
+import particlesim.render.NamedArrowSamples
 import particlesim.render.SceneQueryImpl
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
@@ -140,7 +141,9 @@ fun main() {
             camera = camera.evaluate(t, scene),
             sphereRadii = poleSphereRadii,
             meshes = listOf(clothMesh),
-            arrowSamples = arrowSamples,
+            // wind.name is non-null (buildFlag names it "wind") - §10.3's per-force arrow
+            // visibility toggle keys off this exact name in the outliner's forces section.
+            arrowGroups = listOf(NamedArrowSamples(wind.name ?: "", arrowSamples)),
             visibleIds = poleIds,
             registry = registry,
         )

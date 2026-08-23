@@ -568,16 +568,26 @@ function applyFrame(frame) {
     overlay.visible = !hiddenByToggle && showMeshEdges;
   });
 
-  // Arrow-sampled field forces (§10.2): one ArrowHelper per sample, pooled the same way.
-  while (arrowObjects.length < frame.arrows.length) {
+  // Arrow-sampled field forces (§10.2), grouped by source force. §10.3's per-force visibility
+  // toggle (hiddenForces) hides a whole group by name before flattening - an unnamed group's
+  // name is "" which never matches anything in hiddenForces (nothing unnamed is reachable in the
+  // outliner to hide it with), same convention as hiddenSurfaces/hiddenGroups. One ArrowHelper
+  // per visible sample, pooled the same way dots/lines are.
+  latestArrowGroups = frame.arrowGroups;
+  const visibleArrowSamples = [];
+  for (const group of frame.arrowGroups) {
+    if (group.name !== "" && hiddenForces.has(group.name)) continue;
+    for (const sample of group.samples) visibleArrowSamples.push(sample);
+  }
+  while (arrowObjects.length < visibleArrowSamples.length) {
     const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(), 1, ARROW_COLOR);
     arrowGroup.add(arrow);
     arrowObjects.push(arrow);
   }
-  while (arrowObjects.length > frame.arrows.length) {
+  while (arrowObjects.length > visibleArrowSamples.length) {
     arrowGroup.remove(arrowObjects.pop());
   }
-  frame.arrows.forEach((sample, i) => {
+  visibleArrowSamples.forEach((sample, i) => {
     const arrow = arrowObjects[i];
     const dir = new THREE.Vector3(sample.vector.x, sample.vector.y, sample.vector.z);
     const length = dir.length();
@@ -594,8 +604,7 @@ function applyFrame(frame) {
     }
   });
 
-  updateGroupPanelInfo(); // text-only refresh - see its own doc comment for why it never touches the checkbox
-  updateInspection(); // same text-only discipline, for the live position/velocity/speed readout
+  updateInspection(); // text-only refresh (info + live readout) - see each module's own updateLive
 }
 
 // --- Binary frame decoding (§9.1) ---------------------------------------------------------
@@ -688,10 +697,17 @@ function decodeFrame(buffer) {
     meshes[i] = { wireframe, name, triangles };
   }
 
-  const arrowCount = view.getInt32(offset, true); offset += 4;
-  const arrows = new Array(arrowCount);
-  for (let i = 0; i < arrowCount; i++) {
-    arrows[i] = { origin: readVec(), vector: readVec() };
+  // Arrow samples grouped by their source force's name (§10.3's per-force visibility toggle -
+  // see BinaryFrame's own doc comment for why the name travels with the samples instead of a
+  // separate lookup). name is "" for an unnamed force, same convention as a mesh's name.
+  const arrowGroupCount = view.getInt32(offset, true); offset += 4;
+  const arrowGroups = new Array(arrowGroupCount);
+  for (let i = 0; i < arrowGroupCount; i++) {
+    const name = readString();
+    const sampleCount = view.getInt32(offset, true); offset += 4;
+    const samples = new Array(sampleCount);
+    for (let j = 0; j < sampleCount; j++) samples[j] = { origin: readVec(), vector: readVec() };
+    arrowGroups[i] = { name, samples };
   }
 
   const hasVisibleIds = view.getUint8(offset) !== 0; offset += 1;
@@ -735,7 +751,7 @@ function decodeFrame(buffer) {
     }
   }
 
-  return { t, step, particles, connections, camera: cam, spheres, meshes, arrows, visibleIds, registry, colliders };
+  return { t, step, particles, connections, camera: cam, spheres, meshes, arrowGroups, visibleIds, registry, colliders };
 }
 
 // --- Time controls (§9.1/§10.3) -----------------------------------------------------------
@@ -843,14 +859,16 @@ function updateStats(frame) {
 // of what's currently rendered - the answer to "how do I reach an invisible object's settings."
 // Selecting an entry opens a shared panel below the list (§10.3: "selecting an entry opens the
 // same per-object panel a right-click would" - right-click-in-3D itself is still separate,
-// unstarted future work). Visibility toggles are only *real* for groups and surfaces this pass:
-// a group's members are already known (registry.groups' memberIds) and a mesh already carries
-// its surface's name (BinaryFrame's mesh entries), but a force's connections/arrow samples carry
-// no source tag yet, and a constraint has no renderer defined at all (§10.2) - both of those get
-// an informational note instead of a checkbox that would silently do nothing.
+// unstarted future work).
+//
+// "groups" and "forces" are self-registered entity-kind modules (see registerEntityKind below):
+// each owns its own outliner list contents and per-object panel body, so a new kind is additive
+// rather than another branch in renderObjectPanel/updateOutliner every other kind already
+// depends on. "constraints"/"surfaces"/"colliders" are still on the older hardcoded path - two
+// real modules (one with just a toggle, one with a toggle *and* live inspection text) already
+// prove the shape; migrating the rest is deferred rather than risking three working panels in one
+// pass for no functional gain (see TODO.md).
 const outlinerSections = {
-  groups: document.getElementById("outlinerGroups"),
-  forces: document.getElementById("outlinerForces"),
   constraints: document.getElementById("outlinerConstraints"),
   surfaces: document.getElementById("outlinerSurfaces"),
   colliders: document.getElementById("outlinerColliders"),
@@ -868,6 +886,7 @@ let objectPanelInfoEl = null; // the groups panel's live "N drawable" text node,
 let latestById = new Map(); // this frame's particles by id (position + velocity), for §10.3 inspection
 let latestMeshes = []; // this frame's mesh declarations, for a selected surface's inspection readout
 let latestColliders = []; // this frame's colliders, for the outliner's remove action
+let latestArrowGroups = []; // this frame's named arrow-sample groups, for the forces panel's toggle
 let objectPanelInspectEl = null; // the groups/surfaces panel's live numeric-readout text node
 
 // Names of groups/surfaces a person has explicitly unchecked in the per-object panel. Composed
@@ -877,6 +896,7 @@ let objectPanelInspectEl = null; // the groups/surfaces panel's live numeric-rea
 // particle/mesh draws only if the server permits it *and* nothing here hides it - see applyFrame.
 const hiddenGroups = new Set();
 const hiddenSurfaces = new Set();
+const hiddenForces = new Set(); // names of forces whose arrow samples (see NamedArrowSamples) are unchecked
 
 // A plain JSON.stringify(registry) can't detect a group's membership changing, since Set doesn't
 // serialize meaningfully (every group would stringify to the same shape regardless of contents) -
@@ -917,62 +937,16 @@ function groupPanelInfoText(name) {
   return `${total} particle(s) — ${drawable} drawable as a dot right now`;
 }
 
-// Updates only the info text node, never touching the checkbox element itself - called every
-// frame (from applyFrame) so the count tracks visibleIds changes live, but recreating the
-// checkbox that often would risk detaching it mid-click if a frame arrives between a person's
-// mousedown and mouseup, turning an occasional click into a lost one.
-function updateGroupPanelInfo() {
-  if (selectedKind !== "groups" || !objectPanelInfoEl) return;
-  objectPanelInfoEl.textContent = groupPanelInfoText(selectedName);
-}
-
 // --- Selection & inspection (§10.3) -------------------------------------------------------
 // "Live numeric readout for it" — extended sensibly from a single particle (what the spec's own
 // examples describe: "a particle's position/velocity") to a whole group or surface, since that's
 // what's actually selectable today. A group's readout is its members' centroid and average
 // speed; a surface's is its unique vertex count's average speed and its triangle count. Forces
-// and constraints still have no live numeric data on the wire (no source-tag on connections/
-// arrow samples, no per-object magnitude), so they keep the same informational note as the
-// visibility-toggle gap — both are blocked on the same missing protocol piece.
+// now have a real per-force arrow visibility toggle (see the "forces" module below) but still no
+// live numeric readout (no per-object magnitude on the wire yet); constraints have neither.
 function vectorLength(x, y, z) { return Math.sqrt(x * x + y * y + z * z); }
 
 function formatVec(x, y, z) { return `(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)})`; }
-
-// Updates only the inspection text node, same single-writer discipline as updateGroupPanelInfo
-// and for the same reason: called every frame, but never recreates the checkbox it sits next to.
-function updateInspection() {
-  if (!objectPanelInspectEl) return;
-  if (selectedKind === "groups") {
-    const group = latestRegistry.groups.find((g) => g.name === selectedName);
-    const memberIds = group ? group.memberIds : new Set();
-    let sumX = 0, sumY = 0, sumZ = 0, sumSpeed = 0, count = 0;
-    for (const id of memberIds) {
-      const p = latestById.get(id);
-      if (!p) continue; // not present this frame (e.g. destroyed - Phase 6, unbuilt, but defensive)
-      sumX += p.x; sumY += p.y; sumZ += p.z;
-      sumSpeed += vectorLength(p.vx, p.vy, p.vz);
-      count++;
-    }
-    objectPanelInspectEl.textContent = count === 0
-      ? "no live data"
-      : `centroid: ${formatVec(sumX / count, sumY / count, sumZ / count)}\navg speed: ${(sumSpeed / count).toFixed(3)} m/s`;
-  } else if (selectedKind === "surfaces") {
-    const meshDecl = latestMeshes.find((m) => m.name === selectedName);
-    if (!meshDecl) { objectPanelInspectEl.textContent = "no live data"; return; }
-    const vertexIds = new Set();
-    for (const tri of meshDecl.triangles) { vertexIds.add(tri.a); vertexIds.add(tri.b); vertexIds.add(tri.c); }
-    let sumSpeed = 0, count = 0;
-    for (const id of vertexIds) {
-      const p = latestById.get(id);
-      if (!p) continue;
-      sumSpeed += vectorLength(p.vx, p.vy, p.vz);
-      count++;
-    }
-    objectPanelInspectEl.textContent = count === 0
-      ? "no live data"
-      : `${meshDecl.triangles.length} triangle(s)\navg vertex speed: ${(sumSpeed / count).toFixed(3)} m/s`;
-  }
-}
 
 function renderNameList(container, kind, names) {
   container.innerHTML = "";
@@ -995,6 +969,137 @@ function renderNameList(container, kind, names) {
   container.appendChild(list);
 }
 
+// --- Self-registering entity-kind UI modules (§10.3) --------------------------------------
+// Each entity kind's outliner section + per-object panel body is owned by a module that
+// registers itself here via registerEntityKind, rather than being another branch in shared
+// dispatch code (renderObjectPanel/updateOutliner) that every other kind's code already lives
+// in - a new kind becomes additive instead of a change to code it doesn't own. A module claims
+// the outliner section the page's own HTML already declares for its kind (rather than building
+// its own container from scratch), so registering is purely additive to what's already on the
+// page - section order and header text stay exactly where the page put them.
+//
+// Two kinds are migrated here - "groups" (a toggle, live info text, *and* live inspection,
+// exercising every hook a module can have) and "forces" (this feature's actual new consumer: a
+// per-force arrow-visibility toggle, real only when that force has arrow samples this frame).
+// "constraints"/"surfaces"/"colliders" stay on the pre-existing hardcoded path below - two real
+// modules already prove the shape; migrating the rest is deferred (see TODO.md) rather than
+// risking three working panels in one pass for no functional gain.
+const entityKindModules = new Map(); // kind -> { getNames(registry), renderPanel(), updateLive()? }
+
+function registerEntityKind(module) {
+  const capitalized = module.kind[0].toUpperCase() + module.kind.slice(1);
+  module.sectionEl = document.getElementById("outliner" + capitalized);
+  entityKindModules.set(module.kind, module);
+}
+
+// Shared per-object-panel building blocks - available to every kind, migrated or not, so the
+// hardcoded constraints/surfaces/colliders branches below and the two modules above build their
+// panel bodies the exact same way.
+function addPanelNote(text) {
+  const note = document.createElement("div");
+  note.className = "noRenderer";
+  note.textContent = text;
+  objectPanelBodyEl.appendChild(note);
+}
+function addPanelToggle(labelText, hiddenSet) {
+  const label = document.createElement("label");
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = !hiddenSet.has(selectedName);
+  checkbox.addEventListener("change", () => {
+    if (checkbox.checked) hiddenSet.delete(selectedName); else hiddenSet.add(selectedName);
+  });
+  label.append(checkbox, document.createTextNode(" " + labelText));
+  objectPanelBodyEl.appendChild(label);
+}
+function addPanelInspect() {
+  const inspect = document.createElement("div");
+  inspect.className = "objectInspect";
+  objectPanelBodyEl.appendChild(inspect);
+  objectPanelInspectEl = inspect;
+}
+
+registerEntityKind({
+  kind: "groups",
+  getNames: (registry) => registry.groups.map((g) => g.name),
+  renderPanel: () => {
+    addPanelToggle("show particles", hiddenGroups);
+    const info = document.createElement("div");
+    info.className = "objectInfo";
+    info.textContent = groupPanelInfoText(selectedName);
+    objectPanelBodyEl.appendChild(info);
+    objectPanelInfoEl = info;
+    addPanelInspect();
+  },
+  // Refreshes the info/inspect text nodes only, never recreating the checkbox they sit next to -
+  // called every frame (from updateInspection, itself called from applyFrame) so both the
+  // "N drawable" count and the live centroid/speed track the current frame without risking a
+  // detached checkbox mid-click.
+  updateLive: () => {
+    if (objectPanelInfoEl) objectPanelInfoEl.textContent = groupPanelInfoText(selectedName);
+    if (!objectPanelInspectEl) return;
+    const group = latestRegistry.groups.find((g) => g.name === selectedName);
+    const memberIds = group ? group.memberIds : new Set();
+    let sumX = 0, sumY = 0, sumZ = 0, sumSpeed = 0, count = 0;
+    for (const id of memberIds) {
+      const p = latestById.get(id);
+      if (!p) continue; // not present this frame (e.g. destroyed - Phase 6, unbuilt, but defensive)
+      sumX += p.x; sumY += p.y; sumZ += p.z;
+      sumSpeed += vectorLength(p.vx, p.vy, p.vz);
+      count++;
+    }
+    objectPanelInspectEl.textContent = count === 0
+      ? "no live data"
+      : `centroid: ${formatVec(sumX / count, sumY / count, sumZ / count)}\navg speed: ${(sumSpeed / count).toFixed(3)} m/s`;
+  },
+});
+
+registerEntityKind({
+  kind: "forces",
+  getNames: (registry) => registry.forces,
+  // A visibility toggle is only real when this force actually has arrow samples this frame
+  // (latestArrowGroups, populated in applyFrame) - a force with no arrow renderer (e.g. plain
+  // uniform gravity) has nothing here to show or hide, so it keeps the same informational note
+  // as before rather than a checkbox that would silently do nothing.
+  renderPanel: () => {
+    const hasArrows = latestArrowGroups.some((g) => g.name === selectedName);
+    if (hasArrows) {
+      addPanelToggle("show arrows", hiddenForces);
+    } else {
+      addPanelNote("no arrow renderer for this force, and no other live numeric data yet (§10.2/§10.3)");
+    }
+  },
+});
+
+// Updates whichever per-object panel is currently open with this frame's live data - called
+// every frame from applyFrame. A module with an updateLive hook gets it; "surfaces" (not yet
+// migrated) keeps its own inline logic, same single-writer discipline (never recreates the
+// checkbox its inspect text sits next to).
+function updateInspection() {
+  const module = entityKindModules.get(selectedKind);
+  if (module) {
+    if (module.updateLive) module.updateLive();
+    return;
+  }
+  if (!objectPanelInspectEl) return;
+  if (selectedKind === "surfaces") {
+    const meshDecl = latestMeshes.find((m) => m.name === selectedName);
+    if (!meshDecl) { objectPanelInspectEl.textContent = "no live data"; return; }
+    const vertexIds = new Set();
+    for (const tri of meshDecl.triangles) { vertexIds.add(tri.a); vertexIds.add(tri.b); vertexIds.add(tri.c); }
+    let sumSpeed = 0, count = 0;
+    for (const id of vertexIds) {
+      const p = latestById.get(id);
+      if (!p) continue;
+      sumSpeed += vectorLength(p.vx, p.vy, p.vz);
+      count++;
+    }
+    objectPanelInspectEl.textContent = count === 0
+      ? "no live data"
+      : `${meshDecl.triangles.length} triangle(s)\navg vertex speed: ${(sumSpeed / count).toFixed(3)} m/s`;
+  }
+}
+
 function renderObjectPanel() {
   // The body is about to be cleared - drop stale references to nodes that won't exist anymore.
   objectPanelInfoEl = null;
@@ -1007,45 +1112,14 @@ function renderObjectPanel() {
   objectPanelTitleEl.textContent = selectedName;
   objectPanelBodyEl.innerHTML = "";
 
-  const addNote = (text) => {
-    const note = document.createElement("div");
-    note.className = "noRenderer";
-    note.textContent = text;
-    objectPanelBodyEl.appendChild(note);
-  };
-  const addToggle = (labelText, hiddenSet) => {
-    const label = document.createElement("label");
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = !hiddenSet.has(selectedName);
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) hiddenSet.delete(selectedName); else hiddenSet.add(selectedName);
-    });
-    label.append(checkbox, document.createTextNode(" " + labelText));
-    objectPanelBodyEl.appendChild(label);
-  };
-  const addInspect = () => {
-    const inspect = document.createElement("div");
-    inspect.className = "objectInspect";
-    objectPanelBodyEl.appendChild(inspect);
-    objectPanelInspectEl = inspect;
-  };
-
-  if (selectedKind === "groups") {
-    addToggle("show particles", hiddenGroups);
-    const info = document.createElement("div");
-    info.className = "objectInfo";
-    info.textContent = groupPanelInfoText(selectedName);
-    objectPanelBodyEl.appendChild(info);
-    objectPanelInfoEl = info;
-    addInspect();
+  const module = entityKindModules.get(selectedKind);
+  if (module) {
+    module.renderPanel();
   } else if (selectedKind === "surfaces") {
-    addToggle("show mesh", hiddenSurfaces);
-    addInspect();
-  } else if (selectedKind === "forces") {
-    addNote("no live data available for forces yet (needs a source-tag protocol extension)");
+    addPanelToggle("show mesh", hiddenSurfaces);
+    addPanelInspect();
   } else if (selectedKind === "constraints") {
-    addNote("no renderer or live data defined for constraints (§10.2)");
+    addPanelNote("no renderer or live data defined for constraints (§10.2)");
   } else if (selectedKind === "colliders") {
     const collider = latestColliders.find((c) => c.name === selectedName);
     const info = document.createElement("div");
@@ -1073,8 +1147,9 @@ function updateOutliner(registry) {
   const signature = registrySignature(registry);
   if (signature === lastRegistrySignature) return;
   lastRegistrySignature = signature;
-  renderNameList(outlinerSections.groups, "groups", registry.groups.map((g) => g.name));
-  renderNameList(outlinerSections.forces, "forces", registry.forces);
+  for (const module of entityKindModules.values()) {
+    renderNameList(module.sectionEl, module.kind, module.getNames(registry));
+  }
   renderNameList(outlinerSections.constraints, "constraints", registry.constraints);
   renderNameList(outlinerSections.surfaces, "surfaces", registry.surfaces);
   updateSelectionHighlight();

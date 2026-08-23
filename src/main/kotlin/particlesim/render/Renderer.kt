@@ -87,6 +87,14 @@ data class ArrowRenderer(
 
 data class ArrowSample(val origin: Vector3, val vector: Vector3)
 
+/** One named force's arrow samples for a frame — [ArrowSample] itself carries no source tag, so
+ * without this a per-force visibility toggle (§10.3) couldn't tell which force's arrows a given
+ * sample belongs to, the same association a mesh already gets for free via
+ * [particlesim.debug.DecodedMesh.name]. [name] is `""` for an unnamed force, the same
+ * "not individually reachable in the outliner" convention every other wire-format name uses —
+ * an unnamed force's arrows still draw, they just can't be hidden by name. */
+data class NamedArrowSamples(val name: String, val samples: List<ArrowSample>)
+
 object ArrowSampling {
     /** Every grid point across [renderer]'s region at its resolution, paired with the force's
      * value there (§10.2). Every [UniformFieldForce] implementation today is spatially uniform

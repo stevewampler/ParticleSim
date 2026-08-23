@@ -9,6 +9,7 @@ import particlesim.core.Vector3
 import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.NamedArrowSamples
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
 import particlesim.surface.Triangle
@@ -38,8 +39,9 @@ import java.nio.charset.StandardCharsets
  * i32  meshCount
  * meshCount * { u8 wireframe, i32 nameLen, nameLen UTF-8 bytes, i32 triangleCount,
  *               triangleCount * { i32 a, i32 b, i32 c } }
- * i32  arrowCount
- * arrowCount * { f64 ox, oy, oz, f64 vx, vy, vz }
+ * i32  arrowGroupCount
+ * arrowGroupCount * { i32 nameLen, nameLen UTF-8 bytes, i32 sampleCount,
+ *                      sampleCount * { f64 ox, oy, oz, f64 vx, vy, vz } }
  * u8   hasVisibleIdsFilter (0 or 1); if set: i32 visibleCount, visibleCount * i32 id
  * i32  registryForceCount;      registryForceCount      * { i32 nameLen, nameLen UTF-8 bytes }
  * i32  registryConstraintCount; registryConstraintCount * { i32 nameLen, nameLen UTF-8 bytes }
@@ -66,12 +68,14 @@ import java.nio.charset.StandardCharsets
  *
  * The registry section (§10.3's outliner prerequisite, [SceneRegistry]) carries names — plus,
  * for groups only, current member ids, since a group's §10.3 visibility toggle needs to know
- * *which particles* it hides, not just that the group exists (forces/constraints/surfaces have
- * no such client-side toggle yet, so they stay name-only). No other per-frame numeric state (a
- * force's live magnitude, a constraint's current target) is attached here — that data already
- * has a home elsewhere in this same frame (a named force's line/arrow renderer, if it has one)
- * or doesn't exist yet (there's no per-object inspection readout wired up yet — a separate,
- * later piece of §10.3). Sent unconditionally (no `has`-flag, unlike `camera`/`visibleIds`)
+ * *which particles* it hides, not just that the group exists (constraints/surfaces have no such
+ * client-side toggle yet, so they stay name-only; a *named* force's arrow visibility is instead
+ * keyed by the arrow-group section's own name field below, not this registry). No other
+ * per-frame numeric state (a force's live magnitude, a constraint's current target) is attached
+ * here — that data already has a home elsewhere in this same frame (a named force's line/arrow
+ * renderer, if it has one) or doesn't exist yet (there's no per-object inspection readout wired
+ * up yet — a separate, later piece of §10.3). Sent unconditionally (no `has`-flag, unlike
+ * `camera`/`visibleIds`)
  * because an absent registry and an empty one mean the same thing here, matching how
  * `sphereRadii`/`meshes`/`arrowSamples` already default to "present but zero-length" rather than
  * a nullable flag — every demo built before this defaults to an empty [SceneRegistry] and pays 4
@@ -105,7 +109,8 @@ object BinaryFrame {
     private const val MESH_HEADER_SIZE = 4
     private const val MESH_ENTRY_HEADER_SIZE = 1 + 4 // wireframe, triangleCount
     private const val TRIANGLE_SIZE = 4 + 4 + 4 // a, b, c
-    private const val ARROW_HEADER_SIZE = 4
+    private const val ARROW_GROUP_HEADER_SIZE = 4 // arrowGroupCount
+    private const val ARROW_GROUP_SAMPLE_COUNT_SIZE = 4
     private const val ARROW_SIZE = 8 * 6 // origin xyz, vector xyz
     private const val VISIBLE_FLAG_SIZE = 1
     private const val VISIBLE_HEADER_SIZE = 4
@@ -131,7 +136,7 @@ object BinaryFrame {
         lineColors: Map<Pair<Int, Int>, Color> = emptyMap(),
         sphereRadii: Map<Int, Double> = emptyMap(),
         meshes: List<SurfaceRenderer> = emptyList(),
-        arrowSamples: List<ArrowSample> = emptyList(),
+        arrowGroups: List<NamedArrowSamples> = emptyList(),
         visibleIds: Set<Int>? = null,
         registry: SceneRegistry = SceneRegistry.build(),
         colliders: List<Collider> = emptyList(),
@@ -143,7 +148,9 @@ object BinaryFrame {
             MESH_HEADER_SIZE + meshes.sumOf {
                 MESH_ENTRY_HEADER_SIZE + stringSize(it.surface.name ?: "") + it.surface.triangles.size * TRIANGLE_SIZE
             } +
-            ARROW_HEADER_SIZE + arrowSamples.size * ARROW_SIZE +
+            ARROW_GROUP_HEADER_SIZE + arrowGroups.sumOf {
+                stringSize(it.name) + ARROW_GROUP_SAMPLE_COUNT_SIZE + it.samples.size * ARROW_SIZE
+            } +
             VISIBLE_FLAG_SIZE + (if (visibleIds != null) VISIBLE_HEADER_SIZE + visibleIds.size * 4 else 0) +
             nameListSize(registry.forces.keys) + nameListSize(registry.constraints.keys) +
             nameListSize(registry.surfaces.keys) + groupListSize(registry.groups) +
@@ -188,10 +195,14 @@ object BinaryFrame {
                 buffer.putInt(tri.a); buffer.putInt(tri.b); buffer.putInt(tri.c)
             }
         }
-        buffer.putInt(arrowSamples.size)
-        for (sample in arrowSamples) {
-            putVector(buffer, sample.origin)
-            putVector(buffer, sample.vector)
+        buffer.putInt(arrowGroups.size)
+        for (group in arrowGroups) {
+            putString(buffer, group.name)
+            buffer.putInt(group.samples.size)
+            for (sample in group.samples) {
+                putVector(buffer, sample.origin)
+                putVector(buffer, sample.vector)
+            }
         }
         if (visibleIds != null) {
             buffer.put(1)
@@ -274,8 +285,13 @@ object BinaryFrame {
             val triangles = (0 until triangleCount).map { Triangle(buf.int, buf.int, buf.int) }
             DecodedMesh(wireframe, triangles, name)
         }
-        val arrowCount = buf.int
-        val arrows = (0 until arrowCount).map { ArrowSample(origin = getVector(buf), vector = getVector(buf)) }
+        val arrowGroupCount = buf.int
+        val arrowGroups = (0 until arrowGroupCount).map {
+            val name = getString(buf)
+            val sampleCount = buf.int
+            val samples = (0 until sampleCount).map { ArrowSample(origin = getVector(buf), vector = getVector(buf)) }
+            DecodedArrowGroup(name, samples)
+        }
         val hasVisibleIds = buf.get().toInt() != 0
         val visibleIds = if (hasVisibleIds) {
             val visibleCount = buf.int
@@ -301,7 +317,7 @@ object BinaryFrame {
                 else -> error("unknown collider kind byte: $kind")
             }
         }
-        return DecodedFrame(t, step, particles, connections, camera, spheres, meshes, arrows, visibleIds, registry, colliders)
+        return DecodedFrame(t, step, particles, connections, camera, spheres, meshes, arrowGroups, visibleIds, registry, colliders)
     }
 
     private fun putVector(buffer: ByteBuffer, v: Vector3) {
@@ -375,6 +391,11 @@ data class DecodedMesh(val wireframe: Boolean, val triangles: List<Triangle>, va
  * which particles a group's checkbox actually hides). */
 data class DecodedGroupEntry(val name: String, val memberIds: Set<Int>)
 
+/** One force's arrow samples, decoded — see [particlesim.render.NamedArrowSamples] for why the
+ * name travels alongside the samples instead of being a separate lookup. [name] is `""` for an
+ * unnamed force, same convention as [DecodedMesh.name]. */
+data class DecodedArrowGroup(val name: String, val samples: List<ArrowSample>)
+
 /** A [particlesim.collision.Collider], decoded for §10.2's debug-render-all wireframe drawing
  * — see [BinaryFrame]'s own doc comment for why this is unconditional rather than opt-in like
  * every other renderer here. [name] is `""` for an unnamed collider, same convention as
@@ -405,7 +426,7 @@ data class DecodedFrame(
     val camera: CameraPose?,
     val spheres: List<DecodedSphere> = emptyList(),
     val meshes: List<DecodedMesh> = emptyList(),
-    val arrows: List<ArrowSample> = emptyList(),
+    val arrowGroups: List<DecodedArrowGroup> = emptyList(),
     val visibleIds: Set<Int>? = null,
     val registry: DecodedRegistry = DecodedRegistry(),
     val colliders: List<DecodedCollider> = emptyList(),

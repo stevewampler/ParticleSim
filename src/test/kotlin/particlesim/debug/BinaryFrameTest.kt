@@ -12,6 +12,7 @@ import particlesim.physics.UniformGravity
 import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.NamedArrowSamples
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
 import particlesim.surface.Surface
@@ -155,7 +156,7 @@ class BinaryFrameTest {
     }
 
     @Test
-    fun `round-trips arrow samples`() {
+    fun `round-trips a named force's arrow samples`() {
         val store = ParticleStore()
         val samples = listOf(
             ArrowSample(origin = Vector3(1.0, 0.0, 0.0), vector = Vector3(0.0, 1.0, 0.0)),
@@ -164,11 +165,35 @@ class BinaryFrameTest {
 
         val buffer = BinaryFrame.encode(
             t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(),
-            arrowSamples = samples,
+            arrowGroups = listOf(NamedArrowSamples("wind", samples)),
         )
         val decoded = BinaryFrame.decode(buffer)
 
-        assertEquals(samples, decoded.arrows)
+        val group = decoded.arrowGroups.single()
+        assertEquals("wind", group.name)
+        assertEquals(samples, group.samples)
+    }
+
+    @Test
+    fun `arrow groups are empty by default, and multiple groups (including an unnamed one) round-trip independently`() {
+        val store = ParticleStore()
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(),
+        )
+        assertEquals(emptyList(), BinaryFrame.decode(buffer).arrowGroups)
+
+        val windSamples = listOf(ArrowSample(origin = Vector3.ZERO, vector = Vector3(1.0, 0.0, 0.0)))
+        val unnamedSamples = listOf(ArrowSample(origin = Vector3(1.0, 1.0, 1.0), vector = Vector3(0.0, 0.0, 2.0)))
+        val multiBuffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(),
+            arrowGroups = listOf(NamedArrowSamples("wind", windSamples), NamedArrowSamples("", unnamedSamples)),
+        )
+        val decoded = BinaryFrame.decode(multiBuffer).arrowGroups
+        assertEquals(2, decoded.size)
+        assertEquals("wind", decoded[0].name)
+        assertEquals(windSamples, decoded[0].samples)
+        assertEquals("", decoded[1].name)
+        assertEquals(unnamedSamples, decoded[1].samples)
     }
 
     @Test

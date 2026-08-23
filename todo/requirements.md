@@ -892,24 +892,28 @@ readout to debug a scene without a separate tool.
   happens to a running simulation when `stiffness` goes negative
   mid-step?) than a read-only inspector, which is why it stays `[stretch]`
   rather than bundled in with the rest of this UI.
-- `[stretch]` **Per-entity-type UI modules, self-registered**: everything
-  above (outliner sections, per-object panels) is described here by what
-  it shows, not how the viewer is built to show it — today that's one
-  hardcoded implementation enumerating each kind (group/force/constraint/
-  collider/surface) by hand, so introducing a new visualizable kind means
-  editing that shared dispatch. The alternative worth designing toward:
-  each entity kind's UI — its outliner section, its per-object panel
-  controls, its own visibility/rendering settings (including, once built,
-  §10.2's lighting/materials controls) — is a self-contained module that
-  registers itself with the viewer, so a new kind is additive (write and
-  register a module) rather than a change to shared code every other kind
-  already depends on. Not deferred because the idea is speculative — the
-  outliner/per-object-panel history already shows the current approach's
-  cost scales linearly with the number of kinds, which is exactly the
-  pressure this would relieve — but because a real plugin/registration
-  architecture is a bigger client-side redesign than any single kind's
-  UI, worth doing once, deliberately, rather than mid-flight while still
-  adding kinds one at a time.
+- **Per-entity-type UI modules, self-registered**: each entity kind's
+  outliner section and per-object panel is owned by a module —
+  `{kind, getNames(registry), renderPanel(), updateLive()?}` — that
+  registers itself with the viewer via `registerEntityKind`, claiming the
+  outliner section the page already declares for that kind rather than
+  building DOM from scratch, so registering is purely additive to what's
+  already on the page. Introducing a new visualizable kind means writing
+  and registering a module, not editing shared dispatch code every other
+  kind already depends on. Proven against two kinds — **groups** (a
+  visibility toggle, live "N drawable" info text, and live centroid/
+  avg-speed inspection, exercising every hook a module can have) and
+  **forces** (a per-force arrow-visibility toggle, real only when that
+  force has arrow samples in the current frame — see §10.2's arrow-sample
+  wire format, now grouped by source-force name for exactly this reason).
+  `[stretch]` **constraints/surfaces/colliders are not yet migrated** —
+  they still work, on the older hardcoded dispatch path that predates
+  this module system; migrating them is deferred as low-risk/low-reward
+  mechanical work rather than a design gap (see `todo/TODO.md`). Once a
+  kind is migrated, its own module is also where kind-specific rendering
+  settings would live (e.g. a future lighting/materials control panel,
+  once that `[stretch]` item above is built) instead of one more
+  hardcoded case.
 
 ## 11. Non-Functional Requirements
 
