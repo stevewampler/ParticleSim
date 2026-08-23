@@ -24,6 +24,12 @@ import kotlin.random.Random
  * single step, which is where visible pile-up behavior (settling, or not) shows up that no
  * isolated two-body component test could catch.
  *
+ * **Friction is wired in now** (floor, walls, and ball-vs-ball all carry static/kinetic
+ * coefficients) — this demo is exactly the concrete consumer that promoted §12.5's friction out
+ * of `[stretch]` in the first place (see the walls-and-drift history below), so leaving it
+ * frictionless here once friction existed would have been an odd thing to ship. With it, the
+ * pile actually comes to a full stop rather than staying merely contained by the walls.
+ *
  * **Staggered spawning, not all-at-once** — a first version dropped all 18 balls simultaneously
  * from a packed vertical stack (loose horizontal spread didn't fix it either): every ball
  * landed on the pile within the same fraction of a second, so several deep, simultaneous
@@ -77,11 +83,14 @@ fun main() {
         PlaneCollider(VectorExpr.of(Vector3(0.0, 0.0, -wallExtent)), normal = Vector3(0.0, 0.0, 1.0), name = "wall-z-neg"),
         PlaneCollider(VectorExpr.of(Vector3(0.0, 0.0, wallExtent)), normal = Vector3(0.0, 0.0, -1.0), name = "wall-z-pos"),
     )
-    val floorRule = ParticleColliderRule(group = ballGroup, collider = floor, restitution = 0.5, compressionDamping = 2.0, extensionDamping = 0.3)
-    val wallRules = walls.map { ParticleColliderRule(group = ballGroup, collider = it, restitution = 0.5) }
+    val floorRule = ParticleColliderRule(
+        group = ballGroup, collider = floor, restitution = 0.5, compressionDamping = 2.0, extensionDamping = 0.3,
+        staticFriction = 0.6, kineticFriction = 0.4,
+    )
+    val wallRules = walls.map { ParticleColliderRule(group = ballGroup, collider = it, restitution = 0.5, staticFriction = 0.3, kineticFriction = 0.2) }
     val floorCollisions = CollisionSystem(listOf(floorRule) + wallRules)
 
-    val particleRule = ParticleCollisionRule(groupA = ballGroup, restitution = 0.6, compressionDamping = 1.0)
+    val particleRule = ParticleCollisionRule(groupA = ballGroup, restitution = 0.6, compressionDamping = 1.0, staticFriction = 0.4, kineticFriction = 0.3)
     val particleCollisions = ParticleCollisionSystem(listOf(particleRule))
 
     val timeControl = TimeControl()

@@ -184,4 +184,66 @@ class SurfaceCollisionSystemTest {
         assertEquals(0.0, store.velocity(triangle.c).y, 1e-9)
         assertEquals(-0.75, store.velocity(ballId).y, 1e-9)
     }
+
+    // --- Friction (§12.5) --------------------------------------------------------------------
+    // Same centroid contact as "ball resting above the flat interior bounces off..." above
+    // (u=v=w=1/3), so the normal-direction numbers here (vy=1.375 for the ball, -2.125 for
+    // each vertex) are already-verified cross-checks that friction leaves the normal response
+    // untouched - only the tangential (x) component is new.
+
+    @Test
+    fun `kinetic friction partially decelerates tangential velocity, split across vertices by barycentric weight`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val triangle = flatTriangle(store, groups)
+        val ballId = ball(store, groups, position = Vector3(0.0, 0.15, 0.0), velocity = Vector3(1.0, -5.0, 0.0))
+        val rule = SurfaceCollisionRule("ball", Surface(listOf(triangle)), restitution = 0.7, kineticFriction = 0.1)
+        SurfaceCollisionSystem(listOf(rule)).resolve(store, groups, t = 0.0, dt = 1e-3)
+
+        assertEquals(0.3625, store.velocity(ballId).x, 1e-9)
+        assertEquals(1.375, store.velocity(ballId).y, 1e-9, "normal response unaffected by friction")
+        for (id in listOf(triangle.a, triangle.b, triangle.c)) {
+            assertEquals(0.2125, store.velocity(id).x, 1e-9)
+            assertEquals(-2.125, store.velocity(id).y, 1e-9, "normal response unaffected by friction")
+        }
+    }
+
+    @Test
+    fun `static friction fractionally arrests a resting contact's tangential velocity`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val triangle = flatTriangle(store, groups)
+        val ballId = ball(store, groups, position = Vector3(0.0, 0.199, 0.0), velocity = Vector3(0.3, 0.001, 0.0))
+        val rule = SurfaceCollisionRule("ball", Surface(listOf(triangle)), restitution = 0.7, staticFriction = 0.4)
+        SurfaceCollisionSystem(listOf(rule)).resolve(store, groups, t = 0.0, dt = 1e-3)
+
+        // 40% of the tangential relative speed (0.3) is killed, leaving 0.18 of relative
+        // motion - split between ball and vertices the same way the normal impulse already is.
+        assertEquals(0.21, store.velocity(ballId).x, 1e-9)
+        for (id in listOf(triangle.a, triangle.b, triangle.c)) {
+            assertEquals(0.03, store.velocity(id).x, 1e-9)
+        }
+    }
+
+    @Test
+    fun `total momentum is conserved with friction active, for a free unpinned system`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val triangle = flatTriangle(store, groups, mass = 2.0)
+        val ballId = ball(store, groups, position = Vector3(0.0, 0.15, 0.0), velocity = Vector3(0.5, -5.0, -0.3), mass = 3.0)
+
+        fun totalMomentum(): Vector3 {
+            var p = Vector3.ZERO
+            for (id in store.liveIds()) p += store.velocity(id) * store.mass(id)
+            return p
+        }
+
+        val before = totalMomentum()
+        val rule = SurfaceCollisionRule("ball", Surface(listOf(triangle)), restitution = 0.7, kineticFriction = 0.3)
+        SurfaceCollisionSystem(listOf(rule)).resolve(store, groups, t = 0.0, dt = 1e-3)
+        val after = totalMomentum()
+
+        assertTrue((before - after).length() < 1e-9, "expected $before but was $after")
+        assertTrue(store.velocity(ballId).x != 0.5, "friction should have changed the ball's tangential velocity")
+    }
 }

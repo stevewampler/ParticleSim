@@ -2,7 +2,9 @@ package particlesim.collision
 
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
+import particlesim.core.Vector3
 import kotlin.math.abs
+import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
@@ -38,6 +40,22 @@ data class ParticleColliderRule(
     val extensionDamping: Double = 0.0,
     /** Fraction of penetration corrected per step (§13.4) — gradual, not instantaneous. */
     val correctionFactor: Double = 0.2,
+    /** Coulomb friction (§12.5), promoted out of `[stretch]` once particle-vs-particle piles
+     * (`ParticleCollisionDebugDemo`) exposed a concrete need: without it, nothing ever stops a
+     * particle's tangential (along-the-surface) velocity, so any sideways nudge from a
+     * collision persists forever. [staticFriction] governs a contact already within the
+     * [CollisionSystem]'s own rest thresholds (§12.7) — not a hard on/off "stick," but the
+     * *fraction* of tangential velocity killed per step (`1.0` = instant stop, `0.3` = decays
+     * over a handful of steps); a hard binary stop was tried first and rejected — several
+     * particles settling within the same frame would visibly *snap* to a halt one by one
+     * rather than gently slowing, which read as a bug the instant it was watched in the
+     * browser. [kineticFriction] governs everything else (still actively bouncing/sliding):
+     * true Coulomb kinetic friction, an impulse opposing the tangential relative velocity,
+     * capped at `kineticFriction * (that step's own normal impulse magnitude)` and never
+     * enough to overshoot into reversing the slide. Both default to `0.0` (frictionless),
+     * matching every rule/demo built before this. */
+    val staticFriction: Double = 0.0,
+    val kineticFriction: Double = 0.0,
 )
 
 /**
@@ -80,15 +98,38 @@ class CollisionSystem(
         rule: ParticleColliderRule,
     ) {
         val v = store.velocity(id)
-        val relVel = (v - collider.velocity).dot(contact.normal)
+        val relVelVector = v - collider.velocity
+        val relVel = relVelVector.dot(contact.normal)
+        val isResting = abs(relVel) < restVelocity && contact.penetration < restPenetration
 
         val newRelVel = when {
-            abs(relVel) < restVelocity && contact.penetration < restPenetration -> 0.0
+            isResting -> 0.0
             relVel < 0.0 -> -rule.restitution * relVel / sqrt(1.0 + rule.compressionDamping)
             else -> relVel / sqrt(1.0 + rule.extensionDamping)
         }
+        val deltaRelVel = newRelVel - relVel
 
-        store.setVelocity(id, v + contact.normal * (newRelVel - relVel))
+        // Infinite-mass collider: the particle absorbs the entire relative-velocity change
+        // itself, so (as already true of the normal-direction line above) no mass or impulse
+        // division is needed anywhere here — velocity-delta *is* impulse-per-unit-mass for a
+        // single dynamic body, in every direction, not just the normal.
+        val tangentialDelta = relVelVector - contact.normal * relVel
+        val tangentialSpeed = tangentialDelta.length()
+        val frictionDelta = if (tangentialSpeed > 1e-9) {
+            if (isResting) {
+                if (rule.staticFriction > 0.0) tangentialDelta * -rule.staticFriction.coerceIn(0.0, 1.0) else Vector3.ZERO
+            } else if (rule.kineticFriction > 0.0) {
+                val tangentDir = tangentialDelta * (1.0 / tangentialSpeed)
+                val stopSpeed = min(rule.kineticFriction * abs(deltaRelVel), tangentialSpeed)
+                tangentDir * -stopSpeed
+            } else {
+                Vector3.ZERO
+            }
+        } else {
+            Vector3.ZERO
+        }
+
+        store.setVelocity(id, v + contact.normal * deltaRelVel + frictionDelta)
         store.setPosition(id, store.position(id) + contact.normal * (contact.penetration * rule.correctionFactor))
     }
 }

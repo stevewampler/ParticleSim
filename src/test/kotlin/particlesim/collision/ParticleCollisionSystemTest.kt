@@ -238,4 +238,58 @@ class ParticleCollisionSystemTest {
         // And something actually happened - otherwise conservation would be trivially true.
         assertTrue(store.velocity(a).x != 4.0)
     }
+
+    // --- Friction (§12.5) --------------------------------------------------------------------
+    // See CollisionSystemTest's own friction tests for the single-body derivation this reuses;
+    // these confirm the same formulas hold once mass no longer cancels (a genuine two-body
+    // reduced-mass impulse, not the single-dynamic-side simplification).
+
+    @Test
+    fun `kinetic friction partially decelerates the tangential relative velocity during a real collision`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val a = particle(store, groups, "ball", Vector3(-0.15, 0.0, 0.0), Vector3(2.0, 0.0, 1.0))
+        val b = particle(store, groups, "ball", Vector3(0.15, 0.0, 0.0), Vector3(-2.0, 0.0, -1.0))
+        val rule = ParticleCollisionRule(groupA = "ball", restitution = 1.0, kineticFriction = 0.1)
+        ParticleCollisionSystem(listOf(rule)).resolve(store, groups, emptyList())
+
+        // Normal (x) impulse = 4.0 (as in the undamped equal-mass swap test); tangential (z)
+        // relative speed = 2.0, maxStopImpulse = 2.0/invMassSum(2) = 1.0, friction cap =
+        // 0.1*4.0 = 0.4 (under the cap - a partial deceleration, split evenly by equal mass).
+        assertEquals(-2.0, store.velocity(a).x, 1e-9)
+        assertEquals(2.0, store.velocity(b).x, 1e-9)
+        assertEquals(0.6, store.velocity(a).z, 1e-9)
+        assertEquals(-0.6, store.velocity(b).z, 1e-9)
+    }
+
+    @Test
+    fun `static friction fractionally arrests a resting pair's tangential relative velocity`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val a = particle(store, groups, "ball", Vector3(-0.199, 0.0, 0.0), Vector3(0.001, 0.5, 0.0))
+        val b = particle(store, groups, "ball", Vector3(0.199, 0.0, 0.0), Vector3(0.0, 0.0, 0.0))
+        val rule = ParticleCollisionRule(groupA = "ball", restitution = 0.7, staticFriction = 0.3)
+        ParticleCollisionSystem(listOf(rule)).resolve(store, groups, emptyList())
+
+        // Tangential (y) relative speed 0.5 -> 0.35 (70% remains, i.e. 30% killed), split
+        // evenly between equal masses: a loses 0.075, b gains 0.075.
+        assertEquals(0.425, store.velocity(a).y, 1e-9)
+        assertEquals(0.075, store.velocity(b).y, 1e-9)
+    }
+
+    @Test
+    fun `total momentum is still conserved with friction active`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val a = particle(store, groups, "ball", Vector3(-0.15, 0.0, 0.0), Vector3(3.0, 0.5, 0.0), mass = 1.0)
+        val b = particle(store, groups, "ball", Vector3(0.15, 0.0, 0.0), Vector3(-1.0, 0.1, 0.0), mass = 4.0)
+
+        fun momentum() = store.velocity(a) * store.mass(a) + store.velocity(b) * store.mass(b)
+        val before = momentum()
+        val rule = ParticleCollisionRule(groupA = "ball", restitution = 0.6, kineticFriction = 0.4)
+        ParticleCollisionSystem(listOf(rule)).resolve(store, groups, emptyList())
+        val after = momentum()
+
+        assertTrue((before - after).length() < 1e-9, "expected $before but was $after")
+    }
 }

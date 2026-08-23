@@ -5,6 +5,7 @@ import particlesim.core.ParticleStore
 import particlesim.core.Vector3
 import particlesim.physics.Constraint
 import kotlin.math.abs
+import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
@@ -30,6 +31,11 @@ data class ParticleCollisionRule(
      * inverse mass — the lighter one (or the only finite-mass one, if the other is pinned)
      * moves more. */
     val correctionFactor: Double = 0.2,
+    /** Coulomb friction (§12.5) — see [ParticleColliderRule]'s own doc comment for the
+     * static-vs-kinetic split and why static friction is a per-step *fractional* arrest rather
+     * than a hard stop. Both default to `0.0` (frictionless). */
+    val staticFriction: Double = 0.0,
+    val kineticFriction: Double = 0.0,
 )
 
 /**
@@ -110,19 +116,43 @@ class ParticleCollisionSystem(
         // the particle" convention with b standing in for the collider side: relVel < 0 means
         // a is closing on b, exactly the sign convention ParticleColliderRule/
         // SurfaceCollisionSystem already use.
-        val relVel = (velA - velB).dot(normal)
+        val relVelVector = velA - velB
+        val relVel = relVelVector.dot(normal)
+        val isResting = abs(relVel) < restVelocity && penetration < restPenetration
 
         val newRelVel = when {
-            abs(relVel) < restVelocity && penetration < restPenetration -> 0.0
+            isResting -> 0.0
             relVel < 0.0 -> -rule.restitution * relVel / sqrt(1.0 + rule.compressionDamping)
             else -> relVel / sqrt(1.0 + rule.extensionDamping)
         }
         val deltaRelVel = newRelVel - relVel
-        if (deltaRelVel != 0.0) {
-            val impulse = deltaRelVel / invMassSum
-            store.setVelocity(a, velA + normal * (impulse * invMassA))
-            store.setVelocity(b, velB - normal * (impulse * invMassB))
+        val impulse = deltaRelVel / invMassSum
+
+        // Same invMassSum scalar applies to any direction (no rotational inertia anywhere in
+        // this engine), so friction reuses it exactly like the normal impulse above.
+        val tangentialDelta = relVelVector - normal * relVel
+        val tangentialSpeed = tangentialDelta.length()
+        val frictionImpulse = if (tangentialSpeed > 1e-9) {
+            if (isResting) {
+                if (rule.staticFriction > 0.0) {
+                    tangentialDelta * (-rule.staticFriction.coerceIn(0.0, 1.0) / invMassSum)
+                } else {
+                    Vector3.ZERO
+                }
+            } else if (rule.kineticFriction > 0.0) {
+                val tangentDir = tangentialDelta * (1.0 / tangentialSpeed)
+                val maxStopImpulse = tangentialSpeed / invMassSum
+                val frictionMag = min(rule.kineticFriction * abs(impulse), maxStopImpulse)
+                tangentDir * -frictionMag
+            } else {
+                Vector3.ZERO
+            }
+        } else {
+            Vector3.ZERO
         }
+        val totalImpulse = normal * impulse + frictionImpulse
+        store.setVelocity(a, velA + totalImpulse * invMassA)
+        store.setVelocity(b, velB - totalImpulse * invMassB)
 
         val correction = penetration * rule.correctionFactor
         store.setPosition(a, store.position(a) + normal * (correction * (invMassA / invMassSum)))

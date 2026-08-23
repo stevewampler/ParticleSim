@@ -5,6 +5,7 @@ import particlesim.core.ParticleStore
 import particlesim.core.Vector3
 import particlesim.surface.Surface
 import kotlin.math.abs
+import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
@@ -28,6 +29,11 @@ data class SurfaceCollisionRule(
      * surface's own vertices are left to the mesh's spring forces to settle, the same way a
      * static [Collider]'s "position" never needs correcting. */
     val correctionFactor: Double = 0.2,
+    /** Coulomb friction (§12.5) — see [ParticleColliderRule]'s own doc comment for the
+     * static-vs-kinetic split and why static friction is a per-step *fractional* arrest rather
+     * than a hard stop. Both default to `0.0` (frictionless). */
+    val staticFriction: Double = 0.0,
+    val kineticFriction: Double = 0.0,
 )
 
 /**
@@ -98,30 +104,52 @@ class SurfaceCollisionSystem(
         val velC = store.velocity(contact.c)
         val contactVel = velA * contact.u + velB * contact.v + velC * contact.w
 
-        val relVel = (velP - contactVel).dot(contact.normal)
+        val relVelVector = velP - contactVel
+        val relVel = relVelVector.dot(contact.normal)
+        val isResting = abs(relVel) < restVelocity && contact.penetration < restPenetration
 
         val newRelVel = when {
-            abs(relVel) < restVelocity && contact.penetration < restPenetration -> 0.0
+            isResting -> 0.0
             relVel < 0.0 -> -rule.restitution * relVel / sqrt(1.0 + rule.compressionDamping)
             else -> relVel / sqrt(1.0 + rule.extensionDamping)
         }
         val deltaRelVel = newRelVel - relVel
-        if (deltaRelVel == 0.0) {
-            store.setPosition(id, store.position(id) + contact.normal * (contact.penetration * rule.correctionFactor))
-            return
-        }
 
         // Impulse J along the normal that produces exactly deltaRelVel of relative-velocity
         // change: v_p' = v_p + (J/m_p)n, v_i' = v_i - (J*w_i/m_i)n for each vertex i, so
-        // relVel' - relVel = J*(1/m_p + sum(w_i^2/m_i)) - solve for J.
+        // relVel' - relVel = J*(1/m_p + sum(w_i^2/m_i)) - solve for J. The same invMassSum
+        // scalar is valid for *any* direction, not just the normal (no rotational inertia
+        // anywhere in this engine) - friction below reuses it unchanged.
         val invMassSum = (1.0 / massP) +
             (contact.u * contact.u / massA) + (contact.v * contact.v / massB) + (contact.w * contact.w / massC)
         val impulse = deltaRelVel / invMassSum
 
-        store.setVelocity(id, velP + contact.normal * (impulse / massP))
-        store.setVelocity(contact.a, velA - contact.normal * (impulse * contact.u / massA))
-        store.setVelocity(contact.b, velB - contact.normal * (impulse * contact.v / massB))
-        store.setVelocity(contact.c, velC - contact.normal * (impulse * contact.w / massC))
+        val tangentialDelta = relVelVector - contact.normal * relVel
+        val tangentialSpeed = tangentialDelta.length()
+        val frictionImpulse = if (tangentialSpeed > 1e-9) {
+            if (isResting) {
+                if (rule.staticFriction > 0.0) {
+                    tangentialDelta * (-rule.staticFriction.coerceIn(0.0, 1.0) / invMassSum)
+                } else {
+                    Vector3.ZERO
+                }
+            } else if (rule.kineticFriction > 0.0) {
+                val tangentDir = tangentialDelta * (1.0 / tangentialSpeed)
+                val maxStopImpulse = tangentialSpeed / invMassSum
+                val frictionMag = min(rule.kineticFriction * abs(impulse), maxStopImpulse)
+                tangentDir * -frictionMag
+            } else {
+                Vector3.ZERO
+            }
+        } else {
+            Vector3.ZERO
+        }
+        val totalImpulse = contact.normal * impulse + frictionImpulse
+
+        store.setVelocity(id, velP + totalImpulse * (1.0 / massP))
+        store.setVelocity(contact.a, velA - totalImpulse * (contact.u / massA))
+        store.setVelocity(contact.b, velB - totalImpulse * (contact.v / massB))
+        store.setVelocity(contact.c, velC - totalImpulse * (contact.w / massC))
 
         store.setPosition(id, store.position(id) + contact.normal * (contact.penetration * rule.correctionFactor))
     }

@@ -1892,7 +1892,55 @@ real prerequisite, not just unstarted — see the note below.
       sole first-class target (§9.1, §10); reuses the same WebSocket
       protocol if ever built
 - [ ] Implicit integration (§13.1)
-- [ ] Friction — static/kinetic (§12.5)
+- [x] Friction — static/kinetic (§12.5) — promoted out of `[stretch]` the
+      same way particle-vs-surface collision was: `ParticleCollisionDebugDemo`
+      (Phase 5) turned up a concrete need. Without friction, a ball pile's
+      floor/wall collisions had no way to ever stop tangential (along-
+      the-surface) velocity — any sideways nudge from a many-body
+      compression event persisted forever, and the demo had to be
+      contained with wall colliders rather than actually settling.
+      Implemented identically across all three collision systems
+      (`ParticleColliderRule`/`CollisionSystem`, `SurfaceCollisionRule`/
+      `SurfaceCollisionSystem`, `ParticleCollisionRule`/
+      `ParticleCollisionSystem`) as two new optional fields,
+      `staticFriction`/`kineticFriction`, both defaulting to `0.0`
+      (frictionless, so every existing rule/demo is unaffected). Kinetic
+      friction is textbook Coulomb: an impulse opposing the tangential
+      relative velocity, capped at `kineticFriction * (that contact's own
+      normal impulse magnitude)` and never enough to overshoot into
+      reversing the slide. Static friction — for a contact already within
+      the existing rest thresholds (§12.7) — is deliberately *not* a
+      binary "stick": it kills a `staticFriction` *fraction* of the
+      residual tangential velocity per step (`1.0` = instant stop, `0.3`
+      = decays over several steps). A hard on/off stop was the first
+      design and was rejected before being built — several particles
+      settling within the same frame would visibly *snap* to a halt one
+      by one rather than gently slowing, an artifact that would have read
+      as a bug the moment it was actually watched (caught by design
+      review, not after building it wrong once - see the advisor
+      consultation before implementation). The same `invMassSum` scalar
+      already computed for each system's normal-direction impulse is
+      reused unchanged for the tangential direction, valid for any
+      direction because nothing in this engine has rotational inertia.
+      12 new tests across the three existing collision test files
+      (`CollisionSystemTest`, `SurfaceCollisionSystemTest`,
+      `ParticleCollisionSystemTest`): kinetic partial-deceleration with
+      hand-derived exact values, kinetic capped-at-a-full-stop
+      (never reverses), static fractional-arrest at two different
+      coefficients, a zero-friction default-regression case, a
+      no-tangential-motion edge case, and momentum-conservation-with-
+      friction-active analytic checks for the two-body/surface systems
+      (friction is an equal-and-opposite pair too, so it doesn't break
+      conservation). Demo updated with real coefficients on the floor,
+      walls, and ball-vs-ball rules and verified two ways: a WebSocket
+      script confirmed every particle's speed settles to ~8e-10 m/s
+      (effectively exact rest, down from the pre-friction 0.03-0.15 m/s
+      residual drift); **and, for the first time this project has been
+      able to do so, directly in a real Chrome browser** (the user
+      enabled Claude in Chrome for this session) — screenshots taken 5
+      seconds apart during settling were pixel-identical, and watching
+      the spawn-to-settle sequence end to end showed a smooth pile
+      forming with no visible snap-to-a-halt artifact.
 - [ ] Continuous collision detection (§12.4)
 - [x] Particle-vs-surface collision (§12.4) — promoted out of `[stretch]`
       by the trampoline below. `particlesim.surface.Triangle.closestPoint`

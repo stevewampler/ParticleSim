@@ -176,4 +176,92 @@ class CollisionSystemTest {
         assertEquals(2.0, store.velocity(id).y, 1e-9) // -0.5 * -4.0
         assertTrue(store.position(id).y > 1.1) // pushed out along +normal
     }
+
+    // --- Friction (§12.5) --------------------------------------------------------------------
+
+    @Test
+    fun `kinetic friction partially decelerates tangential velocity during an active bounce`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        // penetration 0.05, relVel -5.0 (not resting): a real compression event.
+        val id = particle(store, groups, position = Vector3(0.0, 0.15, 0.0), velocity = Vector3(2.0, -5.0, 0.0))
+        val plane = PlaneCollider(VectorExpr.of(Vector3.ZERO), normal = Vector3(0.0, 1.0, 0.0))
+        val rule = ParticleColliderRule(group = "ball", collider = plane, restitution = 0.7, kineticFriction = 0.1)
+        CollisionSystem(listOf(rule)).resolve(store, groups, t = 0.0, dt = 1e-3)
+
+        // deltaRelVel (the normal-direction "impulse", mass-cancelled) = 3.5 - (-5.0) = 8.5;
+        // friction cap = 0.1 * 8.5 = 0.85, well under the full tangential speed (2.0), so it's
+        // a partial, not saturated, deceleration: vx = 2.0 - 0.85 = 1.15.
+        assertEquals(1.15, store.velocity(id).x, 1e-9)
+        assertEquals(3.5, store.velocity(id).y, 1e-9) // restitution unaffected by friction
+    }
+
+    @Test
+    fun `kinetic friction never reverses tangential velocity, only caps it at a full stop`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val id = particle(store, groups, position = Vector3(0.0, 0.15, 0.0), velocity = Vector3(2.0, -5.0, 0.0))
+        val plane = PlaneCollider(VectorExpr.of(Vector3.ZERO), normal = Vector3(0.0, 1.0, 0.0))
+        // 5.0 * 8.5 = 42.5, far more than the 2.0 m/s of tangential speed actually present.
+        val rule = ParticleColliderRule(group = "ball", collider = plane, restitution = 0.7, kineticFriction = 5.0)
+        CollisionSystem(listOf(rule)).resolve(store, groups, t = 0.0, dt = 1e-3)
+
+        assertEquals(0.0, store.velocity(id).x, 1e-9, "capped at zero, not driven negative")
+    }
+
+    @Test
+    fun `static friction fractionally arrests a resting contact's tangential velocity, not an instant stop`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        // penetration 0.001 < restPenetration, relVel 0.005 < restVelocity: a resting contact.
+        val id = particle(store, groups, position = Vector3(0.0, 0.199, 0.0), velocity = Vector3(0.5, 0.005, 0.0))
+        val plane = PlaneCollider(VectorExpr.of(Vector3.ZERO), normal = Vector3(0.0, 1.0, 0.0))
+        val rule = ParticleColliderRule(group = "ball", collider = plane, restitution = 0.7, staticFriction = 0.3)
+        CollisionSystem(listOf(rule)).resolve(store, groups, t = 0.0, dt = 1e-3)
+
+        assertEquals(0.35, store.velocity(id).x, 1e-9, "30% of tangential residual killed, not all of it")
+        assertEquals(0.0, store.velocity(id).y, 1e-9, "normal component still clamped to rest as before")
+    }
+
+    @Test
+    fun `static friction of 1_0 fully arrests tangential velocity in one step`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val id = particle(store, groups, position = Vector3(0.0, 0.199, 0.0), velocity = Vector3(0.5, 0.005, 0.0))
+        val plane = PlaneCollider(VectorExpr.of(Vector3.ZERO), normal = Vector3(0.0, 1.0, 0.0))
+        val rule = ParticleColliderRule(group = "ball", collider = plane, restitution = 0.7, staticFriction = 1.0)
+        CollisionSystem(listOf(rule)).resolve(store, groups, t = 0.0, dt = 1e-3)
+
+        assertEquals(0.0, store.velocity(id).x, 1e-9)
+    }
+
+    @Test
+    fun `zero friction, the default, leaves tangential velocity untouched in both regimes`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val plane = PlaneCollider(VectorExpr.of(Vector3.ZERO), normal = Vector3(0.0, 1.0, 0.0))
+
+        val sliding = particle(store, groups, position = Vector3(0.0, 0.15, 0.0), velocity = Vector3(2.0, -5.0, 0.0))
+        CollisionSystem(listOf(ParticleColliderRule(group = "ball", collider = plane, restitution = 0.7)))
+            .resolve(store, groups, t = 0.0, dt = 1e-3)
+        assertEquals(2.0, store.velocity(sliding).x, 1e-9)
+
+        val resting = particle(store, groups, position = Vector3(1.0, 0.199, 0.0), velocity = Vector3(0.5, 0.005, 0.0))
+        CollisionSystem(listOf(ParticleColliderRule(group = "ball", collider = plane, restitution = 0.7)))
+            .resolve(store, groups, t = 0.0, dt = 1e-3)
+        assertEquals(0.5, store.velocity(resting).x, 1e-9)
+    }
+
+    @Test
+    fun `friction does nothing when there is no tangential relative motion to oppose`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val id = particle(store, groups, position = Vector3(0.0, 0.15, 0.0), velocity = Vector3(0.0, -5.0, 0.0))
+        val plane = PlaneCollider(VectorExpr.of(Vector3.ZERO), normal = Vector3(0.0, 1.0, 0.0))
+        val rule = ParticleColliderRule(group = "ball", collider = plane, restitution = 0.7, staticFriction = 1.0, kineticFriction = 1.0)
+        CollisionSystem(listOf(rule)).resolve(store, groups, t = 0.0, dt = 1e-3)
+
+        assertEquals(0.0, store.velocity(id).x, 1e-9)
+        assertEquals(0.0, store.velocity(id).z, 1e-9)
+    }
 }
