@@ -445,10 +445,17 @@ items below for exactly what's deferred and why.
       a WebSocket script watching the real running demo confirmed the
       step counter freezes bit-exactly under pause and resumes correctly,
       and the decoded collider list matched all 5 real colliders (the
-      floor plus 4 walls) with correct positions/normals. The actual
-      visual result (does it *look* right in a browser) is still
-      unverified — Chrome automation remains unavailable in this
-      environment, same standing limitation as every other viewer feature.
+      floor plus 4 walls) with correct positions/normals.
+      **Now also visually confirmed in-browser** (the user enabled Chrome
+      automation for this session, closing the standing gap noted above):
+      the floor + 4 walls render as a wireframe box around the ball pile;
+      clicking pause froze `step` exactly (46592 held across a 2s wait,
+      button flipped to "▶ play") and resume advanced it again; toggling
+      the new "colliders" checkbox off/on actually hides/shows the
+      wireframe, not just relabels it. First real in-browser check of any
+      viewer feature this project has had — every prior Phase 9/10 item's
+      "browser-verified" note up to now meant the *user* looked at it and
+      reported back, not that this assistant directly observed the page.
 - [x] Collision groups & filtering beyond a single rule's group/collider
       pairing (§12.3) — landed as part of the item above:
       `ParticleCollisionRule(groupA, groupB)` *is* the group-vs-group
