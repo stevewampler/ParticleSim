@@ -45,7 +45,10 @@ class PlaneCollider(
     normal: Vector3,
     name: String? = null,
 ) : Collider(positionExpr, name) {
-    private val unitNormal = normal.normalized()
+    // Public, matching SphereCollider's/BoxCollider's own shape fields (radius/halfExtents) -
+    // the debug renderer (§10.2's "every collider as wireframe") needs it to orient a plane's
+    // visual quad, the same way it already reads those other two colliders' shape fields.
+    val unitNormal = normal.normalized()
 
     override fun contact(sphereCenter: Vector3, sphereRadius: Double): Contact? {
         val distance = (sphereCenter - position).dot(unitNormal)

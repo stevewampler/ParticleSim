@@ -122,7 +122,8 @@
   <section>
     <h4>display</h4>
     <label><input type="checkbox" id="gridToggle" checked> grid</label><br>
-    <label><input type="checkbox" id="axesToggle" checked> axes</label>
+    <label><input type="checkbox" id="axesToggle" checked> axes</label><br>
+    <label><input type="checkbox" id="collidersToggle" checked> colliders</label>
   </section>
   <section>
     <h4>time</h4>
@@ -206,6 +207,7 @@ scene.add(axesHelper);
 
 document.getElementById("gridToggle").addEventListener("change", (e) => { gridHelper.visible = e.target.checked; });
 document.getElementById("axesToggle").addEventListener("change", (e) => { axesHelper.visible = e.target.checked; });
+document.getElementById("collidersToggle").addEventListener("change", (e) => { colliderGroup.visible = e.target.checked; });
 
 // Lighting for §10.2's shaded surface meshes — MeshBasicMaterial (dots, wireframe meshes)
 // doesn't need this, but a solid MeshStandardMaterial surface would render pure black without it.
@@ -352,6 +354,64 @@ let arrowObjects = []; // THREE.ArrowHelper[]
 let arrowGroup = new THREE.Group();
 scene.add(arrowGroup);
 
+// §10.2's debug-render-all collider wireframes (planes/spheres/boxes) - unconditional, not
+// pooled against a per-frame "declared renderer" the way meshes/spheres are, since a collider
+// has no renderer-declaration equivalent at all yet. Rebuilt whenever the collider *list*
+// itself changes shape (kind or count), not every frame - unlike particles/meshes, nothing
+// server-side moves a collider's geometry parameters within a single demo run today, so
+// rebuilding on every frame would be pure waste. If a future moving-collider demo needs live
+// updates here, this is the spot to revisit.
+const colliderMaterial = new THREE.LineBasicMaterial({ color: 0x3399ff, transparent: true, opacity: 0.6 });
+let colliderObjects = []; // THREE.LineSegments[]
+let colliderGroup = new THREE.Group();
+scene.add(colliderGroup);
+let lastColliderSignature = "";
+
+function buildColliderGeometry(c) {
+  if (c.kind === "plane") {
+    const s = c.renderHalfSize * 2;
+    return new THREE.PlaneGeometry(s, s, 6, 6);
+  }
+  if (c.kind === "sphere") {
+    return new THREE.SphereGeometry(c.radius, 16, 12);
+  }
+  return new THREE.BoxGeometry(c.halfExtents.x * 2, c.halfExtents.y * 2, c.halfExtents.z * 2);
+}
+
+function updateColliders(colliders) {
+  // Cheap change-detection signature (kind+shape only - position could move for a moving
+  // collider, but nothing does yet, see this section's own doc comment above) so a static
+  // scene's colliders aren't torn down and rebuilt every single frame for no reason.
+  const signature = JSON.stringify(colliders.map((c) => [c.kind, c.radius, c.halfExtents, c.normal, c.renderHalfSize]));
+  if (signature === lastColliderSignature && colliderObjects.length === colliders.length) {
+    return;
+  }
+  lastColliderSignature = signature;
+
+  while (colliderObjects.length < colliders.length) {
+    const obj = new THREE.LineSegments(new THREE.BufferGeometry(), colliderMaterial);
+    colliderGroup.add(obj);
+    colliderObjects.push(obj);
+  }
+  while (colliderObjects.length > colliders.length) {
+    colliderGroup.remove(colliderObjects.pop());
+  }
+
+  colliders.forEach((c, i) => {
+    const obj = colliderObjects[i];
+    obj.geometry.dispose();
+    obj.geometry = new THREE.WireframeGeometry(buildColliderGeometry(c));
+    obj.position.set(c.position.x, c.position.y, c.position.z);
+    if (c.kind === "plane") {
+      // PlaneGeometry's own normal is +Z; rotate it to match the collider's actual normal.
+      const n = new THREE.Vector3(c.normal.x, c.normal.y, c.normal.z).normalize();
+      obj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+    } else {
+      obj.quaternion.identity();
+    }
+  });
+}
+
 let latestStep = 0;
 
 // Builds one mesh's geometry with *shared* (indexed) vertices, not one unconnected triangle
@@ -452,6 +512,7 @@ function applyFrame(frame) {
   lines.geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   lines.geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   updateColorLegend(frame);
+  updateColliders(frame.colliders);
 
   // Surface meshes (§10.2): rebuilt every frame (positions move every step) but the pool of
   // THREE.Mesh objects itself is grown/shrunk, not recreated, matching the dots/lines pattern.
@@ -637,7 +698,27 @@ function decodeFrame(buffer) {
     groups: readGroupList(),
   };
 
-  return { t, step, particles, connections, camera: cam, spheres, meshes, arrows, visibleIds, registry };
+  // §10.2's "debug/--render-all mode... draws every collider as wireframe" - unconditional,
+  // not opt-in like every other renderer here (see BinaryFrame's own doc comment).
+  const colliderCount = view.getInt32(offset, true); offset += 4;
+  const colliders = new Array(colliderCount);
+  for (let i = 0; i < colliderCount; i++) {
+    const kind = view.getUint8(offset); offset += 1;
+    const name = readString();
+    const position = readVec();
+    if (kind === 0) {
+      const normal = readVec();
+      const renderHalfSize = view.getFloat64(offset, true); offset += 8;
+      colliders[i] = { kind: "plane", name, position, normal, renderHalfSize };
+    } else if (kind === 1) {
+      const radius = view.getFloat64(offset, true); offset += 8;
+      colliders[i] = { kind: "sphere", name, position, radius };
+    } else {
+      colliders[i] = { kind: "box", name, position, halfExtents: readVec() };
+    }
+  }
+
+  return { t, step, particles, connections, camera: cam, spheres, meshes, arrows, visibleIds, registry, colliders };
 }
 
 // --- Time controls (§9.1/§10.3) -----------------------------------------------------------

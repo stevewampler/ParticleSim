@@ -1,5 +1,9 @@
 package particlesim.debug
 
+import particlesim.collision.BoxCollider
+import particlesim.collision.Collider
+import particlesim.collision.PlaneCollider
+import particlesim.collision.SphereCollider
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
 import particlesim.render.ArrowSample
@@ -42,7 +46,23 @@ import java.nio.charset.StandardCharsets
  * i32  registrySurfaceCount;    registrySurfaceCount    * { i32 nameLen, nameLen UTF-8 bytes }
  * i32  registryGroupCount;      registryGroupCount      * { i32 nameLen, nameLen UTF-8 bytes,
  *                                                            i32 memberCount, memberCount * i32 id }
+ * i32  colliderCount
+ * colliderCount * { u8 kind (0=plane, 1=sphere, 2=box), i32 nameLen, nameLen UTF-8 bytes,
+ *                    f64 px, py, pz,
+ *                    kind==0: f64 nx, ny, nz, f64 renderHalfSize
+ *                    kind==1: f64 radius
+ *                    kind==2: f64 hx, hy, hz }
  * ```
+ *
+ * The collider section is §10.2's "debug/`--render-all` mode... draws every collider as
+ * wireframe" — [Collider] has no renderer-declaration equivalent of its own (unlike particles/
+ * surfaces/forces), so this is unconditional, not opt-in: any [particlesim.collision.Collider]
+ * a caller passes gets drawn, there's no way to reference one by name from a renderer
+ * declaration the way §10.2 lets you target a group or surface. A plane is infinite, so the
+ * viewer draws a finite quad centered on its position — [PLANE_RENDER_HALF_SIZE] sets that
+ * quad's half-extent, sent over the wire (rather than duplicated as a second hardcoded
+ * constant in the JS client) so there's exactly one source of truth for it; this is a debug
+ * visualization choice, not a physical or DSL-exposed property of the collider itself.
  *
  * The registry section (§10.3's outliner prerequisite, [SceneRegistry]) carries names — plus,
  * for groups only, current member ids, since a group's §10.3 visibility toggle needs to know
@@ -91,6 +111,15 @@ object BinaryFrame {
     private const val VISIBLE_HEADER_SIZE = 4
     private const val REGISTRY_LIST_HEADER_SIZE = 4 // count, once per kind
     private const val STRING_HEADER_SIZE = 4 // nameLen
+    private const val COLLIDER_HEADER_SIZE = 4
+    private const val COLLIDER_ENTRY_HEADER_SIZE = 1 + 24 // kind, position
+    private const val PLANE_KIND: Byte = 0
+    private const val SPHERE_KIND: Byte = 1
+    private const val BOX_KIND: Byte = 2
+
+    /** Half-extent of the finite quad drawn for an (infinite) [PlaneCollider] — a debug-render
+     * choice, not a modeled property; see this file's own doc comment. */
+    const val PLANE_RENDER_HALF_SIZE = 3.0
 
     fun encode(
         t: Double,
@@ -105,6 +134,7 @@ object BinaryFrame {
         arrowSamples: List<ArrowSample> = emptyList(),
         visibleIds: Set<Int>? = null,
         registry: SceneRegistry = SceneRegistry.build(),
+        colliders: List<Collider> = emptyList(),
     ): ByteBuffer {
         val size = HEADER_SIZE + ids.size * PARTICLE_SIZE +
             CONNECTION_HEADER_SIZE + connections.size * CONNECTION_SIZE +
@@ -116,7 +146,8 @@ object BinaryFrame {
             ARROW_HEADER_SIZE + arrowSamples.size * ARROW_SIZE +
             VISIBLE_FLAG_SIZE + (if (visibleIds != null) VISIBLE_HEADER_SIZE + visibleIds.size * 4 else 0) +
             nameListSize(registry.forces.keys) + nameListSize(registry.constraints.keys) +
-            nameListSize(registry.surfaces.keys) + groupListSize(registry.groups)
+            nameListSize(registry.surfaces.keys) + groupListSize(registry.groups) +
+            COLLIDER_HEADER_SIZE + colliders.sumOf { colliderEntrySize(it) }
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
         buffer.putDouble(t)
@@ -177,6 +208,21 @@ object BinaryFrame {
             putString(buffer, name)
             buffer.putInt(memberIds.size)
             for (id in memberIds) buffer.putInt(id)
+        }
+        buffer.putInt(colliders.size)
+        for (collider in colliders) {
+            when (collider) {
+                is PlaneCollider -> buffer.put(PLANE_KIND)
+                is SphereCollider -> buffer.put(SPHERE_KIND)
+                is BoxCollider -> buffer.put(BOX_KIND)
+            }
+            putString(buffer, collider.name ?: "")
+            putVector(buffer, collider.position)
+            when (collider) {
+                is PlaneCollider -> { putVector(buffer, collider.unitNormal); buffer.putDouble(PLANE_RENDER_HALF_SIZE) }
+                is SphereCollider -> buffer.putDouble(collider.radius)
+                is BoxCollider -> putVector(buffer, collider.halfExtents)
+            }
         }
 
         buffer.flip()
@@ -243,7 +289,19 @@ object BinaryFrame {
             surfaces = getNameList(buf),
             groups = getGroupList(buf),
         )
-        return DecodedFrame(t, step, particles, connections, camera, spheres, meshes, arrows, visibleIds, registry)
+        val colliderCount = buf.int
+        val colliders = (0 until colliderCount).map {
+            val kind = buf.get()
+            val name = getString(buf)
+            val position = getVector(buf)
+            when (kind) {
+                PLANE_KIND -> DecodedCollider.Plane(name, position, normal = getVector(buf), renderHalfSize = buf.double)
+                SPHERE_KIND -> DecodedCollider.Sphere(name, position, radius = buf.double)
+                BOX_KIND -> DecodedCollider.Box(name, position, halfExtents = getVector(buf))
+                else -> error("unknown collider kind byte: $kind")
+            }
+        }
+        return DecodedFrame(t, step, particles, connections, camera, spheres, meshes, arrows, visibleIds, registry, colliders)
     }
 
     private fun putVector(buffer: ByteBuffer, v: Vector3) {
@@ -259,6 +317,15 @@ object BinaryFrame {
 
     private fun groupListSize(groups: Map<String, Set<Int>>) =
         REGISTRY_LIST_HEADER_SIZE + groups.entries.sumOf { (name, members) -> stringSize(name) + 4 + members.size * 4 }
+
+    private fun colliderEntrySize(collider: Collider): Int {
+        val shapeSize = when (collider) {
+            is PlaneCollider -> 24 + 8
+            is SphereCollider -> 8
+            is BoxCollider -> 24
+        }
+        return COLLIDER_ENTRY_HEADER_SIZE + stringSize(collider.name ?: "") + shapeSize
+    }
 
     private fun putString(buffer: ByteBuffer, s: String) {
         val bytes = s.toByteArray(StandardCharsets.UTF_8)
@@ -308,6 +375,19 @@ data class DecodedMesh(val wireframe: Boolean, val triangles: List<Triangle>, va
  * which particles a group's checkbox actually hides). */
 data class DecodedGroupEntry(val name: String, val memberIds: Set<Int>)
 
+/** A [particlesim.collision.Collider], decoded for §10.2's debug-render-all wireframe drawing
+ * — see [BinaryFrame]'s own doc comment for why this is unconditional rather than opt-in like
+ * every other renderer here. [name] is `""` for an unnamed collider, same convention as
+ * [DecodedMesh.name]. */
+sealed class DecodedCollider {
+    abstract val name: String
+    abstract val position: Vector3
+
+    data class Plane(override val name: String, override val position: Vector3, val normal: Vector3, val renderHalfSize: Double) : DecodedCollider()
+    data class Sphere(override val name: String, override val position: Vector3, val radius: Double) : DecodedCollider()
+    data class Box(override val name: String, override val position: Vector3, val halfExtents: Vector3) : DecodedCollider()
+}
+
 /** §10.3's outliner data — see [SceneRegistry] for what "named" means per kind and why groups
  * carry member ids while the other three kinds are plain name lists. */
 data class DecodedRegistry(
@@ -328,4 +408,5 @@ data class DecodedFrame(
     val arrows: List<ArrowSample> = emptyList(),
     val visibleIds: Set<Int>? = null,
     val registry: DecodedRegistry = DecodedRegistry(),
+    val colliders: List<DecodedCollider> = emptyList(),
 )

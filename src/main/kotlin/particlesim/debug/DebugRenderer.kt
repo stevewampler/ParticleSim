@@ -1,5 +1,6 @@
 package particlesim.debug
 
+import particlesim.collision.Collider
 import particlesim.core.ParticleStore
 import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
@@ -44,10 +45,12 @@ class DebugRenderer(
         arrowSamples: List<ArrowSample> = emptyList(),
         visibleIds: Set<Int>? = null,
         registry: SceneRegistry = SceneRegistry.build(),
+        colliders: List<Collider> = emptyList(),
     ) {
         wsServer.broadcastFrame(
             BinaryFrame.encode(
                 t, step, store, ids, connections, camera, lineColors, sphereRadii, meshes, arrowSamples, visibleIds, registry,
+                colliders,
             ),
         )
     }

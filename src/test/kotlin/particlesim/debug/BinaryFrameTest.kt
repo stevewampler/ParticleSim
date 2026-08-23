@@ -1,8 +1,12 @@
 package particlesim.debug
 
+import particlesim.collision.BoxCollider
+import particlesim.collision.PlaneCollider
+import particlesim.collision.SphereCollider
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
+import particlesim.core.VectorExpr
 import particlesim.physics.FixedPosition
 import particlesim.physics.UniformGravity
 import particlesim.render.ArrowSample
@@ -250,6 +254,50 @@ class BinaryFrameTest {
         val decoded = BinaryFrame.decode(buffer).registry
 
         assertEquals(listOf("flügel-mesh"), decoded.surfaces)
+    }
+
+    @Test
+    fun `round-trips a plane collider with its render half-size`() {
+        val store = ParticleStore()
+        val floor = PlaneCollider(VectorExpr.of(Vector3(0.0, 1.0, 0.0)), normal = Vector3(0.0, 1.0, 0.0), name = "floor")
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), colliders = listOf(floor),
+        )
+        val decoded = BinaryFrame.decode(buffer).colliders.single() as DecodedCollider.Plane
+
+        assertEquals("floor", decoded.name)
+        assertEquals(Vector3(0.0, 1.0, 0.0), decoded.position)
+        assertEquals(Vector3(0.0, 1.0, 0.0), decoded.normal)
+        assertEquals(BinaryFrame.PLANE_RENDER_HALF_SIZE, decoded.renderHalfSize)
+    }
+
+    @Test
+    fun `round-trips a sphere and a box collider, unnamed`() {
+        val store = ParticleStore()
+        val sphere = SphereCollider(VectorExpr.of(Vector3(1.0, 2.0, 3.0)), radius = 0.5)
+        val box = BoxCollider(VectorExpr.of(Vector3(-1.0, 0.0, 0.0)), halfExtents = Vector3(1.0, 2.0, 3.0))
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), colliders = listOf(sphere, box),
+        )
+        val decoded = BinaryFrame.decode(buffer).colliders
+
+        val decodedSphere = decoded[0] as DecodedCollider.Sphere
+        assertEquals("", decodedSphere.name)
+        assertEquals(Vector3(1.0, 2.0, 3.0), decodedSphere.position)
+        assertEquals(0.5, decodedSphere.radius)
+
+        val decodedBox = decoded[1] as DecodedCollider.Box
+        assertEquals(Vector3(-1.0, 0.0, 0.0), decodedBox.position)
+        assertEquals(Vector3(1.0, 2.0, 3.0), decodedBox.halfExtents)
+    }
+
+    @Test
+    fun `no colliders passed round-trips to an empty list, not an error`() {
+        val store = ParticleStore()
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList())
+        assertEquals(emptyList(), BinaryFrame.decode(buffer).colliders)
     }
 
     @Test

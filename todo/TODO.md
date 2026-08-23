@@ -175,7 +175,9 @@ reasoning):
       pinned chain of spring-connected particles swinging under gravity.
       **Colliders and surfaces aren't drawn** — neither exists yet
       (Phase 4/5); those branches of `--render-all` land with the things
-      they draw, not stubbed out now.
+      they draw, not stubbed out now. Surfaces landed with Phase 4/9/10's
+      mesh renderer; **colliders landed later, alongside particle-vs-
+      particle collision below** (Phase 5) — see that item's own note.
       Verified: `DebugFrame`'s serialization is unit-tested; the running
       demo was confirmed end-to-end from the server side (HTTP page
       serves, a raw WebSocket client receives well-formed frames showing
@@ -417,6 +419,36 @@ items below for exactly what's deferred and why.
       Final live check: 18 balls settled to the correct resting height
       (0.14996, matching radius 0.15) with speeds around 0.03-0.15 m/s and
       trending down, all within the walls.
+      **Follow-up, from real user testing**: the demo shipped without two
+      things that turned out to matter once someone actually watched it —
+      pause didn't work (this demo's `DebugRenderer` had no `onTextMessage`
+      handler at all, so a `TimeControlMessage` the client sent just went
+      nowhere; fixed by wiring `TimeControl` in exactly like `FlagDebugDemo`
+      already does) and the pen's walls were invisible (colliders have
+      never had any renderer at all — Phase 3's own `--render-all` item
+      above promised "every collider as wireframe" but that branch was
+      never built, since nothing needed it until now). Closed the second
+      gap for real, not just for this demo: `BinaryFrame` gained a
+      collider section (kind-tagged: plane/sphere/box, §12.2's three
+      primitives), `PlaneCollider.unitNormal` went public (matching
+      `SphereCollider`/`BoxCollider`'s already-public shape fields) so the
+      encoder can read it, and the viewer renders each as a pooled
+      wireframe object plus a `colliders` global toggle alongside
+      grid/axes — a plane's infinite extent is drawn as a finite quad
+      whose half-size (`BinaryFrame.PLANE_RENDER_HALF_SIZE`) is sent over
+      the wire rather than duplicated as a second hardcoded constant in
+      the JS client. This is unconditional, not opt-in like every other
+      §10.2 renderer — a `Collider` has no name-targeted renderer
+      declaration to attach to, so any collider a demo passes just draws.
+      3 new `BinaryFrameTest` round-trip cases (plane-with-render-size,
+      sphere+box unnamed, empty-list default). Verified live end-to-end:
+      a WebSocket script watching the real running demo confirmed the
+      step counter freezes bit-exactly under pause and resumes correctly,
+      and the decoded collider list matched all 5 real colliders (the
+      floor plus 4 walls) with correct positions/normals. The actual
+      visual result (does it *look* right in a browser) is still
+      unverified — Chrome automation remains unavailable in this
+      environment, same standing limitation as every other viewer feature.
 - [x] Collision groups & filtering beyond a single rule's group/collider
       pairing (§12.3) — landed as part of the item above:
       `ParticleCollisionRule(groupA, groupB)` *is* the group-vs-group

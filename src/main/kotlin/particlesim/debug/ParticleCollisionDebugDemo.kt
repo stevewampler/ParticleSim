@@ -44,6 +44,13 @@ import kotlin.random.Random
  * colliders below pen the pile in rather than chasing that gap further — containing the demo,
  * not fixing physics that's working exactly as documented (§12.5 lists friction `[stretch]`,
  * not "done").
+ *
+ * §10.3's time controls (pause/resume, speed, step-once) via [TimeControl], same pattern as
+ * [FlagDebugDemo] — spawning lives inside the `stepsThisFrame` loop alongside physics, so
+ * pausing freezes new arrivals too, not just existing balls. The floor and four walls are also
+ * broadcast as [particlesim.collision.Collider]s so the pen is actually visible (§10.2's
+ * debug-render-all wireframe) rather than invisible geometry the balls just mysteriously stop
+ * at.
  */
 fun main() {
     val store = ParticleStore()
@@ -77,7 +84,10 @@ fun main() {
     val particleRule = ParticleCollisionRule(groupA = ballGroup, restitution = 0.6, compressionDamping = 1.0)
     val particleCollisions = ParticleCollisionSystem(listOf(particleRule))
 
-    val renderer = DebugRenderer()
+    val timeControl = TimeControl()
+    val renderer = DebugRenderer(onTextMessage = { text ->
+        TimeControlMessage.parse(text)?.let(timeControl::apply)
+    })
     renderer.start()
 
     val integrator = Integrator()
@@ -91,7 +101,7 @@ fun main() {
     val frameNanos = 1_000_000_000L / framesPerSecond
     while (true) {
         val frameStart = System.nanoTime()
-        repeat(stepsPerFrame) {
+        repeat(timeControl.stepsThisFrame(stepsPerFrame)) {
             if (spawned < ballCount && t >= nextSpawnT) {
                 val position = Vector3((random.nextDouble() - 0.5) * 1.5, 2.0, (random.nextDouble() - 0.5) * 1.5)
                 val id = store.create(position = position, radius = ScalarExpr.of(radius))
@@ -106,7 +116,11 @@ fun main() {
             t += dt
             step++
         }
-        renderer.broadcast(t, step, store, ids, emptyList(), sphereRadii = ids.associateWith { radius })
+        renderer.broadcast(
+            t, step, store, ids, emptyList(),
+            sphereRadii = ids.associateWith { radius },
+            colliders = listOf(floor) + walls,
+        )
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)
     }
