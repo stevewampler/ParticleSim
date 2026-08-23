@@ -53,9 +53,11 @@ import kotlin.math.sin
  * dragging was a worse experience than never showing tension color.
  *
  * And §10.3's time controls: pause/resume, a speed multiplier, and step-once, applied via
- * [TimeControl] on this loop's own `stepsPerFrame` — `FLAG_DT` itself is never touched (§9.1's
- * pacing policy). This is the loop those controls were designed against, not retrofitted onto
- * it after the fact.
+ * [ViewerInput.timeControl] on this loop's own `stepsPerFrame` — `FLAG_DT` itself is never
+ * touched (§9.1's pacing policy). This is the loop those controls were designed against, not
+ * retrofitted onto it after the fact — [ViewerInput] itself came later, consolidating what this
+ * demo (and `DragDebugDemo`'s/`ParticleCollisionDebugDemo`'s own hand-rolled versions) already
+ * did into one class every demo shares.
  */
 fun main() {
     val scenario = buildFlag(rows = 8, cols = 14)
@@ -89,12 +91,8 @@ fun main() {
         groups = scenario.groups,
     )
 
-    val dragQueue = DragMessageQueue()
-    val timeControl = TimeControl()
-    val renderer = DebugRenderer(onTextMessage = { text ->
-        DragMessage.parse(text)?.let(dragQueue::offer)
-        TimeControlMessage.parse(text)?.let(timeControl::apply)
-    })
+    val viewerInput = ViewerInput()
+    val renderer = DebugRenderer(onTextMessage = viewerInput::onTextMessage)
     renderer.start()
 
     val integrator = Integrator()
@@ -112,8 +110,8 @@ fun main() {
         // many whole dt-steps run this tick. A paused/step-once frame can run zero steps, in
         // which case t/step don't advance and the broadcast below just resends the frozen state
         // (camera and wind-arrow sampling, both keyed on t, freeze along with it for free).
-        repeat(timeControl.stepsThisFrame(stepsPerFrame)) {
-            for (message in dragQueue.drainAll()) {
+        repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) {
+            for (message in viewerInput.dragQueue.drainAll()) {
                 when (message) {
                     is DragMessage.Start -> {
                         // The pole edge is already FixedPosition-constrained — dragging it

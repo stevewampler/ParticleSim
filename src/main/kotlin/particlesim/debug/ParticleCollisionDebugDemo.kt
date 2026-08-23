@@ -46,12 +46,11 @@ import kotlin.random.Random
  * [spawnInterval] means each new arrival only ever compresses an already-mostly-settled pile,
  * never several other falling balls at once.
  *
- * §10.3's time controls (pause/resume, speed, step-once) via [TimeControl], same pattern as
- * [FlagDebugDemo] — spawning lives inside the `stepsThisFrame` loop alongside physics, so
- * pausing freezes new arrivals too, not just existing balls. The floor and walls are also
- * broadcast as [particlesim.collision.Collider]s so the pen is actually visible (§10.2's
- * debug-render-all wireframe) rather than invisible geometry the balls just mysteriously stop
- * at.
+ * §10.3's time controls (pause/resume, speed, step-once) via [ViewerInput.timeControl] —
+ * spawning lives inside the `stepsThisFrame` loop alongside physics, so pausing freezes new
+ * arrivals too, not just existing balls. The floor and walls are also broadcast as
+ * [particlesim.collision.Collider]s so the pen is actually visible (§10.2's debug-render-all
+ * wireframe) rather than invisible geometry the balls just mysteriously stop at.
  *
  * **Removable colliders, interactive delete, and restart**, via [SceneControlMessage]: the
  * viewer's outliner lists each collider by name with a "remove" action (this is *the* way to
@@ -64,9 +63,10 @@ import kotlin.random.Random
  * `ParticleStore`/`Groups` (old particle ids from before a restart are meaningless, not reused)
  * plus every collider restored, not just the ones still standing. All three arrive on
  * [DebugServer]'s WebSocket I/O thread but are only ever *applied* on the physics loop's own
- * thread via [SceneControlMessageQueue.drainAll] — replacing `store`/`groups`/the live collider
- * list out from under a concurrently-running physics step would be a real race, not just
- * untidy, the same reasoning [DragMessageQueue] already established for per-particle input.
+ * thread via [SceneControlMessageQueue.drainAll] (reached through [ViewerInput.sceneControlQueue])
+ * — replacing `store`/`groups`/the live collider list out from under a concurrently-running
+ * physics step would be a real race, not just untidy, the same reasoning [DragMessageQueue]
+ * already established for per-particle input.
  */
 private data class NamedColliderRule(val collider: PlaneCollider, val rule: ParticleColliderRule)
 
@@ -100,12 +100,8 @@ fun main() {
     // keeps one cleanup mechanism everywhere (§14.3) rather than a second hand-rolled one here.
     val destruction = DestructionSystem()
 
-    val sceneControlQueue = SceneControlMessageQueue()
-    val timeControl = TimeControl()
-    val renderer = DebugRenderer(onTextMessage = { text ->
-        TimeControlMessage.parse(text)?.let(timeControl::apply)
-        SceneControlMessage.parse(text)?.let(sceneControlQueue::offer)
-    })
+    val viewerInput = ViewerInput()
+    val renderer = DebugRenderer(onTextMessage = viewerInput::onTextMessage)
     renderer.start()
 
     val integrator = Integrator()
@@ -132,7 +128,7 @@ fun main() {
 
     while (true) {
         val frameStart = System.nanoTime()
-        for (message in sceneControlQueue.drainAll()) {
+        for (message in viewerInput.sceneControlQueue.drainAll()) {
             when (message) {
                 is SceneControlMessage.RemoveCollider -> {
                     liveColliderRules = liveColliderRules.filter { it.collider.name != message.name }
@@ -157,7 +153,7 @@ fun main() {
                 }
             }
         }
-        repeat(timeControl.stepsThisFrame(stepsPerFrame)) {
+        repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) {
             if (spawned < ballCount && t >= nextSpawnT) {
                 val position = Vector3((random.nextDouble() - 0.5) * 1.5, 2.0, (random.nextDouble() - 0.5) * 1.5)
                 val id = store.create(position = position, radius = ScalarExpr.of(radius))

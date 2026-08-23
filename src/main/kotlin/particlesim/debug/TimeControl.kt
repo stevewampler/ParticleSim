@@ -22,10 +22,11 @@ import java.util.concurrent.atomic.AtomicInteger
  * [stepDebt] is never touched by [apply], only by [stepsThisFrame], so it needs no
  * synchronization of its own.
  *
- * A caller's own `onTextMessage` callback is expected to try *both* [DragMessage.parse] and
- * [TimeControlMessage.parse] on every incoming message (each returns `null` for a `type` it
- * doesn't recognize) rather than assuming one or the other — the same bidirectional channel
- * carries both kinds of viewer input now, not just drag targets.
+ * A caller's `onTextMessage` callback needs to try [DragMessage.parse], this class's own
+ * [TimeControlMessage.parse], and [SceneControlMessage.parse] on every incoming message (each
+ * returns `null` for a `type` it doesn't recognize) rather than assuming just one — the same
+ * bidirectional channel carries all three kinds of viewer input. [ViewerInput] does exactly
+ * this dispatch already; use it instead of hand-rolling the same three-way parse in a new demo.
  */
 class TimeControl {
     @Volatile private var paused = false

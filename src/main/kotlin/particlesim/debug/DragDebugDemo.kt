@@ -50,6 +50,10 @@ import particlesim.physics.UniformGravity
  * cleanup mechanism §14.3 already established for lifetime/condition/collision-triggered
  * destroys, not a hand-rolled one-off for this demo. The result is two independently-hanging
  * pieces, not a chain that silently keeps simulating a phantom connection.
+ *
+ * Playback controls (pause/speed/step-once) via [ViewerInput], which also bundles the drag and
+ * scene-control queues this demo actually uses — see that class's own doc comment for why every
+ * debug demo shares one of these now instead of each hand-rolling its own `onTextMessage`.
  */
 fun main() {
     val store = ParticleStore()
@@ -75,12 +79,8 @@ fun main() {
     val fixedConstraints = listOf(FixedPosition("anchor", store.position(anchorId)))
     val destruction = DestructionSystem()
 
-    val dragQueue = DragMessageQueue()
-    val sceneControlQueue = SceneControlMessageQueue()
-    val renderer = DebugRenderer(onTextMessage = { text ->
-        DragMessage.parse(text)?.let(dragQueue::offer)
-        SceneControlMessage.parse(text)?.let(sceneControlQueue::offer)
-    })
+    val viewerInput = ViewerInput()
+    val renderer = DebugRenderer(onTextMessage = viewerInput::onTextMessage)
     renderer.start()
 
     val integrator = Integrator()
@@ -95,7 +95,7 @@ fun main() {
 
     while (true) {
         val frameStart = System.nanoTime()
-        for (message in sceneControlQueue.drainAll()) {
+        for (message in viewerInput.sceneControlQueue.drainAll()) {
             if (message is SceneControlMessage.DeleteParticle) {
                 // The pinned anchor can be deleted too - FixedPosition just becomes a no-op for
                 // a group with no members left in it, no special-casing needed (§10.3's
@@ -111,8 +111,8 @@ fun main() {
                 }
             }
         }
-        repeat(stepsPerFrame) {
-            for (message in dragQueue.drainAll()) {
+        repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) {
+            for (message in viewerInput.dragQueue.drainAll()) {
                 when (message) {
                     is DragMessage.Start -> {
                         // The pinned anchor can't be dragged - it would just fight FixedPosition.

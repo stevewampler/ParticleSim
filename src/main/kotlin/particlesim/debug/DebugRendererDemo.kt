@@ -13,6 +13,9 @@ import particlesim.physics.UniformGravity
  * A visible run of Phase 3's debug renderer: a chain of particles connected by springs, one
  * end pinned, swinging under gravity — enough to see dots (particles) and lines (the
  * springs) both moving. `./gradlew run`, then open the URL it prints.
+ *
+ * Playback controls (pause/speed/step-once) via [ViewerInput] — every debug demo gets these
+ * the same way now, see that class's own doc comment for why.
  */
 fun main() {
     val store = ParticleStore()
@@ -39,7 +42,8 @@ fun main() {
     val forces = listOf(UniformGravity("chain", Vector3(0.0, -9.8, 0.0))) + springs
     val constraints = listOf(FixedPosition("anchor", store.position(ids.first())))
 
-    val renderer = DebugRenderer()
+    val viewerInput = ViewerInput()
+    val renderer = DebugRenderer(onTextMessage = viewerInput::onTextMessage)
     renderer.start()
 
     val integrator = Integrator()
@@ -52,7 +56,7 @@ fun main() {
     val frameNanos = 1_000_000_000L / framesPerSecond
     while (true) {
         val frameStart = System.nanoTime()
-        repeat(stepsPerFrame) {
+        repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) {
             integrator.step(store, groups, forces, constraints, t, dt)
             t += dt
             step++

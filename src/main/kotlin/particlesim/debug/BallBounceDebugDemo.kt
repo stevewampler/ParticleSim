@@ -15,13 +15,17 @@ import particlesim.physics.Integrator
  * done bouncing and see nothing but a stationary dot. The drop re-triggers on a fixed cycle
  * (well past the settle time with margin) so there's always another bounce coming soon,
  * rather than requiring the viewer tab to be open at the exact moment `main` starts.
+ *
+ * Playback controls (pause/speed/step-once) via [ViewerInput] — every debug demo gets these
+ * the same way now, see that class's own doc comment for why.
  */
 fun main() {
     val scenario = buildBallBounce()
     val dropPosition = scenario.store.position(scenario.ballId)
     val cycleSeconds = 8.0
 
-    val renderer = DebugRenderer()
+    val viewerInput = ViewerInput()
+    val renderer = DebugRenderer(onTextMessage = viewerInput::onTextMessage)
     renderer.start()
 
     val integrator = Integrator()
@@ -35,7 +39,7 @@ fun main() {
     val ids = listOf(scenario.ballId)
     while (true) {
         val frameStart = System.nanoTime()
-        repeat(stepsPerFrame) {
+        repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) {
             if (t - cycleStart >= cycleSeconds) {
                 scenario.store.setPosition(scenario.ballId, dropPosition)
                 scenario.store.setVelocity(scenario.ballId, Vector3.ZERO)

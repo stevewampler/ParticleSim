@@ -1800,6 +1800,31 @@ real prerequisite, not just unstarted — see the note below.
       stepping *feels* right in a real browser is for a human to confirm
       — same standing caveat as every other client-side piece of this
       phase. Not wired into any demo besides `FlagDebugDemo`.
+      **Follow-up, from real user testing**: the user reported "none of
+      the playback buttons work" after running various demos from
+      IntelliJ — true for every demo except `FlagDebugDemo`,
+      `ParticleCollisionDebugDemo`, and `DragDebugDemo` (the only three
+      that had ever been individually wired), exactly the gap the note
+      above already flagged as a real risk. Fixed by extracting a shared
+      `ViewerInput` class (parses `TimeControlMessage`/`DragMessage`/
+      `SceneControlMessage` and routes each to its own queue/handler) and
+      using it in *every* debug demo — `DebugRendererDemo`,
+      `BallBounceDebugDemo`, `SparksDebugDemo`, `TrampolineDebugDemo`,
+      `MultiShapeDebugDemo` gained pause/speed/step-once for the first
+      time; `FlagDebugDemo`/`DragDebugDemo`/`ParticleCollisionDebugDemo`
+      had their own hand-rolled `onTextMessage` dispatch consolidated
+      onto the same shared class instead of three near-identical private
+      copies. This closes the actual failure mode, not just this one
+      report of it: a *new* demo now gets pause/speed/step-once/drag/
+      scene-control for free from its first `DebugRenderer(onTextMessage
+      = viewerInput::onTextMessage)` line, rather than being one missed
+      wiring step away from silently-dead playback buttons the way six
+      of eight demos turned out to be. Verified live in a real browser
+      against `SparksDebugDemo` (previously totally unwired): pause froze
+      `t`/`step`/`particles` exactly across a 2s wait, resume advanced
+      them and resumed spawning new sparks. 332 tests still green (no
+      new tests — `ViewerInput` is pure composition of three already-
+      tested parsers/queues, nothing new to verify in isolation).
 - [x] Removable colliders + scene restart from the viewer (§10.3, new
       requirement) — a third kind of viewer-to-engine input,
       `SceneControlMessage` (`remove_collider`/`restart`), alongside

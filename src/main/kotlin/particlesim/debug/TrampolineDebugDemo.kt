@@ -19,6 +19,9 @@ import particlesim.render.SurfaceRenderer
  * eventually settles resting on the mat, and a fixed reset cycle (well past settle time) means
  * there's always another bounce coming soon rather than requiring the viewer to be open at the
  * exact moment `main` starts.
+ *
+ * Playback controls (pause/speed/step-once) via [ViewerInput] — every debug demo gets these
+ * the same way now, see that class's own doc comment for why.
  */
 fun main() {
     val scenario = buildTrampoline()
@@ -33,7 +36,8 @@ fun main() {
         groups = scenario.groups,
     )
 
-    val renderer = DebugRenderer()
+    val viewerInput = ViewerInput()
+    val renderer = DebugRenderer(onTextMessage = viewerInput::onTextMessage)
     renderer.start()
 
     val integrator = Integrator()
@@ -53,7 +57,7 @@ fun main() {
     val visibleIds = rimIds + scenario.ballId
     while (true) {
         val frameStart = System.nanoTime()
-        repeat(stepsPerFrame) {
+        repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) {
             if (t - cycleStart >= cycleSeconds) {
                 scenario.store.setPosition(scenario.ballId, dropPosition)
                 scenario.store.setVelocity(scenario.ballId, Vector3.ZERO)

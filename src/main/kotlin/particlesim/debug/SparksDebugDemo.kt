@@ -11,11 +11,16 @@ import particlesim.physics.Integrator
  * integrated once (see [particlesim.lifecycle.DestructionSystem]'s doc comment). Unlike the
  * flag/ball-bounce demos, the particle set actually changes size frame to frame, so the ids
  * broadcast each frame come fresh from `store.liveIds()` rather than a list built once upfront.
+ *
+ * Playback controls (pause/speed/step-once) via [ViewerInput] — every debug demo gets these
+ * the same way now, see that class's own doc comment for why. Pausing freezes emission and
+ * destruction along with physics, since both live inside the same `stepsThisFrame` loop.
  */
 fun main() {
     val scenario = buildSparks()
 
-    val renderer = DebugRenderer()
+    val viewerInput = ViewerInput()
+    val renderer = DebugRenderer(onTextMessage = viewerInput::onTextMessage)
     renderer.start()
 
     val integrator = Integrator()
@@ -27,7 +32,7 @@ fun main() {
     val frameNanos = 1_000_000_000L / framesPerSecond
     while (true) {
         val frameStart = System.nanoTime()
-        repeat(stepsPerFrame) {
+        repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) {
             integrator.step(scenario.store, scenario.groups, scenario.forces, emptyList(), t, SPARKS_DT)
             scenario.destruction.resolve(scenario.store, scenario.groups, scenario.forces, t, SPARKS_DT)
             scenario.emitter.update(scenario.store, scenario.groups, t, SPARKS_DT)

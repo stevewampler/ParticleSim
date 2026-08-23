@@ -27,6 +27,9 @@ import particlesim.physics.Integrator
  * Kept deliberately simple visually (plain dots/lines, a static camera) — the point here is
  * composition, not re-proving Phase 9's renderer/camera work, which is already proven
  * elsewhere (`FlagDebugDemo`).
+ *
+ * Playback controls (pause/speed/step-once) via [ViewerInput] — every debug demo gets these
+ * the same way now, see that class's own doc comment for why.
  */
 fun main() {
     val store = ParticleStore()
@@ -58,7 +61,8 @@ fun main() {
             flag.meshSprings[0].activeConnections() +
             tire.rimIds.indices.map { i -> tire.rimIds[i] to tire.rimIds[(i + 1) % tire.rimIds.size] }
 
-    val renderer = DebugRenderer()
+    val viewerInput = ViewerInput()
+    val renderer = DebugRenderer(onTextMessage = viewerInput::onTextMessage)
     renderer.start()
 
     val integrator = Integrator()
@@ -71,7 +75,7 @@ fun main() {
     val frameNanos = 1_000_000_000L / framesPerSecond
     while (true) {
         val frameStart = System.nanoTime()
-        repeat(stepsPerFrame) {
+        repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) {
             integrator.step(store, groups, allForces, allConstraints, t, dt)
             tire.collisions.resolve(store, groups, t, dt)
             ball.collisions.resolve(store, groups, t, dt)
