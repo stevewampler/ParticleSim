@@ -41,6 +41,12 @@
   }
   #bookmarkList .goBtn { flex: 1; text-align: left; padding: 2px 4px; }
   #bookmarkForm { display: flex; gap: 4px; }
+  #timeButtons, #speedButtons { display: flex; gap: 4px; margin-bottom: 4px; }
+  #timeButtons button, #speedButtons button {
+    font: 11px monospace; cursor: pointer; background: rgba(255,255,255,0.1);
+    color: #ddd; border: 1px solid rgba(255,255,255,0.25); border-radius: 3px; padding: 2px 6px;
+  }
+  #speedButtons button.active { background: rgba(80,140,220,0.5); color: #fff; }
   #bookmarkNameInput {
     width: 90px; font: 11px monospace; background: rgba(255,255,255,0.1);
     color: #ddd; border: 1px solid rgba(255,255,255,0.25); border-radius: 3px;
@@ -117,6 +123,20 @@
     <h4>display</h4>
     <label><input type="checkbox" id="gridToggle" checked> grid</label><br>
     <label><input type="checkbox" id="axesToggle" checked> axes</label>
+  </section>
+  <section>
+    <h4>time</h4>
+    <div id="timeButtons">
+      <button id="playPauseBtn">⏸ pause</button>
+      <button id="stepOnceBtn">⏭ step</button>
+    </div>
+    <div id="speedButtons">
+      <button data-speed="0.25">0.25x</button>
+      <button data-speed="0.5">0.5x</button>
+      <button data-speed="1" class="active">1x</button>
+      <button data-speed="2">2x</button>
+      <button data-speed="4">4x</button>
+    </div>
   </section>
   <section>
     <h4>stats</h4>
@@ -620,6 +640,40 @@ function decodeFrame(buffer) {
   return { t, step, particles, connections, camera: cam, spheres, meshes, arrows, visibleIds, registry };
 }
 
+// --- Time controls (§9.1/§10.3) -----------------------------------------------------------
+// Sends viewer -> engine commands over the same JSON text channel drag messages already use
+// (see TimeControlMessage's own doc comment for why both parsers are tried on every message
+// server-side). This viewer has no server-authoritative pause-state readback - isPaused here is
+// purely local, set only by this viewer's own button clicks, initialized false on page load.
+// Fine for a single-viewer debug tool; a second concurrent viewer would show its own guess.
+let isPaused = false;
+const playPauseBtn = document.getElementById("playPauseBtn");
+
+playPauseBtn.addEventListener("click", () => {
+  isPaused = !isPaused;
+  send({ type: isPaused ? "pause" : "resume" });
+  playPauseBtn.textContent = isPaused ? "▶ play" : "⏸ pause";
+  // Resuming shouldn't have the paused duration count as "falling behind" - see updateStats'
+  // own lag comment for why an attaching-mid-run viewer needs the same fresh-anchor treatment.
+  if (!isPaused) resetStats();
+});
+
+document.getElementById("stepOnceBtn").addEventListener("click", () => {
+  send({ type: "step_once" });
+  // TimeControl always leaves the engine paused right after a step (see its own doc comment) -
+  // reflect that locally immediately rather than waiting a frame for confirmation.
+  isPaused = true;
+  playPauseBtn.textContent = "▶ play";
+});
+
+document.querySelectorAll("#speedButtons button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    send({ type: "set_speed", multiplier: parseFloat(btn.dataset.speed) });
+    document.querySelectorAll("#speedButtons button").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+  });
+});
+
 // --- Stats overlay (§10.3) ----------------------------------------------------------------
 // Particle count is a direct frame readout; step rate and lag both need a wall-clock anchor,
 // reset on every fresh connection (not just once ever) so reconnecting to a *different* demo
@@ -666,10 +720,15 @@ function updateStats(frame) {
     statsRateSampleStep = frame.step;
   }
 
+  // While paused, wall-clock time keeps advancing but sim time deliberately doesn't - showing
+  // a growing "+Ns lag" there would misrepresent an intentional pause as the physics falling
+  // behind. resetStats() on resume (see playPauseBtn's own listener) keeps this honest once
+  // running again, rather than needing special-case math here to subtract out paused duration.
+  const lagText = isPaused ? "— (paused)" : `${lagS >= 0 ? "+" : ""}${lagS.toFixed(2)}s`;
   statsPanelEl.textContent =
     `particles: ${frame.particles.length}\n` +
     `steps/s:   ${statsStepRate.toFixed(0)}\n` +
-    `lag:       ${lagS >= 0 ? "+" : ""}${lagS.toFixed(2)}s`;
+    `lag:       ${lagText}`;
 }
 
 // --- Outliner & per-object panel (§10.3) --------------------------------------------------

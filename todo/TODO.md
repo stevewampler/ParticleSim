@@ -1643,9 +1643,76 @@ real prerequisite, not just unstarted — see the note below.
       the legend would correctly stay hidden — the positive case (does it
       actually *appear* when it should) remains unverified by an actual
       colored demo or a human in a browser. Full suite now 264 green.
-- [ ] Time controls (pause, speed multiplier, step-once) — already
-      specified in §9.1, not yet built anywhere; this is the UI surface
-      for it
+- [x] **Time controls**: pause/resume, a speed multiplier, and step-once,
+      as a new bidirectional-channel message type (`TimeControlMessage`)
+      applied uniformly via a new `TimeControl` class rather than each
+      demo reimplementing pause/speed logic independently.
+      **§9.1's pacing policy held to literally**: `dt` itself is never
+      touched anywhere in this — a speed multiplier changes how many
+      whole `dt`-steps `TimeControl.stepsThisFrame` returns per broadcast
+      tick, never the size of one step (coarsening `dt` "would silently
+      break determinism," the exact thing §9.1 rules out). A non-integer
+      multiplier (e.g. 0.33x) still averages out correctly over many
+      frames via a fractional `stepDebt` accumulator carried between
+      calls, rather than always rounding the same direction every frame.
+      **Step-once resolved a real ambiguity deliberately**: it advances
+      one *nominal frame's* worth of steps (`stepsPerFrame`, ~16 at
+      60fps/`dt=1e-3`), not one raw `dt`-step — a single 1e-3s step is
+      visually imperceptible, and step-once exists specifically to be a
+      visible debugging aid. It also **always leaves the engine paused
+      afterward**, regardless of whether it was already paused or
+      running when clicked — "step" means "advance by exactly one
+      visible increment, then hold," one predictable outcome either way,
+      not two different behaviors depending on prior state. Multiple
+      queued step-once clicks each advance one more frame (not
+      coalesced).
+      **Threading mirrors `DragMessageQueue`'s existing model**: the
+      WebSocket I/O thread calls `TimeControl.apply` as messages arrive,
+      the physics loop's own thread calls `stepsThisFrame` once per
+      broadcast tick — `paused`/`speedMultiplier` are `@Volatile` for
+      that cross-thread visibility, `stepDebt` is untouched by `apply`
+      so it needs no synchronization of its own.
+      **Wired into `FlagDebugDemo` only** (this phase's established
+      pattern — every other Phase 10 feature was proven on this one demo
+      before wider rollout): `onTextMessage` now tries *both*
+      `DragMessage.parse` and `TimeControlMessage.parse` on every
+      incoming message, since the same channel now carries two kinds of
+      viewer input, not just drag targets.
+      **Viewer UI**: play/pause and step buttons plus five speed presets
+      (0.25x–4x) in `#controlPanel`. `isPaused` is tracked purely
+      client-side (no server-authoritative pause-state readback — fine
+      for a single-viewer debug tool, a second concurrent viewer would
+      show its own guess) so the stats panel can show `"— (paused)"`
+      instead of a misleadingly growing lag number while paused, and
+      `resetStats()` is called on resume so the paused duration itself
+      never counts as "falling behind."
+      **Verified three ways**: `TimeControlMessageTest` (5) and
+      `TimeControlTest` (7) — including that step-once wins over both an
+      active pause *and* an active speed multiplier, that pausing
+      doesn't disturb `stepDebt` (it resumes exactly where it left off),
+      and that a fractional multiplier's *average* rate over 1000
+      simulated frames matches the theoretical rate within 10 steps.
+      The usual no-browser fallback (`node --check`, `getElementById`
+      cross-check, live `curl`). And a live server-side WebSocket check
+      against a running `FlagDebugDemo` sending real pause/resume/
+      set_speed/step_once commands and reading the engine's actual
+      `step` counter back: pause produced an *exact* zero step delta
+      over a full second, step-once advanced by *exactly* 16 (matching
+      `stepsPerFrame` precisely), the engine stayed paused immediately
+      after step-once, and running at 4x produced *exactly* 4.0x the
+      step-rate measured at 1x (3072 vs 768) — the proportional scaling
+      is the load-bearing signal here, not the absolute rate, which fell
+      short of the theoretical ~1000 steps/s at 1x for reasons unrelated
+      to `TimeControl` (the demo's own `stepsPerFrame = ((1.0/60)/dt)
+      .toInt()` truncates 16.67 down to 16, a pre-existing, unrelated
+      rounding artifact, plus ordinary sampling jitter in a 1-second
+      window) — worth knowing about but not this feature's bug to fix.
+      Full suite now 276 green.
+      **Still not done, matching Phase 10's own last-resort framing**:
+      whether the buttons are actually usable and whether pausing/
+      stepping *feels* right in a real browser is for a human to confirm
+      — same standing caveat as every other client-side piece of this
+      phase. Not wired into any demo besides `FlagDebugDemo`.
 - [ ] `[stretch]` Live parameter tweaking (viewer writes back into a
       running force/constraint's numeric parameters) — deliberately kept
       out of this phase's main scope; needs generalizing §9.4's
