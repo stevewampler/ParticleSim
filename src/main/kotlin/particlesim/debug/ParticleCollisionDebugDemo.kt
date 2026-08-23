@@ -24,7 +24,7 @@ import kotlin.random.Random
  * single step, which is where visible pile-up behavior (settling, or not) shows up that no
  * isolated two-body component test could catch.
  *
- * **Friction is wired in now** (floor, walls, and ball-vs-ball all carry static/kinetic
+ * **Friction is wired in** (floor, walls, and ball-vs-ball all carry static/kinetic
  * coefficients) — this demo is exactly the concrete consumer that promoted §12.5's friction out
  * of `[stretch]` in the first place (see the walls-and-drift history below), so leaving it
  * frictionless here once friction existed would have been an odd thing to ship. With it, the
@@ -38,64 +38,64 @@ import kotlin.random.Random
  * reason about" discrete detection deliberately, not an iterative constraint solver) — resolving
  * pair (a,b) can push b deeper into pair (b,c)'s overlap, compounding rather than cancelling.
  * Confirmed live: balls ended up hundreds of meters out at a constant several-m/s horizontal
- * drift that never decayed, since floor/ball friction isn't implemented yet (§12.5 `[stretch]`)
- * and a frictionless floor has nothing to bleed off sideways velocity once it exists. Every
- * *pairwise* collision was individually verified correct (restitution, damping, momentum,
- * elastic energy conservation, all to 1e-9 - see [particlesim.collision.ParticleCollisionSystemTest]) —
- * this was a many-body, one-step-of-resolution artifact, not a wrong formula. Dropping one ball
- * every [spawnInterval] means each new arrival only ever compresses an already-mostly-settled
- * pile, never several other falling balls at once — it noticeably reduced the drift, but didn't
- * eliminate it: a ball landing on an existing pile still nudges its neighbors sideways, and
- * with no friction that sideways nudge is permanent no matter how gentle the landing. Four wall
- * colliders below pen the pile in rather than chasing that gap further — containing the demo,
- * not fixing physics that's working exactly as documented (§12.5 lists friction `[stretch]`,
- * not "done").
+ * drift that never decayed, before friction existed to bleed it off. Every *pairwise* collision
+ * was individually verified correct (restitution, damping, momentum, elastic energy
+ * conservation, all to 1e-9 - see [particlesim.collision.ParticleCollisionSystemTest]) — this
+ * was a many-body, one-step-of-resolution artifact, not a wrong formula. Dropping one ball every
+ * [spawnInterval] means each new arrival only ever compresses an already-mostly-settled pile,
+ * never several other falling balls at once.
  *
  * §10.3's time controls (pause/resume, speed, step-once) via [TimeControl], same pattern as
  * [FlagDebugDemo] — spawning lives inside the `stepsThisFrame` loop alongside physics, so
- * pausing freezes new arrivals too, not just existing balls. The floor and four walls are also
+ * pausing freezes new arrivals too, not just existing balls. The floor and walls are also
  * broadcast as [particlesim.collision.Collider]s so the pen is actually visible (§10.2's
  * debug-render-all wireframe) rather than invisible geometry the balls just mysteriously stop
  * at.
+ *
+ * **Removable colliders and restart**, via [SceneControlMessage]: the viewer's outliner lists
+ * each collider by name with a "remove" action (this is *the* way to answer "what does the pile
+ * do without the walls?" live, rather than needing a second demo binary just to try it), and a
+ * "restart" button rebuilds the whole scenario from scratch — brand-new `ParticleStore`/`Groups`
+ * (old particle ids from before a restart are meaningless, not reused) plus every collider
+ * restored, not just the ones still standing. Both arrive on [DebugServer]'s WebSocket I/O
+ * thread but are only ever *applied* on the physics loop's own thread via
+ * [SceneControlMessageQueue.drainAll] — replacing `store`/`groups`/the live collider list out
+ * from under a concurrently-running physics step would be a real race, not just untidy, the
+ * same reasoning [DragMessageQueue] already established for per-particle input.
  */
+private data class NamedColliderRule(val collider: PlaneCollider, val rule: ParticleColliderRule)
+
 fun main() {
-    val store = ParticleStore()
-    val groups = Groups()
     val ballGroup = "balls"
-
-    val ballCount = 18
     val radius = 0.15
+    val ballCount = 18
     val spawnInterval = 0.35
-    val random = Random(seed = 1)
-    var spawned = 0
-    val ids = ArrayList<Int>()
-
-    val gravity = UniformGravity(ballGroup, Vector3(0.0, -9.8, 0.0))
-    val floor = PlaneCollider(VectorExpr.of(Vector3.ZERO), normal = Vector3(0.0, 1.0, 0.0), name = "floor")
-    // Four walls penning the pile into a +-1.5m square - without floor/ball friction (§12.5
-    // `[stretch]`), nothing else stops a ball nudged sideways during landing from drifting
-    // forever, so this keeps the demo visually contained rather than scattering across the
-    // scene (see this file's own doc comment for how that was found).
     val wallExtent = 1.5
+
+    // The canonical, never-mutated full set of colliders+rules - a restart resets the live set
+    // back to exactly this, restoring any wall (or the floor) a "remove" click took out.
+    val floor = PlaneCollider(VectorExpr.of(Vector3.ZERO), normal = Vector3(0.0, 1.0, 0.0), name = "floor")
+    val floorRule = ParticleColliderRule(
+        group = ballGroup, collider = floor, restitution = 0.5, compressionDamping = 2.0, extensionDamping = 0.3,
+        staticFriction = 0.6, kineticFriction = 0.4,
+    )
     val walls = listOf(
         PlaneCollider(VectorExpr.of(Vector3(-wallExtent, 0.0, 0.0)), normal = Vector3(1.0, 0.0, 0.0), name = "wall-x-neg"),
         PlaneCollider(VectorExpr.of(Vector3(wallExtent, 0.0, 0.0)), normal = Vector3(-1.0, 0.0, 0.0), name = "wall-x-pos"),
         PlaneCollider(VectorExpr.of(Vector3(0.0, 0.0, -wallExtent)), normal = Vector3(0.0, 0.0, 1.0), name = "wall-z-neg"),
         PlaneCollider(VectorExpr.of(Vector3(0.0, 0.0, wallExtent)), normal = Vector3(0.0, 0.0, -1.0), name = "wall-z-pos"),
     )
-    val floorRule = ParticleColliderRule(
-        group = ballGroup, collider = floor, restitution = 0.5, compressionDamping = 2.0, extensionDamping = 0.3,
-        staticFriction = 0.6, kineticFriction = 0.4,
-    )
     val wallRules = walls.map { ParticleColliderRule(group = ballGroup, collider = it, restitution = 0.5, staticFriction = 0.3, kineticFriction = 0.2) }
-    val floorCollisions = CollisionSystem(listOf(floorRule) + wallRules)
+    val allColliderRules = listOf(NamedColliderRule(floor, floorRule)) + walls.zip(wallRules).map { (w, r) -> NamedColliderRule(w, r) }
 
     val particleRule = ParticleCollisionRule(groupA = ballGroup, restitution = 0.6, compressionDamping = 1.0, staticFriction = 0.4, kineticFriction = 0.3)
     val particleCollisions = ParticleCollisionSystem(listOf(particleRule))
 
+    val sceneControlQueue = SceneControlMessageQueue()
     val timeControl = TimeControl()
     val renderer = DebugRenderer(onTextMessage = { text ->
         TimeControlMessage.parse(text)?.let(timeControl::apply)
+        SceneControlMessage.parse(text)?.let(sceneControlQueue::offer)
     })
     renderer.start()
 
@@ -103,13 +103,47 @@ fun main() {
     val dt = 1e-3
     val framesPerSecond = 60
     val stepsPerFrame = maxOf(1, ((1.0 / framesPerSecond) / dt).toInt())
+    val frameNanos = 1_000_000_000L / framesPerSecond
 
+    // Everything below is rebuilt wholesale on restart - grouped as `var`s (not `val`s) for
+    // exactly that reason, all reassigned together in one place rather than mutated piecemeal.
+    var store = ParticleStore()
+    var groups = Groups()
+    var gravity = UniformGravity(ballGroup, Vector3(0.0, -9.8, 0.0))
+    var liveColliderRules = allColliderRules
+    var floorCollisions = CollisionSystem(liveColliderRules.map { it.rule })
+    var ids = ArrayList<Int>()
+    var spawned = 0
+    var nextSpawnT = 0.0
     var t = 0.0
     var step = 0L
-    var nextSpawnT = 0.0
-    val frameNanos = 1_000_000_000L / framesPerSecond
+    // Re-seeded on restart too, not just at startup - a restart is meant to reproduce the exact
+    // same run, not continue the same random stream from wherever it happened to be.
+    var random = Random(seed = 1)
+
     while (true) {
         val frameStart = System.nanoTime()
+        for (message in sceneControlQueue.drainAll()) {
+            when (message) {
+                is SceneControlMessage.RemoveCollider -> {
+                    liveColliderRules = liveColliderRules.filter { it.collider.name != message.name }
+                    floorCollisions = CollisionSystem(liveColliderRules.map { it.rule })
+                }
+                SceneControlMessage.Restart -> {
+                    store = ParticleStore()
+                    groups = Groups()
+                    gravity = UniformGravity(ballGroup, Vector3(0.0, -9.8, 0.0))
+                    liveColliderRules = allColliderRules
+                    floorCollisions = CollisionSystem(liveColliderRules.map { it.rule })
+                    ids = ArrayList()
+                    spawned = 0
+                    nextSpawnT = 0.0
+                    t = 0.0
+                    step = 0L
+                    random = Random(seed = 1)
+                }
+            }
+        }
         repeat(timeControl.stepsThisFrame(stepsPerFrame)) {
             if (spawned < ballCount && t >= nextSpawnT) {
                 val position = Vector3((random.nextDouble() - 0.5) * 1.5, 2.0, (random.nextDouble() - 0.5) * 1.5)
@@ -128,7 +162,7 @@ fun main() {
         renderer.broadcast(
             t, step, store, ids, emptyList(),
             sphereRadii = ids.associateWith { radius },
-            colliders = listOf(floor) + walls,
+            colliders = liveColliderRules.map { it.collider },
         )
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)

@@ -112,6 +112,8 @@
     <div id="outlinerConstraints"></div>
     <h4>surfaces</h4>
     <div id="outlinerSurfaces"></div>
+    <h4>colliders</h4>
+    <div id="outlinerColliders"></div>
   </div>
   <div id="objectPanel">
     <div id="objectPanelTitle"></div>
@@ -130,6 +132,7 @@
     <div id="timeButtons">
       <button id="playPauseBtn">⏸ pause</button>
       <button id="stepOnceBtn">⏭ step</button>
+      <button id="restartBtn">↺ restart</button>
     </div>
     <div id="speedButtons">
       <button data-speed="0.25">0.25x</button>
@@ -379,14 +382,28 @@ function buildColliderGeometry(c) {
 }
 
 function updateColliders(colliders) {
+  latestColliders = colliders;
   // Cheap change-detection signature (kind+shape only - position could move for a moving
   // collider, but nothing does yet, see this section's own doc comment above) so a static
-  // scene's colliders aren't torn down and rebuilt every single frame for no reason.
+  // scene's colliders aren't torn down and rebuilt every single frame for no reason. A removal
+  // always changes colliders.length even when the signature string doesn't (e.g. one wall out
+  // of four identical-shaped ones), so the length check alone still catches it.
   const signature = JSON.stringify(colliders.map((c) => [c.kind, c.radius, c.halfExtents, c.normal, c.renderHalfSize]));
   if (signature === lastColliderSignature && colliderObjects.length === colliders.length) {
     return;
   }
   lastColliderSignature = signature;
+
+  // §10.3's outliner, extended to colliders (name-only - unnamed ones aren't individually
+  // reachable, same convention as every other outliner kind). Gated on the same "did the set
+  // actually change" signature as the wireframe rebuild below, not every frame.
+  renderNameList(outlinerSections.colliders, "colliders", colliders.filter((c) => c.name !== "").map((c) => c.name));
+  if (selectedKind === "colliders" && !colliders.some((c) => c.name === selectedName)) {
+    selectedKind = null; // the selected collider was just removed - close its panel
+    selectedName = null;
+  }
+  updateSelectionHighlight();
+  renderObjectPanel();
 
   while (colliderObjects.length < colliders.length) {
     const obj = new THREE.LineSegments(new THREE.BufferGeometry(), colliderMaterial);
@@ -747,6 +764,15 @@ document.getElementById("stepOnceBtn").addEventListener("click", () => {
   playPauseBtn.textContent = "▶ play";
 });
 
+// §10.3's restart: a SceneControlMessage (not TimeControlMessage - this replaces the scene
+// itself, not just pacing), handled per-demo (currently just ParticleCollisionDebugDemo; a demo
+// that doesn't understand "restart" just ignores it, same "unrecognized types are silently
+// dropped" stance every message type here already takes).
+document.getElementById("restartBtn").addEventListener("click", () => {
+  send({ type: "restart" });
+  resetStats();
+});
+
 document.querySelectorAll("#speedButtons button").forEach((btn) => {
   btn.addEventListener("click", () => {
     send({ type: "set_speed", multiplier: parseFloat(btn.dataset.speed) });
@@ -827,6 +853,7 @@ const outlinerSections = {
   forces: document.getElementById("outlinerForces"),
   constraints: document.getElementById("outlinerConstraints"),
   surfaces: document.getElementById("outlinerSurfaces"),
+  colliders: document.getElementById("outlinerColliders"),
 };
 const objectPanelEl = document.getElementById("objectPanel");
 const objectPanelTitleEl = document.getElementById("objectPanelTitle");
@@ -834,12 +861,13 @@ const objectPanelBodyEl = document.getElementById("objectPanelBody");
 
 let lastRegistrySignature = null;
 let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [] };
-let selectedKind = null; // "groups" | "forces" | "constraints" | "surfaces"
+let selectedKind = null; // "groups" | "forces" | "constraints" | "surfaces" | "colliders"
 let selectedName = null;
 let latestVisibleIds = null; // this frame's server-side dot filter, updated every frame in applyFrame
 let objectPanelInfoEl = null; // the groups panel's live "N drawable" text node, or null otherwise
 let latestById = new Map(); // this frame's particles by id (position + velocity), for §10.3 inspection
 let latestMeshes = []; // this frame's mesh declarations, for a selected surface's inspection readout
+let latestColliders = []; // this frame's colliders, for the outliner's remove action
 let objectPanelInspectEl = null; // the groups/surfaces panel's live numeric-readout text node
 
 // Names of groups/surfaces a person has explicitly unchecked in the per-object panel. Composed
@@ -1018,6 +1046,24 @@ function renderObjectPanel() {
     addNote("no live data available for forces yet (needs a source-tag protocol extension)");
   } else if (selectedKind === "constraints") {
     addNote("no renderer or live data defined for constraints (§10.2)");
+  } else if (selectedKind === "colliders") {
+    const collider = latestColliders.find((c) => c.name === selectedName);
+    const info = document.createElement("div");
+    info.className = "objectInfo";
+    info.textContent = collider ? collider.kind : "";
+    objectPanelBodyEl.appendChild(info);
+    const removeBtn = document.createElement("button");
+    removeBtn.textContent = "remove";
+    removeBtn.addEventListener("click", () => {
+      send({ type: "remove_collider", name: selectedName });
+      // Don't wait for the next frame's collider list to confirm it - close the panel now,
+      // same "assume the click worked" immediacy as every other button on this page.
+      selectedKind = null;
+      selectedName = null;
+      updateSelectionHighlight();
+      renderObjectPanel();
+    });
+    objectPanelBodyEl.appendChild(removeBtn);
   }
   updateInspection(); // populate immediately rather than waiting for the next frame
 }

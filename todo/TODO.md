@@ -1800,6 +1800,52 @@ real prerequisite, not just unstarted — see the note below.
       stepping *feels* right in a real browser is for a human to confirm
       — same standing caveat as every other client-side piece of this
       phase. Not wired into any demo besides `FlagDebugDemo`.
+- [x] Removable colliders + scene restart from the viewer (§10.3, new
+      requirement) — a third kind of viewer-to-engine input,
+      `SceneControlMessage` (`remove_collider`/`restart`), alongside
+      `DragMessage` (per-particle input) and `TimeControlMessage`
+      (playback pacing): this one mutates the *scene* itself. Requested
+      directly by the user after trying `ParticleCollisionDebugDemo`
+      (Phase 5) — "I'd like the ability to remove the walls and to
+      restart the simulation from within the viewer," a natural follow-on
+      to a demo whose whole premise (walls containing a ball pile) begs
+      "what does it do without them?"
+      The outliner gained a fifth section, COLLIDERS, listing every named
+      `Collider` from the existing wire-protocol section (§10.2's earlier
+      collider-wireframe work) with a per-item "remove" action in its
+      object panel — clicking it sends `remove_collider` and closes the
+      panel optimistically, same immediacy as every other button on this
+      page. A new "↺ restart" button sits next to pause/step.
+      `SceneControlMessageQueue` mirrors `DragMessageQueue` exactly and
+      for the same reason: both a restart and a collider removal mutate
+      state (`ParticleStore`, `Groups`, the live collider list) that the
+      physics loop's own thread is concurrently reading mid-step, so
+      applying either directly from `DebugServer`'s WebSocket I/O thread
+      would be a real race — messages are queued and only drained/applied
+      once per step, on the physics thread. `ParticleCollisionDebugDemo`
+      tracks a canonical (never-mutated) full collider+rule set and a
+      live, mutable one; removal filters the live set and rebuilds
+      `CollisionSystem` from it (cheap - it holds no expensive
+      precomputed state); restart resets the live set back to the
+      canonical one *and* replaces `store`/`groups` wholesale with fresh
+      instances (old particle ids are meaningless after a restart, not
+      reused) and re-seeds the spawn RNG so a restart reproduces the
+      exact same run, not a continuation of wherever the random stream
+      happened to be.
+      4 new `SceneControlMessageTest` parser cases. Verified directly in
+      a real Chrome browser (now connected for this session): removed
+      all four walls one at a time via the outliner, watching each
+      disappear from both the wireframe and the list immediately, then
+      watched the pile — already at rest under friction — stay
+      completely still with nothing containing it anymore (a nice
+      incidental confirmation friction is doing real work, not just
+      looking settled); then clicked restart and confirmed the scene
+      came back at `t=0`/`step=0` with all 5 colliders restored and balls
+      spawning fresh from the top. Scoped to `ParticleCollisionDebugDemo`
+      only, matching Phase 10's established "prove on one demo before
+      wider rollout" pattern (`TimeControl` did the same before spreading
+      further) — no other demo currently has removable colliders or a
+      restart affordance.
 - [ ] `[stretch]` Live parameter tweaking (viewer writes back into a
       running force/constraint's numeric parameters) — deliberately kept
       out of this phase's main scope; needs generalizing §9.4's
