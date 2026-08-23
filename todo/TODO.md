@@ -356,25 +356,73 @@ items below for exactly what's deferred and why.
       idealization doesn't match the fixture" are both worth checking
       before assuming which one is at fault.
 - [ ] Shared spatial partitioning (sized to collision granularity) — its
-      first real consumer, not the general execution engine (§9.3).
-      Deferred: a single ball against one plane collider needs no broad
-      phase at all; building one before a scenario has enough
-      particles/colliders to need it would be optimizing blind. Second
-      pass, alongside particle-vs-particle collision below.
-- [ ] Particle-vs-particle collision (§12.4/§12.5, the two-body case) —
-      deferred to the second pass along with the spatial index above (an
-      all-pairs particle-vs-particle check has the same "needs enough
-      particles to matter" problem broad phase does). This is also where
-      "constrained particles behave as infinite mass in collision
-      response" (§12.5) actually needs implementing — the two-body impulse
-      formula has to substitute infinite mass for a `FixedPosition`/
-      `FixedVelocity` particle's real mass, which particle-vs-collider
-      response never has to do.
-- [ ] Collision groups & filtering beyond a single rule's group/collider
-      pairing (§12.3) — deferred alongside particle-vs-particle collision,
-      since group-vs-group filtering is primarily about *that* case
-      (which pairs of groups collide with each other), not particle-vs-
-      collider (already filtered by which rule references which collider).
+      first real consumer, not the general execution engine (§9.3). Still
+      deferred even after particle-vs-particle collision landed below:
+      that system brute-forces its candidate pairs (same call already made
+      for `SurfaceCollisionSystem`), and nothing built so far has enough
+      particles/colliders at once to actually need a broad phase. Revisit
+      once a scenario's particle count makes O(n²) pairwise checks the
+      actual bottleneck, not before.
+- [x] Particle-vs-particle collision (§12.4/§12.5, the two-body case) —
+      `particlesim.collision.ParticleCollisionRule`/`ParticleCollisionSystem`.
+      Brute-force over each rule's candidate pairs (same "no spatial index
+      until a scenario needs one" call as `SurfaceCollisionSystem`) — the
+      same-group case (`groupB` defaults to `groupA`, e.g. "debris with
+      each other") uses the triangular `i<j` pairing `NBodyGravity` already
+      established to avoid double-counting; a cross-group rule assumes the
+      two groups are disjoint (documented, and pinned by a test showing
+      the actual behavior when they overlap, rather than left silently
+      unhandled). Real two-body impulse (`J = deltaRelVel/(invMassA +
+      invMassB)`), reusing the same restitution/asymmetric-damping/
+      rest-clamp formulas as `ParticleColliderRule`/`SurfaceCollisionSystem`.
+      **"Constrained particles behave as infinite mass in collision
+      response" (§12.5) is now implemented**, not just noted as
+      outstanding: `Constraint` gained `pinnedIds(groups): Set<Int>`
+      (default empty), overridden by `FixedPosition`/`FixedVelocity`/
+      `DragConstraint`; `ParticleCollisionSystem.resolve` takes the step's
+      live `constraints` list specifically to compute this, zeroing a
+      pinned particle's inverse mass so it affects what it collides with
+      but is never itself moved — verified by a test asserting a pinned
+      particle's position/velocity are bit-identical before and after, and
+      the free particle it hits bounces exactly like it hit an immovable
+      wall. 13 new tests (`ParticleCollisionSystemTest`): elastic
+      velocity-swap, tangential-untouched, compression damping, the
+      rest-clamp's *relative*-velocity-not-either-particle's-own subtlety
+      (same lesson `SurfaceCollisionSystemTest` already learned), the
+      pinned-particle case, both-sides-pinned (no divide-by-zero),
+      self-collision within one group, cross-group filtering, the
+      documented overlapping-groups behavior, and two §15.1 analytic
+      checks — momentum conservation (any restitution/damping) and, for a
+      perfectly elastic/undamped unequal-mass case, kinetic energy
+      conservation to 1e-9, the discriminating check that would catch a
+      wrong `invMassSum` or a non-unit normal that the momentum test alone
+      cannot.
+      Demo: `ParticleCollisionDebugDemoKt` / `./gradlew
+      runParticleCollisionDemo` — balls dropped one at a time (not all at
+      once) into a four-walled pen, piling up on the floor. Getting the
+      demo to actually look right (not just pass unit tests) took real
+      iteration, documented in the demo's own doc comment: dropping all 18
+      balls simultaneously from a packed stack caused deep, simultaneous
+      multi-body overlaps that this project's single-pass-per-step
+      resolution (§12.4's deliberately "simplest to implement" discrete
+      detection, not an iterative solver) doesn't fully untangle in one
+      pass, and with floor/ball friction still `[stretch]`, any resulting
+      horizontal drift never decays — confirmed live via a disposable
+      WebSocket script watching balls end up hundreds of meters out at a
+      constant speed. Staggering the spawn reduced but didn't eliminate
+      this (a new ball landing on a settled pile still nudges neighbors
+      sideways with nothing to damp it), so four wall colliders pen the
+      pile in — containing the demo rather than papering over a math bug,
+      since every pairwise formula was independently verified correct.
+      Final live check: 18 balls settled to the correct resting height
+      (0.14996, matching radius 0.15) with speeds around 0.03-0.15 m/s and
+      trending down, all within the walls.
+- [x] Collision groups & filtering beyond a single rule's group/collider
+      pairing (§12.3) — landed as part of the item above:
+      `ParticleCollisionRule(groupA, groupB)` *is* the group-vs-group
+      filtering mechanism (a rule declares exactly which two groups check
+      against each other, same selector reuse as forces/constraints), not
+      a separate feature built on top of it.
 
 ## Phase 6 — Particle lifecycle
 - [x] Emitters: rate + uniform-box/sphere/point-spread distributions,

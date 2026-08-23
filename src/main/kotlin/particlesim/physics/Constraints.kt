@@ -22,6 +22,13 @@ interface Constraint {
 
     fun applyVelocity(store: ParticleStore, groups: Groups, t: Double) {}
     fun applyPosition(store: ParticleStore, groups: Groups, t: Double) {}
+
+    /** Particle ids this constraint pins as of this step — used by particle-vs-particle
+     * collision response (§12.5) to treat a constrained particle as infinite mass, the same
+     * way a static [particlesim.collision.Collider] already is: it affects what it collides
+     * with but is never itself moved by a collision. Empty by default; only a constraint that
+     * actually pins position or velocity needs to override it. */
+    fun pinnedIds(groups: Groups): Set<Int> = emptySet()
 }
 
 /**
@@ -46,6 +53,8 @@ class FixedPosition private constructor(
         }
     }
 
+    override fun pinnedIds(groups: Groups): Set<Int> = groups.membersOf(group)
+
     companion object {
         /** Pins every current member of [group] to wherever it is right now, individually. */
         fun atCurrentPositions(group: String, store: ParticleStore, groups: Groups, name: String? = null): FixedPosition =
@@ -64,6 +73,8 @@ class FixedVelocity(
             store.setVelocity(id, velocity)
         }
     }
+
+    override fun pinnedIds(groups: Groups): Set<Int> = groups.membersOf(group)
 }
 
 /**
@@ -107,6 +118,8 @@ class DragConstraint(val particleId: Int, initialTarget: Vector3) : Constraint {
         store.setPosition(particleId, currentTarget)
         store.setVelocity(particleId, Vector3.ZERO)
     }
+
+    override fun pinnedIds(groups: Groups): Set<Int> = setOf(particleId)
 
     /** Call on release, before removing this constraint from the active list, so letting go
      * while moving imparts a natural throw instead of a dead stop (§9.4). Zero if the target
