@@ -14,6 +14,9 @@ import particlesim.physics.Force
 import particlesim.physics.Integrator
 import particlesim.physics.Spring
 import particlesim.physics.UniformGravity
+import particlesim.render.ColorBy
+import particlesim.render.LineRenderer
+import particlesim.render.LineRendering
 
 /**
  * §9.4's interactive drag worked example: the same spring-chain scenario as the default `run`
@@ -54,6 +57,27 @@ import particlesim.physics.UniformGravity
  * second, deliberately-triggered destroy consumer alongside [SparksDebugDemo]'s continuous one,
  * proving the channel isn't specific to *how* a particle died.
  *
+ * **Breakable structural springs** (§5.4), the first live demo to actually exercise it — every
+ * prior chance (`buildFlag`'s structural springs) left `breakThreshold` at its infinite default
+ * after reverted attempts elsewhere in this project ran into ringing/overshoot from sub-critical
+ * damping falsely tripping the threshold (see [particlesim.debug.FlagDebugDemo]'s own doc
+ * comment). This chain's damping is already tuned *above* critical (see above), so a sudden
+ * drag reposition doesn't ring the same way — the risk that sank the earlier attempt doesn't
+ * apply here. Each [Spring] is individually named (`"link-0"`, `"link-1"`, ...) and colored by
+ * [ColorBy.BREAK_PROXIMITY] (blue at rest, shading toward orange as its stretch approaches
+ * [springBreakThreshold]) — §10.2's break-proximity line renderer, defined and unit-tested since
+ * Phase 9 but never actually driven by a live demo until now. Dragging a link far enough from
+ * its neighbor snaps that one spring **and** its paired [Damper] (same cleanup as interactive
+ * delete's `danglingForces` — a spring's rest-length spec and its damper are one physical
+ * connection, so both go or neither does), splitting the chain into two independently-falling
+ * pieces without breaking anything else. Emits a [SimEvent.ForceBreak] naming the snapped
+ * spring into §9.1's discrete-event channel — the first live consumer of that variant (spawn/
+ * destroy already had `SparksDebugDemo`/this file's own delete path; break never had one).
+ * `Integrator.step`'s returned `StepResult.brokenForces` is captured and its forces actually
+ * removed from the active list here — a real, separate gap this closes: no demo before this one
+ * ever captured that return value at all, so §5.4's "the caller must drop a broken force from
+ * its list" contract had never actually been discharged anywhere, only unit-tested.
+ *
  * Playback controls (pause/speed/step-once) via [ViewerInput], which also bundles the drag and
  * scene-control queues this demo actually uses — see that class's own doc comment for why every
  * debug demo shares one of these now instead of each hand-rolling its own `onTextMessage`. The
@@ -69,10 +93,28 @@ fun main() {
     val mass = 0.2
     val stiffness = 80.0
     val damping = 12.0 // above critical (2*sqrt(stiffness*mass) ~= 8.0) for the spring/damper pairs
+    // Chosen empirically (live in Chrome, not derived): loose enough that the chain's own resting
+    // sag under gravity - which, near the anchor, must support every link below it - never gets
+    // close, tight enough that a deliberate drag reaches it in a couple of visible seconds rather
+    // than requiring the link be dragged off-screen.
+    val springBreakThreshold = 0.5
     val drag = Drag("chain", coefficient = 1.5) // damps bulk/pendulum-style motion Damper can't reach; a
     // group-targeted force needs no rebuilding on restart, unlike everything below that holds
     // particle ids directly.
     val destruction = DestructionSystem() // stateless (just triggers/rules) - reused across restarts
+
+    // One spring + one damper per adjacent pair, index-aligned (same pair at the same index in
+    // both lists) so a broken spring's index tells us exactly which damper is now dangling too -
+    // see the break-handling below. Each spring is individually named so a ForceBreak event can
+    // say *which* link snapped, not just that something did.
+    fun buildChain(chainIds: List<Int>): Pair<List<Spring>, List<Damper>> {
+        val pairs = chainIds.zipWithNext()
+        val springs = pairs.mapIndexed { i, (a, b) ->
+            Spring(a, b, restLength = spacing, stiffness = stiffness, breakThreshold = springBreakThreshold, name = "link-$i")
+        }
+        val dampers = pairs.map { (a, b) -> Damper(a, b, damping = damping) }
+        return springs to dampers
+    }
 
     // Everything below is rebuilt wholesale on restart - grouped as `var`s (not `val`s) for
     // exactly that reason, all reassigned together in one place rather than mutated piecemeal
@@ -86,8 +128,7 @@ fun main() {
     groups.add("anchor", anchorId)
     groups.add("chain", anchorId)
     ids.drop(1).forEach { groups.add("chain", it) }
-    var springs = ids.zipWithNext { a, b -> Spring(a, b, restLength = spacing, stiffness = stiffness) }
-    var dampers = ids.zipWithNext { a, b -> Damper(a, b, damping = damping) }
+    var (springs, dampers) = buildChain(ids)
     var forces: List<Force> = listOf(UniformGravity("chain", Vector3(0.0, -9.8, 0.0)), drag) + springs + dampers
     var fixedConstraints = listOf(FixedPosition("anchor", store.position(anchorId)))
 
@@ -138,8 +179,9 @@ fun main() {
                     groups.add("anchor", anchorId)
                     groups.add("chain", anchorId)
                     ids.drop(1).forEach { groups.add("chain", it) }
-                    springs = ids.zipWithNext { a, b -> Spring(a, b, restLength = spacing, stiffness = stiffness) }
-                    dampers = ids.zipWithNext { a, b -> Damper(a, b, damping = damping) }
+                    val (rebuiltSprings, rebuiltDampers) = buildChain(ids)
+                    springs = rebuiltSprings
+                    dampers = rebuiltDampers
                     forces = listOf(UniformGravity("chain", Vector3(0.0, -9.8, 0.0)), drag) + springs + dampers
                     fixedConstraints = listOf(FixedPosition("anchor", store.position(anchorId)))
                     activeDrag = null
@@ -173,11 +215,35 @@ fun main() {
                 }
             }
             val constraints: List<Constraint> = activeDrag?.let { fixedConstraints + it } ?: fixedConstraints
-            integrator.step(store, groups, forces, constraints, t, dt)
+            // §5.4's break check is once-per-physics-step, not once-per-frame - checked and
+            // handled here (inside the repeat loop), not after it, so a spring that snaps on,
+            // say, this frame's 3rd of 16 steps stops contributing force for the remaining 13
+            // rather than a stale reference lingering until the next broadcast.
+            val result = integrator.step(store, groups, forces, constraints, t, dt)
+            val brokenSprings = result.brokenForces.filterIsInstance<Spring>()
+            if (brokenSprings.isNotEmpty()) {
+                // Index-aligned with dampers (see buildChain) - a broken spring's index is
+                // exactly its paired damper's index, the same "one physical connection, both
+                // forces go together" reasoning DeleteParticle's danglingForces already applies.
+                val brokenIndices = springs.withIndex().filter { it.value in brokenSprings }.map { it.index }.toSet()
+                val danglingDampers = brokenIndices.map { dampers[it] }.toSet()
+                val brokenSet = brokenSprings.toSet()
+                forces = forces.filter { it !in brokenSet && it !in danglingDampers }
+                springs = springs.filterIndexed { i, _ -> i !in brokenIndices }
+                dampers = dampers.filterIndexed { i, _ -> i !in brokenIndices }
+                for (spring in brokenSprings) events += SimEvent.ForceBreak(spring.name ?: "")
+            }
             t += dt
             step++
         }
-        renderer.broadcast(t, step, store, ids, springs.map { it.particleA to it.particleB }, events = events)
+        // Break-proximity coloring (§10.2): blue at rest, shading to orange as a spring's
+        // current stretch approaches springBreakThreshold - the first live demo to actually
+        // drive this renderer (see this file's own doc comment). colorFor's only null case is
+        // colorBy=NONE, which this never uses, so the assertion is safe.
+        val lineColors = springs.associate { spring ->
+            (spring.particleA to spring.particleB) to LineRendering.colorFor(LineRenderer(spring, ColorBy.BREAK_PROXIMITY), store)!!
+        }
+        renderer.broadcast(t, step, store, ids, springs.map { it.particleA to it.particleB }, lineColors = lineColors, events = events)
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)
     }

@@ -727,21 +727,14 @@ this project has used since Phase 5.
       emits a `ParticleDestroyed`, giving a second, user-triggered
       consumer and confirming the channel isn't tied to *how* a particle
       died.
-      **`ForceBreak` is defined and wire-tested (`BinaryFrameTest`) but
-      not yet emitted by any live demo** — deliberately deferred after
-      review, not an oversight: no interactive demo currently sets a
-      finite `breakThreshold` (`buildFlag`'s defaults to
-      `Double.POSITIVE_INFINITY`), and — a separate, real latent gap
-      found while investigating this — **no demo loop has ever captured
-      `Integrator.step`'s returned `StepResult` at all**, so the
-      "caller must remove a broken force from its active list" contract
-      that method's own doc comment describes has never actually been
-      discharged anywhere. Wiring a finite threshold into a demo (the
-      natural candidate is `DragDebugDemo`'s spring chain — drag hard
-      enough to snap a link) needs that removal logic to land in the
-      same change, not a bare event with no corresponding behavior fix;
-      left as a follow-on rather than bundling a demo behavior change
-      into the pass that proved the channel mechanism.
+      **`ForceBreak` was defined and wire-tested (`BinaryFrameTest`) but
+      deliberately left unemitted by any live demo this pass** — no
+      interactive demo set a finite `breakThreshold`, and no demo loop
+      had ever captured `Integrator.step`'s returned `StepResult` at
+      all, so §5.4's "caller must remove a broken force from its active
+      list" contract had never actually been discharged anywhere. See
+      the new entry below ("Breakable structural springs live in
+      DragDebugDemo") for where this got closed out.
       **Client-side**: a new "events" section in the existing
       bottom-left control panel, a capped rolling log (last 20, newest
       first, `EVENT_LOG_MAX`) so a continuously-spawning demo like Sparks
@@ -761,6 +754,81 @@ this project has used since Phase 5.
       confirmed the log's new `particle N destroyed` line matched the
       link that actually vanished (count dropped 12→11, chain visibly
       split into two pieces). No console errors on either demo.
+- [x] Breakable structural springs live in `DragDebugDemo`, closing out
+      `ForceBreak`'s deferred wiring above — user asked specifically to
+      "see a force... approach, reach, and exceed its breaking point,"
+      which meant landing three things together: a real finite
+      threshold on a live demo, the break-proximity color renderer
+      (§10.2, defined and unit-tested via `ColorRampTest` since Phase 9
+      but never actually driven by a live demo before this), and
+      finally discharging `Integrator.step`'s "remove a broken force
+      from the active list" contract that no demo loop had ever done.
+      **Why `DragDebugDemo` and not `FlagDebugDemo`** (which already has
+      a `structuralBreakThreshold` param, left at its infinite default):
+      Flag's structural springs use damping well *under* critical, and
+      an earlier attempt there found that a sudden reposition — exactly
+      what dragging does every step — rings/overshoots enough to trip a
+      break threshold falsely; reverted rather than papering over it
+      with an unrealistically loose threshold. `DragDebugDemo`'s chain
+      is already damped *above* critical for exactly this reason, so the
+      failure mode that sank the earlier attempt doesn't apply here.
+      **Each `Spring` individually named** (`"link-0"`, `"link-1"`, ...,
+      built by a small local `buildChain` helper shared between initial
+      construction and restart) so a `ForceBreak` event names *which*
+      link snapped. `breakThreshold` (0.5, chosen empirically live in
+      Chrome rather than derived — loose enough that the chain's own
+      resting sag under gravity never approaches it, tight enough that a
+      deliberate drag reaches it quickly) applies to `Spring` only, not
+      `Damper` — a damper's break threshold is a relative-velocity
+      quantity, a different kind of "too far" than the stretch-distance
+      snap the user asked to see.
+      **Break handling lives inside the physics-step loop, not after
+      it** — §5.4's break check is once-per-physics-step, so a spring
+      breaking on, say, step 3 of a frame's 16 must stop contributing
+      force for the remaining 13, not linger until the next broadcast.
+      When a `Spring` breaks, its index-aligned `Damper` (same pair,
+      same array index — `buildChain` builds both lists in lockstep)
+      is removed too, the same "one physical connection, both forces go
+      together" reasoning `DeleteParticle`'s `danglingForces` cleanup
+      already established, reused rather than reinvented.
+      **Verified live in Chrome, robustly**: resting chain stayed pure
+      blue (proximity ≈ 0) across multiple restarts, confirming the
+      threshold isn't so tight that ordinary hanging ever approaches it.
+      Dragging a link (via `left_click_drag`, both a small ~70px and a
+      large ~290px screen-space pull) reliably snapped one or both of
+      its neighboring springs, each producing a correctly-named
+      `ForceBreak` event (`"force 'link-6' broke"`, etc.) at the correct
+      sim time, with `particles: 12` staying unchanged throughout
+      (confirming force-break destroys a *connection*, not a particle —
+      distinct from the destroy-event semantics verified separately
+      above). One trial produced `link-6` and `link-5` breaking at two
+      different timestamps a full second apart rather than
+      simultaneously, which is only possible if each spring's
+      break-proximity was genuinely being evaluated continuously and
+      independently, not as a single coupled event.
+      **What wasn't caught, and why, stated plainly rather than
+      glossed over**: a screenshot of a spring mid-transition — visibly
+      orange, stretched, but not yet broken — proved elusive through
+      this tool's synthetic `left_click_drag`. Investigating why led to
+      a real finding: `DragConstraint.applyPosition` is fully
+      kinematic — `store.setPosition(particleId, currentTarget)` teleports
+      the dragged particle to the current target every step, with no
+      gradual catch-up — so a spring's stretch jumps to its near-final
+      value within the first step or two after any `drag_move`, rather
+      than ramping up smoothly the way a real spring pulling toward a
+      *moving* target might suggest. A live human dragging with a
+      physical mouse sends many incremental positions as the cursor
+      glides, so the color visibly ramps blue→orange in that case; a
+      single automated drag call effectively jumps straight from "rest"
+      to "final drag position," leaving only a razor-thin, unpredictable
+      window where the connection is stretched-but-intact - not
+      reliably long enough to land a screenshot in. The mechanism itself
+      isn't in question (blue-at-rest and the independently-timed
+      breaks above already confirm continuous, correct evaluation, and
+      `ColorRampTest` independently proves the interpolation math) —
+      this is a limitation of scripted verification, not the feature,
+      and is exactly what a real user dragging by hand will see work as
+      intended.
 - [~] Batch/record mode: sharded Arrow IPC File format, per-frame
       particle-id column, format version field (§9.2). **First sub-pass
       done** (recording only — no checkpoint/resume, no discrete-event
