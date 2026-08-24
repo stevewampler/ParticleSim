@@ -166,7 +166,7 @@ reasoning):
 - [x] Debug-render override in the web viewer (`--render-all`): every
       particle as a dot, every pairwise force as a line, every collider as
       wireframe, ignoring the (not-yet-built) opt-in renderer declarations
-      (§10.2) — `src/main/resources/particlesim/debug-viewer.html`
+      (§10.2) — `src/main/resources/particlesim/viewer.html`
       (three.js via CDN import map), served over `http://localhost` by
       `ViewerHttpServer` (JDK's built-in `HttpServer`, no dependency) —
       not `file://`, which blocks ES module `<script>` tags in Chrome.
@@ -1200,7 +1200,7 @@ this project has used since Phase 5.
       particle wouldn't demonstrate that at all. Picking/raycasting and
       the drag-plane projection (through the picked point, facing the
       camera — the standard way to turn a 2D mouse position into a 3D
-      target) are added to `debug-viewer.html`, resolved entirely
+      target) are added to `viewer.html`, resolved entirely
       client-side per §9.4 ("the engine doesn't need to know about
       cameras or screen coordinates").
       **Verification**: Chrome browser automation wasn't available in
@@ -1257,7 +1257,7 @@ this project has used since Phase 5.
       `DebugFrame`/`DebugRenderer` gained an optional `camera: CameraPose?`
       parameter — `null` (the default) omits the JSON field entirely, so
       every pre-existing demo (ball-bounce, sparks, the plain spring-chain,
-      drag) needed zero changes. `debug-viewer.html` applies the camera
+      drag) needed zero changes. `viewer.html` applies the camera
       pose when the field is present and otherwise leaves its static
       default camera untouched.
       **Worked example**: `FlagDebugDemo` now scripts a camera orbiting
@@ -1362,7 +1362,7 @@ this project has used since Phase 5.
       and a smoothly-changing camera pose matching the flag demo's known
       shape, not just a self-consistent encode/decode round-trip in
       isolation.
-      **Client (`debug-viewer.html`)**: `ws.binaryType = "arraybuffer"`
+      **Client (`viewer.html`)**: `ws.binaryType = "arraybuffer"`
       plus a hand-written `decodeFrame` mirroring `BinaryFrame`'s layout
       exactly via `DataView` (little-endian) — this half is **unverified
       by anything other than careful transliteration**, since it can
@@ -1414,7 +1414,7 @@ this project has used since Phase 5.
       every other existing demo needed zero changes (empty map is the
       default). `DebugRenderer.broadcast` threads `lineColors` through
       the same way.
-      **Client**: `debug-viewer.html`'s line material switched to
+      **Client**: `viewer.html`'s line material switched to
       `vertexColors: true` with a parallel color `BufferAttribute`
       alongside position; `decodeFrame` reads the 3 extra `f64`s per
       connection. Unverified beyond careful transliteration, same
@@ -1469,7 +1469,7 @@ this project has used since Phase 5.
       invisible as dots, the viewer's raycaster now also intersects
       surface mesh objects, resolving a mesh-face hit to whichever of
       its three vertex particles is nearest the click point
-      (`pickParticle` in `debug-viewer.html`, using the raycast hit's own
+      (`pickParticle` in `viewer.html`, using the raycast hit's own
       local face-vertex indices paired positionally with the triangle's
       recorded particle ids — not a search/guess). Mesh geometry itself
       is built with *shared* (indexed) vertices per unique particle id,
@@ -1539,7 +1539,7 @@ Chrome automation wasn't available to this session):
 
 First sub-pass landed: the three viewer-local pieces that need zero wire-
 protocol change and no new engine-side naming/identity concept, all in
-`debug-viewer.html`. Everything past this point (outliner, per-object
+`viewer.html`. Everything past this point (outliner, per-object
 panels, right-click, selection/inspection, color legend) is blocked on a
 real prerequisite, not just unstarted — see the note below.
 
@@ -1568,7 +1568,7 @@ real prerequisite, not just unstarted — see the note below.
       still scripted would just get overwritten by the very next frame,
       a trap that's easy to hit by testing only from manual mode.
 - [x] **Dev-loop fix, not spec'd but needed to build the above sanely**:
-      `ViewerHttpServer` cached `debug-viewer.html`'s bytes once at
+      `ViewerHttpServer` cached `viewer.html`'s bytes once at
       construction; changed to re-read from the classpath per request.
       A demo process runs for minutes while the HTML itself gets
       iterated on many times, and re-reading means `./gradlew
@@ -1645,7 +1645,7 @@ real prerequisite, not just unstarted — see the note below.
       `Groups` has no way to enumerate *all* group names (only look up a
       specific one) — both real gaps for a complete outliner, neither
       blocking what forces/surfaces needed. Nothing here touches
-      `BinaryFrame`'s wire layout or `debug-viewer.html` — transmitting
+      `BinaryFrame`'s wire layout or `viewer.html` — transmitting
       the registry and actually building outliner UI is the next
       sub-pass, not bundled into this one.
 - [x] **Prerequisite closed, second half**: `Constraint` gained a `name`
@@ -1727,7 +1727,7 @@ real prerequisite, not just unstarted — see the note below.
       **`FlagDebugDemo` is the real (not hypothetical) consumer**: builds
       a `SceneRegistry` from `scenario.forces/constraints/surface/groups`
       and passes it to `broadcast`.
-      **Viewer**: `debug-viewer.html`'s `decodeFrame` gained `readString`/
+      **Viewer**: `viewer.html`'s `decodeFrame` gained `readString`/
       `readNameList` (via `TextDecoder`, mirroring `BinaryFrame.decode`
       exactly) and a new `#outliner` panel (top-left) listing all four
       kinds under labeled sections — read-only, no per-object panels/
@@ -1892,7 +1892,7 @@ real prerequisite, not just unstarted — see the note below.
       **Verified**: the usual no-browser fallback (`node --check`,
       `getElementById` cross-check, live `curl` confirming the handler
       and `surfaceName` tagging are served) plus the full Kotlin suite
-      staying green (262 — this change touches only `debug-viewer.html`,
+      staying green (262 — this change touches only `viewer.html`,
       no engine code). Whether right-clicking actually opens the correct
       panel in a real browser is for the human tester to confirm, same
       standing caveat as every other piece of this phase's client-side
@@ -1955,7 +1955,7 @@ real prerequisite, not just unstarted — see the note below.
       carry a resolved `r,g,b` per connection, so "is a gradient active"
       is detected purely client-side: any connection whose color isn't
       exactly `Color.DEFAULT_LINE`'s RGB (`isDefaultLineColor` in
-      `debug-viewer.html`, mirroring the Kotlin constant's exact values).
+      `viewer.html`, mirroring the Kotlin constant's exact values).
       **A real, explicitly-flagged limitation**: this heuristic is sound
       *today* only because exactly one `colorBy` variant exists
       (`BREAK_PROXIMITY`) — the wire carries no per-connection tag saying

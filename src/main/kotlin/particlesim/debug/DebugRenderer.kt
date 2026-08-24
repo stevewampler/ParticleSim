@@ -29,7 +29,7 @@ class DebugRenderer(
     fun start() {
         wsServer.start()
         httpServer.start()
-        println("debug viewer: http://localhost:$httpPort  (state stream: ws://localhost:$webSocketPort)")
+        println("viewer: http://localhost:$httpPort  (state stream: ws://localhost:$webSocketPort)")
     }
 
     fun broadcast(

@@ -37,7 +37,7 @@ import kotlin.math.sin
  * mesh-only: only the pole group is in it, so cloth particles carry position data (for the
  * mesh's vertices and the structural lines) without ever drawing their own dot. Picking still
  * works on mesh-only particles — the viewer's raycaster hits mesh faces too, resolving to
- * whichever vertex is nearest the hit point (see debug-viewer.html's `pickParticle`).
+ * whichever vertex is nearest the hit point (see viewer.html's `pickParticle`).
  *
  * **No `breakProximity`-colored structural springs here**, unlike an earlier version of this
  * demo — tried and reverted. `MeshSprings`' structural damping (1.0, well under critical for

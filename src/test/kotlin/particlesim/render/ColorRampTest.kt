@@ -30,7 +30,7 @@ class ColorRampTest {
     fun `no point on the gradient coincides with the default uncolored line color`() {
         // §10.3's viewer-side color legend has no explicit per-connection tag saying "this color
         // came from a colorBy" - it detects activity purely by checking whether a connection's
-        // color differs from Color.DEFAULT_LINE (debug-viewer.html's isDefaultLineColor). That
+        // color differs from Color.DEFAULT_LINE (viewer.html's isDefaultLineColor). That
         // heuristic silently breaks if any point on this gradient ever equals DEFAULT_LINE - a
         // breakProximity-colored connection would then look indistinguishable from an uncolored
         // one and the legend would never show. Sampled points, not a proof of every interior t -
