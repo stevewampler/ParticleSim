@@ -282,6 +282,71 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `a collider's name and active flag round-trip in the registry, regardless of the wireframe list`() {
+        val store = ParticleStore()
+        val floor = PlaneCollider(VectorExpr.of(Vector3.ZERO), normal = Vector3(0.0, 1.0, 0.0), name = "floor")
+        floor.active = false
+        val registry = SceneRegistry.build(colliders = listOf(floor))
+
+        // The wireframe list is what a caller like DebugRenderer.broadcast would already have
+        // filtered to active-only - the registry section must still carry "floor" regardless.
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(),
+            registry = registry, colliders = emptyList(),
+        )
+        val decoded = BinaryFrame.decode(buffer).registry
+
+        assertEquals(listOf(DecodedColliderEntry("floor", active = false)), decoded.colliders)
+    }
+
+    @Test
+    fun `group enabled state round-trips in the registry, defaulting to true`() {
+        val store = ParticleStore()
+        val groups = Groups().apply { add("a", 1); add("b", 2) }
+        groups.setEnabled("b", false)
+        val registry = SceneRegistry.build(groups = groups)
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), registry = registry,
+        )
+        val decoded = BinaryFrame.decode(buffer).registry
+
+        assertEquals(mapOf("a" to true, "b" to false), decoded.groupEnabled)
+    }
+
+    @Test
+    fun `an EditableFields force's current values round-trip as a flat field-entry list`() {
+        val store = ParticleStore()
+        val gravity = UniformGravity("g", Vector3(0.0, -9.8, 0.0), name = "gravity")
+        val fixedVelocity = particlesim.physics.FixedVelocity("g", Vector3(1.0, 0.0, 0.0), name = "wind-hold")
+        val registry = SceneRegistry.build(forces = listOf(gravity), constraints = listOf(fixedVelocity))
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), registry = registry,
+        )
+        val decoded = BinaryFrame.decode(buffer).registry
+
+        assertEquals(
+            setOf(
+                DecodedFieldEntry("force", "gravity", "acceleration", particlesim.physics.FieldValue.Vector(Vector3(0.0, -9.8, 0.0))),
+                DecodedFieldEntry("constraint", "wind-hold", "velocity", particlesim.physics.FieldValue.Vector(Vector3(1.0, 0.0, 0.0))),
+            ),
+            decoded.fields.toSet(),
+        )
+    }
+
+    @Test
+    fun `a force with no EditableFields contributes nothing to the field-entry list`() {
+        val store = ParticleStore()
+        val registry = SceneRegistry.build(forces = listOf(particlesim.physics.Drag("g", coefficient = 1.0, name = "drag")))
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), registry = registry,
+        )
+        assertEquals(emptyList(), BinaryFrame.decode(buffer).registry.fields)
+    }
+
+    @Test
     fun `round-trips a plane collider with its render half-size`() {
         val store = ParticleStore()
         val floor = PlaneCollider(VectorExpr.of(Vector3(0.0, 1.0, 0.0)), normal = Vector3(0.0, 1.0, 0.0), name = "floor")

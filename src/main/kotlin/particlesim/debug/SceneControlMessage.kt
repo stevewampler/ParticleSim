@@ -2,6 +2,7 @@ package particlesim.debug
 
 import org.yaml.snakeyaml.Yaml
 import org.yaml.snakeyaml.error.YAMLException
+import particlesim.core.Vector3
 
 /**
  * Viewer → engine scene-mutation input — a third kind of message on the same bidirectional
@@ -34,6 +35,15 @@ sealed interface SceneControlMessage {
      * choose to respect it — see `Groups.isEnabled`/`setEnabled`. */
     data class SetGroupEnabled(val name: String, val enabled: Boolean) : SceneControlMessage
 
+    /** §10.4's numeric field editing write path — [kind] is `"force"` or `"constraint"`,
+     * matching [particlesim.debug.DecodedFieldEntry.kind] on the read side. Two message types
+     * (scalar vs. vector), not one carrying a variant payload, because SnakeYAML/JSON has no
+     * cheap way to express "this field is either a bare number or an {x,y,z} object" other than
+     * checking which keys showed up — simpler to just let the client pick the right message
+     * shape for the field it's editing. */
+    data class SetScalarField(val kind: String, val name: String, val field: String, val value: Double) : SceneControlMessage
+    data class SetVectorField(val kind: String, val name: String, val field: String, val value: Vector3) : SceneControlMessage
+
     companion object {
         /** Returns `null` for anything malformed or unrecognized, same "ignore, don't tear down
          * the connection" stance as [DragMessage.parse]/[TimeControlMessage.parse]. */
@@ -59,8 +69,29 @@ sealed interface SceneControlMessage {
                     val enabled = data["enabled"] as? Boolean ?: return null
                     SetGroupEnabled(name, enabled)
                 }
+                "set_scalar_field" -> {
+                    val kind = data["kind"] as? String ?: return null
+                    val name = data["name"] as? String ?: return null
+                    val field = data["field"] as? String ?: return null
+                    val value = (data["value"] as? Number)?.toDouble() ?: return null
+                    SetScalarField(kind, name, field, value)
+                }
+                "set_vector_field" -> {
+                    val kind = data["kind"] as? String ?: return null
+                    val name = data["name"] as? String ?: return null
+                    val field = data["field"] as? String ?: return null
+                    val target = vectorOf(data) ?: return null
+                    SetVectorField(kind, name, field, target)
+                }
                 else -> null
             }
+        }
+
+        private fun vectorOf(data: Map<String, Any?>): Vector3? {
+            val x = (data["x"] as? Number)?.toDouble() ?: return null
+            val y = (data["y"] as? Number)?.toDouble() ?: return null
+            val z = (data["z"] as? Number)?.toDouble() ?: return null
+            return Vector3(x, y, z)
         }
     }
 }

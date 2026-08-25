@@ -191,6 +191,10 @@ fun main() {
                 is SceneControlMessage.RemoveCollider -> {} // this demo has no colliders
                 is SceneControlMessage.SetColliderActive -> {} // this demo has no colliders
                 is SceneControlMessage.SetGroupEnabled -> groups.setEnabled(message.name, message.enabled)
+                // Nothing here is named yet, so nothing is reachable via §10.4's field-edit
+                // messages - see ParticleCollisionDebugDemo for the wired equivalent.
+                is SceneControlMessage.SetScalarField -> {}
+                is SceneControlMessage.SetVectorField -> {}
             }
         }
         repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) {

@@ -11,8 +11,10 @@ import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
 import particlesim.core.VectorExpr
 import particlesim.lifecycle.DestructionSystem
+import particlesim.physics.FieldValue
 import particlesim.physics.Integrator
 import particlesim.physics.UniformGravity
+import particlesim.render.SceneRegistry
 import kotlin.random.Random
 
 /**
@@ -114,7 +116,7 @@ fun main() {
     // exactly that reason, all reassigned together in one place rather than mutated piecemeal.
     var store = ParticleStore()
     var groups = Groups()
-    var gravity = UniformGravity(ballGroup, Vector3(0.0, -9.8, 0.0))
+    var gravity = UniformGravity(ballGroup, Vector3(0.0, -9.8, 0.0), name = "gravity")
     var liveColliderRules = allColliderRules
     var floorCollisions = CollisionSystem(liveColliderRules.map { it.rule })
     var ids = ArrayList<Int>()
@@ -138,6 +140,12 @@ fun main() {
                     liveColliderRules.find { it.collider.name == message.name }?.collider?.active = message.active
                 }
                 is SceneControlMessage.SetGroupEnabled -> groups.setEnabled(message.name, message.enabled)
+                is SceneControlMessage.SetScalarField -> {
+                    if (message.kind == "force" && message.name == gravity.name) gravity.setField(message.field, FieldValue.Scalar(message.value))
+                }
+                is SceneControlMessage.SetVectorField -> {
+                    if (message.kind == "force" && message.name == gravity.name) gravity.setField(message.field, FieldValue.Vector(message.value))
+                }
                 is SceneControlMessage.DeleteParticle -> {
                     val result = destruction.resolve(store, groups, listOf(gravity), t, dt, explicitIds = setOf(message.particleId))
                     ids.removeAll(result.destroyedIds.toSet())
@@ -145,7 +153,7 @@ fun main() {
                 SceneControlMessage.Restart -> {
                     store = ParticleStore()
                     groups = Groups()
-                    gravity = UniformGravity(ballGroup, Vector3(0.0, -9.8, 0.0))
+                    gravity = UniformGravity(ballGroup, Vector3(0.0, -9.8, 0.0), name = "gravity")
                     liveColliderRules = allColliderRules
                     floorCollisions = CollisionSystem(liveColliderRules.map { it.rule })
                     ids = ArrayList()
@@ -176,6 +184,7 @@ fun main() {
             t, step, store, ids, emptyList(),
             sphereRadii = ids.associateWith { radius },
             colliders = liveColliderRules.map { it.collider },
+            registry = SceneRegistry.build(forces = listOf(gravity), groups = groups, colliders = liveColliderRules.map { it.collider }),
         )
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)

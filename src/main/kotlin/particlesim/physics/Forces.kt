@@ -8,9 +8,17 @@ import kotlin.math.sqrt
 /** Constant acceleration applied to every member of [group] (§5.2) — e.g. `[0, -9.8, 0]`. */
 class UniformGravity(
     private val group: String,
-    private val acceleration: Vector3,
+    private var acceleration: Vector3,
     override val name: String? = null,
-) : Force, UniformFieldForce {
+) : Force, UniformFieldForce, EditableFields {
+    override fun editableFields(): Map<String, FieldValue> = mapOf("acceleration" to FieldValue.Vector(acceleration))
+
+    override fun setField(field: String, value: FieldValue): Boolean {
+        if (field != "acceleration" || value !is FieldValue.Vector) return false
+        acceleration = value.value
+        return true
+    }
+
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
@@ -67,10 +75,25 @@ class Drag(
  */
 class NBodyGravity(
     private val group: String,
-    private val g: Double = 6.674e-11,
-    private val softening: Double = DEFAULT_SOFTENING,
+    private var g: Double = 6.674e-11,
+    private var softening: Double = DEFAULT_SOFTENING,
     override val name: String? = null,
-) : Force {
+) : Force, EditableFields {
+    override fun editableFields(): Map<String, FieldValue> = mapOf(
+        "g" to FieldValue.Scalar(g),
+        "softening" to FieldValue.Scalar(softening),
+    )
+
+    override fun setField(field: String, value: FieldValue): Boolean {
+        if (value !is FieldValue.Scalar) return false
+        when (field) {
+            "g" -> g = value.value
+            "softening" -> softening = value.value
+            else -> return false
+        }
+        return true
+    }
+
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,

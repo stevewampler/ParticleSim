@@ -25,9 +25,17 @@ import particlesim.surface.Triangle
 class Wind(
     private val triangles: List<Triangle>,
     private val velocity: VectorExpr,
-    private val density: Double = 1.0,
+    private var density: Double = 1.0,
     override val name: String? = null,
-) : Force, UniformFieldForce {
+) : Force, UniformFieldForce, EditableFields {
+    override fun editableFields(): Map<String, FieldValue> = mapOf("density" to FieldValue.Scalar(density))
+
+    override fun setField(field: String, value: FieldValue): Boolean {
+        if (field != "density" || value !is FieldValue.Scalar) return false
+        density = value.value
+        return true
+    }
+
     /** The wind *velocity* itself (§10.2's arrow renderer target) — not the resulting
      * per-triangle pressure force [accumulate] computes, which depends on each triangle's own
      * orientation/motion and isn't a spatial field in the same sense. [position] is unused:

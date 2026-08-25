@@ -2245,22 +2245,72 @@ real prerequisite, not just unstarted — see the note below.
           contributes zero force while disabled, resumes when
           re-enabled) and `GroupsTest`'s enable/disable tests (including
           that `membersOf` itself is untouched by disabling).
-    - [ ] Numeric field editing (gravity acceleration, N-body g/softening,
-          wind density, spring/damper stiffness/damping, FixedVelocity's
-          velocity, FixedPosition's shared position) - none of this is
-          built yet. Needs both a generalized read path (today's registry
-          wire section only carries names/booleans, no numeric values -
-          the client has nothing to pre-fill a field with) and turning
-          each of those `private val`s into mutable state, a real
-          per-field code change, not just wire-protocol work.
+    - [x] Numeric field editing: a new opt-in `EditableFields` capability
+          interface (`particlesim.physics`, alongside `UniformFieldForce`/
+          `Breakable`) - `editableFields(): Map<String, FieldValue>` (read)
+          and `setField(field, value): Boolean` (write, returns `false`
+          for an unknown field name or wrong value kind rather than
+          silently no-op'ing - a client typo is detectable, not
+          swallowed). `FieldValue` is `Scalar(Double)` or `Vector(Vector3)`
+          - the only two shapes anything editable needs. Implemented on
+          `UniformGravity.acceleration`, `NBodyGravity.g`/`softening`,
+          `Wind.density`, `FixedVelocity.velocity` (each field promoted
+          from `private val` to `private var`); deferred: `Spring`/
+          `Damper` stiffness/damping (need the group-ownership scan first)
+          and `FixedPosition` (the shared-vs-per-particle split needs its
+          own decision about what the panel shows when `position ==
+          null`). Read path: a new flat per-frame wire section, one entry
+          per `(kind, name, field) -> current value` for every named
+          force/constraint that implements `EditableFields` - recomputed
+          fresh every frame directly off the live object, never cached,
+          so one client's edit shows up in every other connected client's
+          next frame for free. Write path: `SceneControlMessage
+          .SetScalarField`/`SetVectorField`, same channel as the
+          activation/enable toggles above. **Client-side pitfall caught
+          before it shipped**: numeric field *values* are deliberately
+          excluded from `registrySignature` (only field *names/kinds* would
+          matter there, and nothing currently needs even that) - values
+          change on every edit, and if the panel rebuilt on every value
+          change it would destroy and recreate the very input the user is
+          mid-keystroke in. Values instead refresh via each panel's
+          `updateLive` hook, which skips an input that currently has
+          focus (`document.activeElement !== input`), the same "never
+          recreate what the user might be interacting with" discipline
+          the groups panel's checkbox already established. **Verified
+          live in Chrome**: named `ParticleCollisionDebugDemo`'s gravity
+          force `"gravity"` (previously unnamed) and added it to that
+          demo's registry - opened its panel, saw the acceleration vector
+          pre-filled `(0, -9.8, 0)`, edited Y to `15` (flipping gravity
+          upward with no ceiling collider in this demo) and watched the
+          entire 18-ball pile rocket off-screen; typing in the field was
+          never clobbered by the ~60fps live-data refresh; restarting the
+          demo correctly reset the field back to its authored `-9.8`. No
+          console errors. Component + wire round-trip test coverage:
+          `ForceComponentTest`'s four `EditableFields` tests (per-class
+          get/set, including rejecting a wrong value kind and an unknown
+          field name) and `BinaryFrameTest`'s three new round-trip tests
+          (collider active-flag persists in the registry regardless of
+          the wireframe list, group enabled state round-trips, and an
+          `EditableFields` force/constraint's current values round-trip
+          as the flat field-entry list; a force with no `EditableFields`
+          contributes nothing).
+    - [x] Pause on edit: a client-only `pauseOnEdit` toggle plus a
+          `sendEdit()` wrapper (used by every §10.4 edit call site instead
+          of `send()` directly) that sends the existing pause
+          `TimeControlMessage` before the edit itself whenever the toggle
+          is on and the sim isn't already paused - zero server-side work,
+          exactly as scoped. **Verified live in Chrome**: with the toggle
+          checked, deactivating a collider immediately flipped the
+          play/pause button to "play" and steps/s dropped to 0 - the edit
+          and the pause both visibly took effect from one click.
     - [ ] Module migration: constraints/surfaces/colliders still render
           via the old hardcoded per-kind dispatch path in `viewer.html`,
           not the self-registering `entityKindModules` system
-          groups/forces already use. The collider panel's new "active"
-          checkbox above was added directly to that hardcoded path as a
-          minimal, scoped addition - it works, but doesn't yet get this
-          migration's benefits (a consistent shape for adding the
-          numeric controls above).
+          groups/forces already use. The collider panel's "active"
+          checkbox and the constraints panel's new editable-fields
+          support were both added directly to that hardcoded path as
+          minimal, scoped additions - they work, but don't yet get this
+          migration's benefit of one consistent per-kind panel shape.
     - [ ] Particles/groups: dual selection (3D click or group-list click
           selects both particle and group), per-particle/per-group
           mass/radius editing, a group's tab surfacing spring/damper
@@ -2268,13 +2318,10 @@ real prerequisite, not just unstarted — see the note below.
           per-particle render override, per-group color override +
           visibility toggle - not built yet, beyond the enable/disable
           checkbox above.
-    - [ ] Constraints/surfaces/emitters editing (FixedPosition's shared
-          variant, FixedVelocity, surfaces' mesh-style toggle, emitters as
-          a new outliner category with rate/maxAlive/capPolicy) - not
-          built yet.
-    - [ ] The "pause on edit" toggle - not built yet. Purely a client
-          change when it happens (send the existing pause
-          `TimeControlMessage` before an edit message), no server work.
+    - [ ] Constraints/surfaces/emitters editing still to do: FixedPosition's
+          shared-position variant (deferred above alongside Spring/Damper),
+          surfaces' mesh-style toggle, and emitters as a new outliner
+          category with rate/maxAlive/capPolicy - not built yet.
 
 ## Shape library (§4.5, new requirement) — not yet phased
 - [x] Kotlin DSL: `ShapePlacement` (`particlesim.examples`) — an

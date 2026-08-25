@@ -69,9 +69,17 @@ class FixedPosition private constructor(
 /** Pins every member of [group] to a constant [velocity] regardless of forces acting on it (§6). */
 class FixedVelocity(
     private val group: String,
-    private val velocity: Vector3,
+    private var velocity: Vector3,
     override val name: String? = null,
-) : Constraint {
+) : Constraint, EditableFields {
+    override fun editableFields(): Map<String, FieldValue> = mapOf("velocity" to FieldValue.Vector(velocity))
+
+    override fun setField(field: String, value: FieldValue): Boolean {
+        if (field != "velocity" || value !is FieldValue.Vector) return false
+        velocity = value.value
+        return true
+    }
+
     override fun applyVelocity(store: ParticleStore, groups: Groups, t: Double) {
         if (!groups.isEnabled(group)) return
         for (id in groups.membersOf(group)) {

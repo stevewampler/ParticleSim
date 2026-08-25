@@ -77,3 +77,27 @@ interface PairwiseForce {
 interface UniformFieldForce {
     fun sampleAt(position: Vector3, t: Double): Vector3
 }
+
+/** A field value §10.4's live editing can carry over the wire — either a bare scalar or a
+ * [Vector3], depending on what the field actually is (a spring's stiffness vs. gravity's
+ * acceleration). Deliberately just these two: nothing editable in this codebase today is a
+ * string, an id, or an expression string itself (expression-capable fields stay editable only
+ * as their currently-evaluated numeric snapshot, not as a live-editable expression source). */
+sealed class FieldValue {
+    data class Scalar(val value: Double) : FieldValue()
+    data class Vector(val value: Vector3) : FieldValue()
+}
+
+/** Opt-in capability (like [UniformFieldForce]) for a [Force] or
+ * [particlesim.physics.Constraint] that exposes some of its own numeric fields for §10.4's live
+ * editing — most forces/constraints have none (a spring's two particle ids aren't "editable" in
+ * this sense) so this stays a separate interface rather than bloating [Force]/[Constraint]
+ * themselves. [editableFields] is read every frame (the wire's registry section, §10.4), so it
+ * must be cheap and side-effect-free. [setField] is the write side: returns `false` for an
+ * unrecognized field name or a value of the wrong kind (a client typo, or an older/newer client
+ * disagreeing on field shape) rather than silently doing nothing — the same "malformed input is
+ * detectable, not swallowed" stance [SceneControlMessage.parse] already takes one layer up. */
+interface EditableFields {
+    fun editableFields(): Map<String, FieldValue>
+    fun setField(field: String, value: FieldValue): Boolean
+}

@@ -139,6 +139,10 @@ fun main() {
                     liveColliderRules.find { it.collider.name == message.name }?.collider?.active = message.active
                 }
                 is SceneControlMessage.SetGroupEnabled -> groups.setEnabled(message.name, message.enabled)
+                // This demo has zero gravity and no named forces/constraints (see its own doc
+                // comment) - see ParticleCollisionDebugDemo for the wired field-edit equivalent.
+                is SceneControlMessage.SetScalarField -> {}
+                is SceneControlMessage.SetVectorField -> {}
                 is SceneControlMessage.DeleteParticle -> {
                     val result = destruction.resolve(store, groups, emptyList<Force>(), t, dt, explicitIds = setOf(message.particleId))
                     ids.removeAll(result.destroyedIds.toSet())

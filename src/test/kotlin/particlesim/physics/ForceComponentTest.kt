@@ -5,6 +5,8 @@ import particlesim.core.ParticleStore
 import particlesim.core.Vector3
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /** §15.3: spring/damper/drag force magnitude for known inputs, in isolation — no running simulation. */
 class ForceComponentTest {
@@ -110,6 +112,43 @@ class ForceComponentTest {
         val gravity = UniformGravity("g", Vector3(0.0, -9.8, 0.0))
         assertEquals(Vector3(0.0, -9.8, 0.0), gravity.sampleAt(Vector3(50.0, 50.0, 50.0), t = 123.0))
         assertEquals(Vector3(0.0, -9.8, 0.0), gravity.sampleAt(Vector3.ZERO, t = 0.0))
+    }
+
+    @Test
+    fun `EditableFields (§10_4) - UniformGravity's acceleration is readable and settable`() {
+        val gravity = UniformGravity("g", Vector3(0.0, -9.8, 0.0))
+        assertEquals(mapOf("acceleration" to FieldValue.Vector(Vector3(0.0, -9.8, 0.0))), gravity.editableFields())
+
+        assertTrue(gravity.setField("acceleration", FieldValue.Vector(Vector3(1.0, 2.0, 3.0))))
+        assertEquals(Vector3(1.0, 2.0, 3.0), gravity.sampleAt(Vector3.ZERO, t = 0.0))
+
+        assertFalse(gravity.setField("acceleration", FieldValue.Scalar(5.0))) // wrong value kind
+        assertFalse(gravity.setField("nonexistent", FieldValue.Vector(Vector3.ZERO)))
+    }
+
+    @Test
+    fun `EditableFields (§10_4) - NBodyGravity exposes g and softening as independent scalars`() {
+        val gravity = NBodyGravity("g", g = 1.0, softening = 2.0)
+        assertEquals(mapOf("g" to FieldValue.Scalar(1.0), "softening" to FieldValue.Scalar(2.0)), gravity.editableFields())
+
+        assertTrue(gravity.setField("g", FieldValue.Scalar(9.0)))
+        assertTrue(gravity.setField("softening", FieldValue.Scalar(8.0)))
+        assertEquals(mapOf("g" to FieldValue.Scalar(9.0), "softening" to FieldValue.Scalar(8.0)), gravity.editableFields())
+
+        assertFalse(gravity.setField("g", FieldValue.Vector(Vector3.ZERO))) // wrong value kind
+    }
+
+    @Test
+    fun `EditableFields (§10_4) - Wind exposes density, FixedVelocity exposes velocity`() {
+        val wind = Wind(emptyList(), particlesim.core.VectorExpr.of(Vector3.ZERO), density = 1.0)
+        assertEquals(mapOf("density" to FieldValue.Scalar(1.0)), wind.editableFields())
+        assertTrue(wind.setField("density", FieldValue.Scalar(2.5)))
+        assertEquals(mapOf("density" to FieldValue.Scalar(2.5)), wind.editableFields())
+
+        val fixedVelocity = FixedVelocity("g", Vector3(1.0, 0.0, 0.0))
+        assertEquals(mapOf("velocity" to FieldValue.Vector(Vector3(1.0, 0.0, 0.0))), fixedVelocity.editableFields())
+        assertTrue(fixedVelocity.setField("velocity", FieldValue.Vector(Vector3(0.0, 5.0, 0.0))))
+        assertEquals(mapOf("velocity" to FieldValue.Vector(Vector3(0.0, 5.0, 0.0))), fixedVelocity.editableFields())
     }
 
     @Test

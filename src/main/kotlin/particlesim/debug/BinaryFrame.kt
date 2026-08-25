@@ -10,6 +10,8 @@ import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
 import particlesim.render.NamedArrowSamples
+import particlesim.physics.EditableFields
+import particlesim.physics.FieldValue
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
 import particlesim.surface.Triangle
@@ -50,6 +52,12 @@ import java.nio.charset.StandardCharsets
  *                                                            i32 memberCount, memberCount * i32 id }
  * i32  registryColliderCount;   registryColliderCount   * { i32 nameLen, nameLen UTF-8 bytes, u8 active }
  * i32  registryGroupEnabledCount; registryGroupEnabledCount * { i32 nameLen, nameLen UTF-8 bytes, u8 enabled }
+ * i32  registryFieldCount;      registryFieldCount      * { u8 kind (0=force, 1=constraint),
+ *                                                            i32 nameLen, nameLen UTF-8 bytes,
+ *                                                            i32 fieldNameLen, fieldNameLen UTF-8 bytes,
+ *                                                            u8 valueKind (0=scalar, 1=vector),
+ *                                                            valueKind==0: f64 value
+ *                                                            valueKind==1: f64 x, y, z }
  * i32  colliderCount
  * colliderCount * { u8 kind (0=plane, 1=sphere, 2=box), i32 nameLen, nameLen UTF-8 bytes,
  *                    f64 px, py, pz,
@@ -108,6 +116,15 @@ import java.nio.charset.StandardCharsets
  * `has`-flag either) when its [SurfaceRenderer.surface] is unnamed — an empty name never matches
  * anything in the outliner, so the two states collapse harmlessly into one.
  *
+ * The field-value section (§10.4) is this frame's *read path* for live editing: a flattened
+ * `(kind, name, field) -> value` list, one entry per [particlesim.physics.EditableFields] field
+ * a named force or constraint currently exposes — not nested under the force/constraint name
+ * lists above, since most forces/constraints expose none and a flat list of only the ones that
+ * do is simpler to decode than a per-entity field count that's usually zero. This is a snapshot
+ * of the *current* value, computed fresh every frame directly from the live object — never
+ * cached — so an edit applied by one client shows up in every other connected client's next
+ * frame without any extra invalidation logic.
+ *
  * Every particle carries velocity alongside position — unconditionally, doubling the per-particle
  * payload from 28 to 52 bytes, not opt-in — so that §10.3's selection & inspection ("a particle's
  * position/velocity... live numeric readout") has something to read without a second wire
@@ -152,6 +169,10 @@ object BinaryFrame {
     private const val FORCE_BREAK_KIND: Byte = 0
     private const val PARTICLE_DESTROYED_KIND: Byte = 1
     private const val PARTICLE_SPAWNED_KIND: Byte = 2
+    private const val FORCE_KIND: Byte = 0
+    private const val CONSTRAINT_KIND: Byte = 1
+    private const val SCALAR_KIND: Byte = 0
+    private const val VECTOR_KIND: Byte = 1
 
     /** Half-extent of the finite quad drawn for an (infinite) [PlaneCollider] — a debug-render
      * choice, not a modeled property; see this file's own doc comment. */
@@ -173,6 +194,7 @@ object BinaryFrame {
         colliders: List<Collider> = emptyList(),
         events: List<SimEvent> = emptyList(),
     ): ByteBuffer {
+        val fieldEntries = collectEditableFields(registry)
         val size = HEADER_SIZE + ids.size * PARTICLE_SIZE +
             CONNECTION_HEADER_SIZE + connections.size * CONNECTION_SIZE +
             CAMERA_FLAG_SIZE + (if (camera != null) CAMERA_SIZE else 0) +
@@ -187,6 +209,7 @@ object BinaryFrame {
             nameListSize(registry.forces.keys) + nameListSize(registry.constraints.keys) +
             nameListSize(registry.surfaces.keys) + groupListSize(registry.groups) +
             boolNameListSize(registry.colliders.keys) + boolNameListSize(registry.groupEnabled.keys) +
+            fieldEntryListSize(fieldEntries) +
             COLLIDER_HEADER_SIZE + colliders.sumOf { colliderEntrySize(it) } +
             EVENT_HEADER_SIZE + events.sumOf { eventEntrySize(it) }
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
@@ -263,6 +286,16 @@ object BinaryFrame {
         for ((name, enabled) in registry.groupEnabled) {
             putString(buffer, name)
             buffer.put(if (enabled) 1 else 0)
+        }
+        buffer.putInt(fieldEntries.size)
+        for (entry in fieldEntries) {
+            buffer.put(if (entry.kind == "force") FORCE_KIND else CONSTRAINT_KIND)
+            putString(buffer, entry.name)
+            putString(buffer, entry.field)
+            when (val value = entry.value) {
+                is FieldValue.Scalar -> { buffer.put(SCALAR_KIND); buffer.putDouble(value.value) }
+                is FieldValue.Vector -> { buffer.put(VECTOR_KIND); putVector(buffer, value.value) }
+            }
         }
         buffer.putInt(colliders.size)
         for (collider in colliders) {
@@ -358,6 +391,7 @@ object BinaryFrame {
             groups = getGroupList(buf),
             colliders = getColliderRegistryList(buf),
             groupEnabled = getBoolNameList(buf),
+            fields = getFieldEntryList(buf),
         )
         val colliderCount = buf.int
         val colliders = (0 until colliderCount).map {
@@ -402,6 +436,30 @@ object BinaryFrame {
      * only the name), so one helper covers both instead of two near-identical ones. */
     private fun boolNameListSize(names: Collection<String>) =
         REGISTRY_LIST_HEADER_SIZE + names.sumOf { stringSize(it) + 1 }
+
+    /** §10.4's read path, flattened: one entry per [EditableFields] field a named force or
+     * constraint currently exposes. Recomputed fresh every [encode] call — see this file's own
+     * doc comment on why that's deliberate, not a missed caching opportunity. */
+    private fun collectEditableFields(registry: SceneRegistry): List<RegistryFieldEntry> {
+        val entries = ArrayList<RegistryFieldEntry>()
+        for ((name, force) in registry.forces) {
+            if (force !is EditableFields) continue
+            for ((field, value) in force.editableFields()) entries += RegistryFieldEntry("force", name, field, value)
+        }
+        for ((name, constraint) in registry.constraints) {
+            if (constraint !is EditableFields) continue
+            for ((field, value) in constraint.editableFields()) entries += RegistryFieldEntry("constraint", name, field, value)
+        }
+        return entries
+    }
+
+    private fun fieldEntryListSize(entries: List<RegistryFieldEntry>): Int =
+        REGISTRY_LIST_HEADER_SIZE + entries.sumOf { entry ->
+            1 + stringSize(entry.name) + stringSize(entry.field) + 1 + when (entry.value) {
+                is FieldValue.Scalar -> 8
+                is FieldValue.Vector -> 24
+            }
+        }
 
     private fun colliderEntrySize(collider: Collider): Int {
         val shapeSize = when (collider) {
@@ -463,6 +521,17 @@ object BinaryFrame {
     /** Decodes a `{name, u8 bool}` list — see [boolNameListSize] for why colliders' `active`
      * flag has its own typed decoder ([getColliderRegistryList]) while [registry.groupEnabled]
      * (no other per-entry data to carry) uses this generic one instead. */
+    private fun getFieldEntryList(buffer: ByteBuffer): List<DecodedFieldEntry> {
+        val count = buffer.int
+        return (0 until count).map {
+            val kind = if (buffer.get() == FORCE_KIND) "force" else "constraint"
+            val name = getString(buffer)
+            val field = getString(buffer)
+            val value = if (buffer.get() == SCALAR_KIND) FieldValue.Scalar(buffer.double) else FieldValue.Vector(getVector(buffer))
+            DecodedFieldEntry(kind, name, field, value)
+        }
+    }
+
     private fun getBoolNameList(buffer: ByteBuffer): Map<String, Boolean> {
         val count = buffer.int
         val result = LinkedHashMap<String, Boolean>(count)
@@ -507,6 +576,15 @@ sealed class DecodedCollider {
     data class Box(override val name: String, override val position: Vector3, val halfExtents: Vector3) : DecodedCollider()
 }
 
+/** One [particlesim.physics.EditableFields] field's current value, keyed by which named force
+ * or constraint owns it — see [BinaryFrame]'s own doc comment on the field-value section for why
+ * this is a flat list rather than nested under the owning entity. Used internally by [encode]
+ * only (never decoded back into this type — the wire-facing counterpart is [DecodedFieldEntry]). */
+private data class RegistryFieldEntry(val kind: String, val name: String, val field: String, val value: FieldValue)
+
+/** [RegistryFieldEntry], decoded. [kind] is `"force"` or `"constraint"`. */
+data class DecodedFieldEntry(val kind: String, val name: String, val field: String, val value: FieldValue)
+
 /** One named collider's §10.4 activation state — kept in the registry (unlike the unconditional
  * wireframe [DecodedCollider] section) so an inactive collider's name is still reachable to
  * reactivate it, even though it's no longer drawn. */
@@ -521,6 +599,7 @@ data class DecodedRegistry(
     val groups: List<DecodedGroupEntry> = emptyList(),
     val colliders: List<DecodedColliderEntry> = emptyList(),
     val groupEnabled: Map<String, Boolean> = emptyMap(),
+    val fields: List<DecodedFieldEntry> = emptyList(),
 )
 
 data class DecodedFrame(

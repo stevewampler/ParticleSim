@@ -142,6 +142,7 @@
       <button data-speed="2">2x</button>
       <button data-speed="4">4x</button>
     </div>
+    <label><input type="checkbox" id="pauseOnEditToggle"> pause on edit</label>
   </section>
   <section>
     <h4>stats</h4>
@@ -216,6 +217,7 @@ scene.add(axesHelper);
 document.getElementById("gridToggle").addEventListener("change", (e) => { gridHelper.visible = e.target.checked; });
 document.getElementById("axesToggle").addEventListener("change", (e) => { axesHelper.visible = e.target.checked; });
 document.getElementById("collidersToggle").addEventListener("change", (e) => { colliderGroup.visible = e.target.checked; });
+document.getElementById("pauseOnEditToggle").addEventListener("change", (e) => { pauseOnEdit = e.target.checked; });
 
 // Lighting for §10.2's shaded surface meshes — MeshBasicMaterial (dots, wireframe meshes)
 // doesn't need this, but a solid MeshStandardMaterial surface would render pure black without it.
@@ -667,6 +669,25 @@ function decodeFrame(buffer) {
     }
     return result;
   };
+  // §10.4's numeric-field read path: a flat list, one entry per EditableFields field a named
+  // force/constraint currently exposes - see BinaryFrame's own doc comment on why this isn't
+  // nested under the owning entity.
+  const readFieldEntryList = () => {
+    const count = view.getInt32(offset, true); offset += 4;
+    const entries = new Array(count);
+    for (let i = 0; i < count; i++) {
+      const kind = view.getUint8(offset) === 0 ? "force" : "constraint"; offset += 1;
+      const name = readString();
+      const field = readString();
+      const valueKind = view.getUint8(offset); offset += 1;
+      const value = valueKind === 0
+        ? { kind: "scalar", value: view.getFloat64(offset, true) }
+        : { kind: "vector", ...readVec() };
+      if (valueKind === 0) offset += 8;
+      entries[i] = { kind, name, field, value };
+    }
+    return entries;
+  };
 
   const t = view.getFloat64(offset, true); offset += 8;
   const step = Number(view.getBigInt64(offset, true)); offset += 8;
@@ -753,6 +774,7 @@ function decodeFrame(buffer) {
     groups: readGroupList(),
     colliders: readColliderRegistryList(),
     groupEnabled: readBoolNameMap(),
+    fields: readFieldEntryList(),
   };
 
   // §10.2's "debug/--render-all mode... draws every collider as wireframe" - unconditional,
@@ -957,7 +979,7 @@ const objectPanelTitleEl = document.getElementById("objectPanelTitle");
 const objectPanelBodyEl = document.getElementById("objectPanelBody");
 
 let lastRegistrySignature = null;
-let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [], colliders: [], groupEnabled: {} };
+let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [], colliders: [], groupEnabled: {}, fields: [] };
 let selectedKind = null; // "groups" | "forces" | "constraints" | "surfaces" | "colliders"
 let selectedName = null;
 let latestVisibleIds = null; // this frame's server-side dot filter, updated every frame in applyFrame
@@ -1102,6 +1124,68 @@ function addPanelInspect() {
   objectPanelInspectEl = inspect;
 }
 
+// §10.4's numeric field editing. currentFieldInputs maps fieldName -> the input element(s) so
+// updateEditableFieldsLive can refresh their *displayed* value without recreating them (which
+// would sever an in-progress edit) - the panel as a whole is still only rebuilt on selection
+// change or a registry signature change, and registrySignature deliberately excludes field
+// *values* (only names/booleans) for exactly this reason: a value changing on every edit must
+// never itself trigger the rebuild that would clobber the input the user is mid-edit in.
+let currentFieldInputs = {};
+
+function renderEditableFields(kind, name) {
+  currentFieldInputs = {};
+  const fields = latestRegistry.fields.filter((f) => f.kind === kind && f.name === name);
+  for (const f of fields) {
+    const row = document.createElement("div");
+    row.className = "objectField";
+    row.appendChild(document.createTextNode(f.field + ": "));
+    if (f.value.kind === "scalar") {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.step = "any";
+      input.value = f.value.value;
+      input.addEventListener("change", () => {
+        sendEdit({ type: "set_scalar_field", kind, name, field: f.field, value: parseFloat(input.value) });
+      });
+      row.appendChild(input);
+      currentFieldInputs[f.field] = { valueKind: "scalar", input };
+    } else {
+      const inputs = ["x", "y", "z"].map(() => {
+        const el = document.createElement("input");
+        el.type = "number";
+        el.step = "any";
+        el.style.width = "4.5em";
+        return el;
+      });
+      inputs[0].value = f.value.x; inputs[1].value = f.value.y; inputs[2].value = f.value.z;
+      const onChange = () => {
+        sendEdit({
+          type: "set_vector_field", kind, name, field: f.field,
+          x: parseFloat(inputs[0].value), y: parseFloat(inputs[1].value), z: parseFloat(inputs[2].value),
+        });
+      };
+      inputs.forEach((el) => { el.addEventListener("change", onChange); row.appendChild(el); });
+      currentFieldInputs[f.field] = { valueKind: "vector", inputs };
+    }
+    objectPanelBodyEl.appendChild(row);
+  }
+}
+
+function updateEditableFieldsLive(kind, name) {
+  const fields = latestRegistry.fields.filter((f) => f.kind === kind && f.name === name);
+  for (const f of fields) {
+    const entry = currentFieldInputs[f.field];
+    if (!entry) continue;
+    if (entry.valueKind === "scalar") {
+      if (document.activeElement !== entry.input) entry.input.value = f.value.value;
+    } else {
+      ["x", "y", "z"].forEach((axis, i) => {
+        if (document.activeElement !== entry.inputs[i]) entry.inputs[i].value = f.value[axis];
+      });
+    }
+  }
+}
+
 registerEntityKind({
   kind: "groups",
   getNames: (registry) => registry.groups.map((g) => g.name),
@@ -1117,7 +1201,7 @@ registerEntityKind({
     enabledCheckbox.type = "checkbox";
     enabledCheckbox.checked = latestRegistry.groupEnabled[selectedName] !== false;
     enabledCheckbox.addEventListener("change", (e) => {
-      send({ type: "set_group_enabled", name: selectedName, enabled: e.target.checked });
+      sendEdit({ type: "set_group_enabled", name: selectedName, enabled: e.target.checked });
     });
     enabledLabel.appendChild(enabledCheckbox);
     enabledLabel.appendChild(document.createTextNode(" enabled"));
@@ -1162,12 +1246,13 @@ registerEntityKind({
   // as before rather than a checkbox that would silently do nothing.
   renderPanel: () => {
     const hasArrows = latestArrowGroups.some((g) => g.name === selectedName);
-    if (hasArrows) {
-      addPanelToggle("show arrows", hiddenForces);
-    } else {
-      addPanelNote("no arrow renderer for this force, and no other live numeric data yet (§10.2/§10.3)");
+    if (hasArrows) addPanelToggle("show arrows", hiddenForces);
+    renderEditableFields("force", selectedName);
+    if (!hasArrows && latestRegistry.fields.every((f) => !(f.kind === "force" && f.name === selectedName))) {
+      addPanelNote("no arrow renderer or editable numeric fields for this force yet (§10.2/§10.4)");
     }
   },
+  updateLive: () => updateEditableFieldsLive("force", selectedName),
 });
 
 // Updates whichever per-object panel is currently open with this frame's live data - called
@@ -1178,6 +1263,10 @@ function updateInspection() {
   const module = entityKindModules.get(selectedKind);
   if (module) {
     if (module.updateLive) module.updateLive();
+    return;
+  }
+  if (selectedKind === "constraints") {
+    updateEditableFieldsLive("constraint", selectedName);
     return;
   }
   if (!objectPanelInspectEl) return;
@@ -1218,7 +1307,10 @@ function renderObjectPanel() {
     addPanelToggle("show mesh", hiddenSurfaces);
     addPanelInspect();
   } else if (selectedKind === "constraints") {
-    addPanelNote("no renderer or live data defined for constraints (§10.2)");
+    renderEditableFields("constraint", selectedName);
+    if (latestRegistry.fields.every((f) => !(f.kind === "constraint" && f.name === selectedName))) {
+      addPanelNote("no renderer or editable numeric fields for this constraint yet (§10.2/§10.4)");
+    }
   } else if (selectedKind === "colliders") {
     const collider = latestColliders.find((c) => c.name === selectedName);
     const registryEntry = latestRegistry.colliders.find((c) => c.name === selectedName);
@@ -1237,7 +1329,7 @@ function renderObjectPanel() {
     activeCheckbox.type = "checkbox";
     activeCheckbox.checked = registryEntry ? registryEntry.active : true;
     activeCheckbox.addEventListener("change", (e) => {
-      send({ type: "set_collider_active", name: selectedName, active: e.target.checked });
+      sendEdit({ type: "set_collider_active", name: selectedName, active: e.target.checked });
     });
     activeLabel.appendChild(activeCheckbox);
     activeLabel.appendChild(document.createTextNode(" active"));
@@ -1321,6 +1413,22 @@ let draggedParticleId = null;
 
 function send(message) {
   if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+}
+
+// §10.4's "pause on edit" toggle - purely client-side: pausing is just sending the existing
+// TimeControlMessage the play/pause button already sends, before the edit message itself, so
+// the edit lands on a stopped simulation instead of racing the next running step. Every §10.4
+// edit call site (collider activation, group enable/disable, numeric field changes) should call
+// this instead of send() directly - drag/time-control/scene-restart messages are unaffected.
+let pauseOnEdit = false;
+
+function sendEdit(message) {
+  if (pauseOnEdit && !isPaused) {
+    isPaused = true;
+    send({ type: "pause" });
+    playPauseBtn.textContent = "▶ play";
+  }
+  send(message);
 }
 
 function pointerToNdc(event) {
