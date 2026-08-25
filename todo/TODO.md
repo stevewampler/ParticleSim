@@ -2294,6 +2294,20 @@ real prerequisite, not just unstarted — see the note below.
           `EditableFields` force/constraint's current values round-trip
           as the flat field-entry list; a force with no `EditableFields`
           contributes nothing).
+          **Scalar path separately verified live in Chrome** (the vector
+          verification above never exercises the JS decoder's scalar
+          branch, which has its own manual offset arithmetic distinct
+          from the vector branch's - a wrong offset there wouldn't throw,
+          it would silently misparse every section that follows in the
+          same frame): relaunched `FlagDebugDemo`, opened the "wind"
+          force's panel, confirmed `density` was pre-filled at its
+          authored `1.2`, edited it to `15` and watched the flag stiffen
+          into a near-flat pose under the much stronger wind pressure -
+          and confirmed the mesh, arrow samples, and event log all still
+          rendered normally afterward (the real assertion: proves the
+          scalar entry's offset arithmetic didn't corrupt the wireframe
+          collider/event sections that decode after it). No console
+          errors either run.
     - [x] Pause on edit: a client-only `pauseOnEdit` toggle plus a
           `sendEdit()` wrapper (used by every §10.4 edit call site instead
           of `send()` directly) that sends the existing pause
@@ -2317,11 +2331,36 @@ real prerequisite, not just unstarted — see the note below.
           params for every fully-contained Spring/Damper/MeshSprings,
           per-particle render override, per-group color override +
           visibility toggle - not built yet, beyond the enable/disable
-          checkbox above.
+          checkbox above. **Two open questions for the user before
+          building this, not decided unilaterally:**
+          (1) A particle can belong to more than one group at once
+          (`Groups.groupsOf(id)` returns a `Set`, and the existing 3D-click
+          code already computes a *plural* candidate list -
+          `latestRegistry.groups.filter(g => g.memberIds.has(particleId))`
+          - for exactly this reason). "Picking a particle also picks its
+          group" doesn't say which one wins when there's more than one -
+          show every containing group's panel at once, or pick one (e.g.
+          the first by creation order) and let the user reselect from the
+          particle's own panel?
+          (2) `mass`/`radius` are stored as `ScalarExpr` in `ParticleStore`
+          (already expression-capable, e.g. `"2.0 + 0.1*sin(t)"`), not
+          plain doubles - making them live-editable is a storage design
+          decision (does an edit replace the expression outright, losing
+          any authored time-variance? or does it need a separate
+          "override" layer sitting on top of the expression?), not just
+          UI wiring. Also still unchecked: whether a connection
+          (`(id, id)` pair) is name-tagged back to its owning
+          Spring/Damper/MeshSprings on the wire - needed for "every
+          spring/damper where all endpoints belong to this group" and not
+          yet confirmed one way or the other.
     - [ ] Constraints/surfaces/emitters editing still to do: FixedPosition's
           shared-position variant (deferred above alongside Spring/Damper),
           surfaces' mesh-style toggle, and emitters as a new outliner
-          category with rate/maxAlive/capPolicy - not built yet.
+          category with rate/maxAlive/capPolicy - not built yet. No demo
+          in this codebase currently has an emitter (Phase 6 lifecycle
+          feature) to verify emitter UI against - confirm one exists (or
+          build a minimal one) before wiring the outliner category, rather
+          than shipping UI with nothing real to point it at.
 
 ## Shape library (§4.5, new requirement) — not yet phased
 - [x] Kotlin DSL: `ShapePlacement` (`particlesim.examples`) — an
