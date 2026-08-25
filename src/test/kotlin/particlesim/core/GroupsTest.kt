@@ -93,4 +93,28 @@ class GroupsTest {
 
         assertEquals(creationOrder, groups.names().toList())
     }
+
+    @Test
+    fun `groups are enabled by default`() {
+        assertTrue(Groups().isEnabled("g"))
+    }
+
+    @Test
+    fun `setEnabled false disables, setEnabled true re-enables`() {
+        val groups = Groups()
+        groups.add("g", 1)
+        groups.setEnabled("g", false)
+        assertFalse(groups.isEnabled("g"))
+        groups.setEnabled("g", true)
+        assertTrue(groups.isEnabled("g"))
+    }
+
+    @Test
+    fun `disabling a group does not touch membersOf - membership stays real regardless of enabled state`() {
+        val groups = Groups()
+        groups.add("g", 1)
+        groups.add("g", 2)
+        groups.setEnabled("g", false)
+        assertEquals(setOf(1, 2), groups.membersOf("g"))
+    }
 }

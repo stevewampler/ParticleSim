@@ -189,6 +189,8 @@ fun main() {
                     step = 0L
                 }
                 is SceneControlMessage.RemoveCollider -> {} // this demo has no colliders
+                is SceneControlMessage.SetColliderActive -> {} // this demo has no colliders
+                is SceneControlMessage.SetGroupEnabled -> groups.setEnabled(message.name, message.enabled)
             }
         }
         repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) {

@@ -20,6 +20,15 @@ data class Contact(val normal: Vector3, val penetration: Double)
  * step, so [velocity] reflects `(pos_now - pos_prev) / dt` (§12.5) rather than symbolic
  * differentiation of [position]'s expression. It defaults to zero on the very first call,
  * before a previous position exists to difference against.
+ *
+ * [active] is §10.4's live-editable activation state: a deactivated collider is fully inert
+ * ([contact] always returns `null`, so nothing resting on it is held up — including an already
+ * -settled pile, which falls straight through the instant it's deactivated, not a case this
+ * guards against) and hidden (the debug renderer's wireframe draw list filters it out — see
+ * [particlesim.debug.DebugRenderer]). Defaults to `true` so every collider built before this
+ * behaves exactly as before. A restart rebuilds colliders from scratch, so a deactivated
+ * collider comes back active on restart — the same "back to the authored scene" behavior
+ * every other restart-affected piece of state already has.
  */
 sealed class Collider(private val positionExpr: VectorExpr, val name: String? = null) {
     var position: Vector3 = positionExpr.evaluate(0.0)
@@ -27,6 +36,7 @@ sealed class Collider(private val positionExpr: VectorExpr, val name: String? = 
     var velocity: Vector3 = Vector3.ZERO
         private set
     private var hasPrevious = false
+    var active: Boolean = true
 
     fun advance(t: Double, dt: Double) {
         val newPosition = positionExpr.evaluate(t)
@@ -35,8 +45,14 @@ sealed class Collider(private val positionExpr: VectorExpr, val name: String? = 
         hasPrevious = true
     }
 
-    /** Narrow-phase sphere-vs-this-shape test (§12.4) — pure geometry, no [ParticleStore] needed. */
-    abstract fun contact(sphereCenter: Vector3, sphereRadius: Double): Contact?
+    /** Narrow-phase sphere-vs-this-shape test (§12.4) — pure geometry, no [ParticleStore]
+     * needed. Returns `null` unconditionally while [active] is `false`, without even reaching
+     * [computeContact] — a single choke point so every existing caller (there's no separate
+     * "is this collider on" check anywhere else) gets deactivation for free. */
+    fun contact(sphereCenter: Vector3, sphereRadius: Double): Contact? =
+        if (active) computeContact(sphereCenter, sphereRadius) else null
+
+    protected abstract fun computeContact(sphereCenter: Vector3, sphereRadius: Double): Contact?
 }
 
 /** An infinite plane through [position] (the "point") with a fixed outward [normal]. */
@@ -50,7 +66,7 @@ class PlaneCollider(
     // visual quad, the same way it already reads those other two colliders' shape fields.
     val unitNormal = normal.normalized()
 
-    override fun contact(sphereCenter: Vector3, sphereRadius: Double): Contact? {
+    override fun computeContact(sphereCenter: Vector3, sphereRadius: Double): Contact? {
         val distance = (sphereCenter - position).dot(unitNormal)
         val penetration = sphereRadius - distance
         return if (penetration > 0.0) Contact(unitNormal, penetration) else null
@@ -63,7 +79,7 @@ class SphereCollider(
     val radius: Double,
     name: String? = null,
 ) : Collider(positionExpr, name) {
-    override fun contact(sphereCenter: Vector3, sphereRadius: Double): Contact? {
+    override fun computeContact(sphereCenter: Vector3, sphereRadius: Double): Contact? {
         val delta = sphereCenter - position
         val dist = delta.length()
         val penetration = (sphereRadius + radius) - dist
@@ -82,7 +98,7 @@ class BoxCollider(
     val halfExtents: Vector3,
     name: String? = null,
 ) : Collider(positionExpr, name) {
-    override fun contact(sphereCenter: Vector3, sphereRadius: Double): Contact? {
+    override fun computeContact(sphereCenter: Vector3, sphereRadius: Double): Contact? {
         val local = sphereCenter - position
         val clamped = Vector3(
             local.x.coerceIn(-halfExtents.x, halfExtents.x),

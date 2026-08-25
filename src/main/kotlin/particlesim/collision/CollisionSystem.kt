@@ -82,6 +82,7 @@ class CollisionSystem(
         }
 
         for (rule in particleColliderRules) {
+            if (!groups.isEnabled(rule.group)) continue
             for (id in groups.membersOf(rule.group)) {
                 val radius = store.radius(id) ?: continue
                 val contact = rule.collider.contact(store.position(id), radius) ?: continue

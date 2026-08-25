@@ -1,5 +1,6 @@
 package particlesim.render
 
+import particlesim.collision.Collider
 import particlesim.core.Groups
 import particlesim.physics.Constraint
 import particlesim.physics.Force
@@ -56,6 +57,8 @@ class SceneRegistry private constructor(
     val constraints: Map<String, Constraint>,
     val surfaces: Map<String, Surface>,
     val groups: Map<String, Set<Int>>,
+    val colliders: Map<String, Collider>,
+    val groupEnabled: Map<String, Boolean>,
 ) {
     companion object {
         fun build(
@@ -63,6 +66,7 @@ class SceneRegistry private constructor(
             constraints: List<Constraint> = emptyList(),
             surfaces: List<Surface> = emptyList(),
             groups: Groups = Groups(),
+            colliders: List<Collider> = emptyList(),
         ): SceneRegistry =
             SceneRegistry(
                 forces = uniqueByName(forces.filter { it.name != null }) { it.name!! },
@@ -73,6 +77,11 @@ class SceneRegistry private constructor(
                 // "snapshot" here would silently keep tracking Groups' real-time membership
                 // instead of freezing it at build() - the opposite of what this class promises.
                 groups = groups.names().associateWith { name -> groups.membersOf(name).toSet() },
+                colliders = uniqueByName(colliders.filter { it.name != null }) { it.name!! },
+                // §10.4's group enable/disable, snapshotted here the same way membership is -
+                // Groups.isEnabled is itself a live read, not something this class retains a
+                // reference to.
+                groupEnabled = groups.names().associateWith { name -> groups.isEnabled(name) },
             )
 
         private fun <T> uniqueByName(items: List<T>, nameOf: (T) -> String): Map<String, T> {

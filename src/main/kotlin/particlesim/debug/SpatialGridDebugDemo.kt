@@ -13,6 +13,7 @@ import particlesim.core.VectorExpr
 import particlesim.lifecycle.DestructionSystem
 import particlesim.physics.Force
 import particlesim.physics.Integrator
+import particlesim.render.SceneRegistry
 import kotlin.random.Random
 
 /**
@@ -134,6 +135,10 @@ fun main() {
                     liveColliderRules = liveColliderRules.filter { it.collider.name != message.name }
                     floorCollisions = CollisionSystem(liveColliderRules.map { it.rule })
                 }
+                is SceneControlMessage.SetColliderActive -> {
+                    liveColliderRules.find { it.collider.name == message.name }?.collider?.active = message.active
+                }
+                is SceneControlMessage.SetGroupEnabled -> groups.setEnabled(message.name, message.enabled)
                 is SceneControlMessage.DeleteParticle -> {
                     val result = destruction.resolve(store, groups, emptyList<Force>(), t, dt, explicitIds = setOf(message.particleId))
                     ids.removeAll(result.destroyedIds.toSet())
@@ -162,6 +167,7 @@ fun main() {
             t, step, store, ids, emptyList(),
             sphereRadii = ids.associateWith { radius },
             colliders = liveColliderRules.map { it.collider },
+            registry = SceneRegistry.build(groups = groups, colliders = liveColliderRules.map { it.collider }),
         )
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)

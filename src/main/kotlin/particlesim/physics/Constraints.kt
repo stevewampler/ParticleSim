@@ -38,6 +38,9 @@ interface Constraint {
  * along that edge keeps its own height, not all collapsing to one point. Scripted,
  * time-varying fixed positions are `[stretch]` (§6) — not implemented here.
  */
+/** Respects §10.4's group enable/disable ([Groups.isEnabled]): while [group] is disabled, this
+ * constraint pins nothing and [pinnedIds] reports empty, exactly as if it weren't running that
+ * step — a disabled group's members are ordinary, unpinned particles for as long as it's off. */
 class FixedPosition private constructor(
     private val group: String,
     private val position: Vector3?,
@@ -47,13 +50,14 @@ class FixedPosition private constructor(
     constructor(group: String, position: Vector3, name: String? = null) : this(group, position, null, name)
 
     override fun applyPosition(store: ParticleStore, groups: Groups, t: Double) {
+        if (!groups.isEnabled(group)) return
         for (id in groups.membersOf(group)) {
             store.setPosition(id, perParticlePosition?.get(id) ?: position!!)
             store.setVelocity(id, Vector3.ZERO)
         }
     }
 
-    override fun pinnedIds(groups: Groups): Set<Int> = groups.membersOf(group)
+    override fun pinnedIds(groups: Groups): Set<Int> = if (groups.isEnabled(group)) groups.membersOf(group) else emptySet()
 
     companion object {
         /** Pins every current member of [group] to wherever it is right now, individually. */
@@ -69,12 +73,13 @@ class FixedVelocity(
     override val name: String? = null,
 ) : Constraint {
     override fun applyVelocity(store: ParticleStore, groups: Groups, t: Double) {
+        if (!groups.isEnabled(group)) return
         for (id in groups.membersOf(group)) {
             store.setVelocity(id, velocity)
         }
     }
 
-    override fun pinnedIds(groups: Groups): Set<Int> = groups.membersOf(group)
+    override fun pinnedIds(groups: Groups): Set<Int> = if (groups.isEnabled(group)) groups.membersOf(group) else emptySet()
 }
 
 /**

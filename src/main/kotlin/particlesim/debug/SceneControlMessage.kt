@@ -21,6 +21,19 @@ sealed interface SceneControlMessage {
     data class DeleteParticle(val particleId: Int) : SceneControlMessage
     data object Restart : SceneControlMessage
 
+    /** §10.4's collider activation toggle — distinct from [RemoveCollider]: a deactivated
+     * collider stays in the scene (and the outliner) fully able to be turned back on, where
+     * removal is permanent for the rest of the run. */
+    data class SetColliderActive(val name: String, val active: Boolean) : SceneControlMessage
+
+    /** §10.4's group enable/disable toggle. Applying this is *not* "make [Groups.membersOf]
+     * return empty" — that would also blank the group out of the outliner's own member list
+     * (the registry snapshot) and the dual-selection lookup a 3D click resolves through,
+     * stranding the very checkbox meant to turn it back on. Each demo instead resolves this
+     * against [particlesim.core.Groups]' own enabled-state API and the per-step call sites that
+     * choose to respect it — see `Groups.isEnabled`/`setEnabled`. */
+    data class SetGroupEnabled(val name: String, val enabled: Boolean) : SceneControlMessage
+
     companion object {
         /** Returns `null` for anything malformed or unrecognized, same "ignore, don't tear down
          * the connection" stance as [DragMessage.parse]/[TimeControlMessage.parse]. */
@@ -36,6 +49,16 @@ sealed interface SceneControlMessage {
                 "remove_collider" -> (data["name"] as? String)?.let { RemoveCollider(it) }
                 "delete_particle" -> (data["particleId"] as? Number)?.toInt()?.let { DeleteParticle(it) }
                 "restart" -> Restart
+                "set_collider_active" -> {
+                    val name = data["name"] as? String ?: return null
+                    val active = data["active"] as? Boolean ?: return null
+                    SetColliderActive(name, active)
+                }
+                "set_group_enabled" -> {
+                    val name = data["name"] as? String ?: return null
+                    val enabled = data["enabled"] as? Boolean ?: return null
+                    SetGroupEnabled(name, enabled)
+                }
                 else -> null
             }
         }

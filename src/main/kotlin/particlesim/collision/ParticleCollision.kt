@@ -106,6 +106,9 @@ class ParticleCollisionSystem(
      * like the old `for a; for b` did.
      */
     private fun candidatePairs(store: ParticleStore, groups: Groups, rule: ParticleCollisionRule): List<Pair<Int, Int>> {
+        // §10.4 group disable: either side disabled means nothing to collide on that side, so
+        // the whole rule contributes no pairs this step.
+        if (!groups.isEnabled(rule.groupA) || !groups.isEnabled(rule.groupB)) return emptyList()
         val membersA = groups.membersOf(rule.groupA).toList()
         if (rule.groupA == rule.groupB) return sameGroupCandidates(store, membersA)
         val membersB = groups.membersOf(rule.groupB).toList()

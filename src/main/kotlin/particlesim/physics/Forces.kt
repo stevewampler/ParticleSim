@@ -15,6 +15,7 @@ class UniformGravity(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
     ) {
+        if (!groups.isEnabled(group)) return
         val members = groups.membersOf(group).toList()
         var i = chunkIndex
         while (i < members.size) {
@@ -40,6 +41,7 @@ class Drag(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
     ) {
+        if (!groups.isEnabled(group)) return
         val members = groups.membersOf(group).toList()
         var i = chunkIndex
         while (i < members.size) {
@@ -73,6 +75,7 @@ class NBodyGravity(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
     ) {
+        if (!groups.isEnabled(group)) return
         val members = groups.membersOf(group).toList()
         var i = chunkIndex
         while (i < members.size) {
@@ -247,6 +250,7 @@ class ConstantForce(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
     ) {
+        if (!groups.isEnabled(group)) return
         val members = groups.membersOf(group).toList()
         var i = chunkIndex
         while (i < members.size) {

@@ -17,6 +17,10 @@ import particlesim.render.SurfaceRenderer
  * meshes, arrow-sampled fields, `colorBy`-driven line colors, or hiding a particle's own dot
  * entirely) via this method's trailing parameters, all defaulted to "off" so every demo built
  * before this needs zero changes.
+ *
+ * [colliders] is filtered to `active` ones only before it reaches [BinaryFrame.encode]'s
+ * wireframe section (§10.4) — a demo's own collider list can simply include everything, active
+ * or not, without remembering to filter it itself.
  */
 class DebugRenderer(
     private val webSocketPort: Int = 8887,
@@ -51,7 +55,7 @@ class DebugRenderer(
         wsServer.broadcastFrame(
             BinaryFrame.encode(
                 t, step, store, ids, connections, camera, lineColors, sphereRadii, meshes, arrowGroups, visibleIds, registry,
-                colliders, events,
+                colliders.filter { it.active }, events,
             ),
         )
     }

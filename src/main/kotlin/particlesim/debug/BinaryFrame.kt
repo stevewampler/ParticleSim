@@ -48,6 +48,8 @@ import java.nio.charset.StandardCharsets
  * i32  registrySurfaceCount;    registrySurfaceCount    * { i32 nameLen, nameLen UTF-8 bytes }
  * i32  registryGroupCount;      registryGroupCount      * { i32 nameLen, nameLen UTF-8 bytes,
  *                                                            i32 memberCount, memberCount * i32 id }
+ * i32  registryColliderCount;   registryColliderCount   * { i32 nameLen, nameLen UTF-8 bytes, u8 active }
+ * i32  registryGroupEnabledCount; registryGroupEnabledCount * { i32 nameLen, nameLen UTF-8 bytes, u8 enabled }
  * i32  colliderCount
  * colliderCount * { u8 kind (0=plane, 1=sphere, 2=box), i32 nameLen, nameLen UTF-8 bytes,
  *                    f64 px, py, pz,
@@ -77,17 +79,28 @@ import java.nio.charset.StandardCharsets
  * quad's half-extent, sent over the wire (rather than duplicated as a second hardcoded
  * constant in the JS client) so there's exactly one source of truth for it; this is a debug
  * visualization choice, not a physical or DSL-exposed property of the collider itself.
+ * [particlesim.debug.DebugRenderer.broadcast] filters this list to `active` colliders only
+ * (§10.4) before it ever reaches [encode] — a deactivated collider is meant to be hidden as well
+ * as inert, and hiding it here (rather than sending an `active` flag per entry and pushing the
+ * skip into client JS) means the geometry payload for an inactive collider is never sent at all.
+ * It still exists in the *registry* section below regardless of `active`, which is what the
+ * outliner's reactivate toggle reads from.
  *
  * The registry section (§10.3's outliner prerequisite, [SceneRegistry]) carries names — plus,
  * for groups only, current member ids, since a group's §10.3 visibility toggle needs to know
  * *which particles* it hides, not just that the group exists (constraints/surfaces have no such
  * client-side toggle yet, so they stay name-only; a *named* force's arrow visibility is instead
- * keyed by the arrow-group section's own name field below, not this registry). No other
- * per-frame numeric state (a force's live magnitude, a constraint's current target) is attached
- * here — that data already has a home elsewhere in this same frame (a named force's line/arrow
- * renderer, if it has one) or doesn't exist yet (there's no per-object inspection readout wired
- * up yet — a separate, later piece of §10.3). Sent unconditionally (no `has`-flag, unlike
- * `camera`/`visibleIds`)
+ * keyed by the arrow-group section's own name field below, not this registry). Colliders are the
+ * one other kind that carries a per-entry flag here: §10.4's activation toggle needs the outliner
+ * to know a deactivated collider's current state even though (per the collider section below) it
+ * no longer appears in the wireframe draw list while inactive — losing that name from *every*
+ * per-frame section would strand the toggle with nothing to re-enable (an inactive collider still
+ * needs a name to reach it via §10.4's write-back messages, same reasoning as a group's checkbox
+ * needing to persist regardless of that group's own current membership). No other per-frame
+ * numeric state (a force's live magnitude, a constraint's current target) is attached here yet —
+ * that data either has a home elsewhere in this same frame (a named force's line/arrow renderer,
+ * if it has one) or doesn't exist yet (a separate, later piece of §10.4). Sent unconditionally
+ * (no `has`-flag, unlike `camera`/`visibleIds`)
  * because an absent registry and an empty one mean the same thing here, matching how
  * `sphereRadii`/`meshes`/`arrowSamples` already default to "present but zero-length" rather than
  * a nullable flag — every demo built before this defaults to an empty [SceneRegistry] and pays 4
@@ -173,6 +186,7 @@ object BinaryFrame {
             VISIBLE_FLAG_SIZE + (if (visibleIds != null) VISIBLE_HEADER_SIZE + visibleIds.size * 4 else 0) +
             nameListSize(registry.forces.keys) + nameListSize(registry.constraints.keys) +
             nameListSize(registry.surfaces.keys) + groupListSize(registry.groups) +
+            boolNameListSize(registry.colliders.keys) + boolNameListSize(registry.groupEnabled.keys) +
             COLLIDER_HEADER_SIZE + colliders.sumOf { colliderEntrySize(it) } +
             EVENT_HEADER_SIZE + events.sumOf { eventEntrySize(it) }
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
@@ -239,6 +253,16 @@ object BinaryFrame {
             putString(buffer, name)
             buffer.putInt(memberIds.size)
             for (id in memberIds) buffer.putInt(id)
+        }
+        buffer.putInt(registry.colliders.size)
+        for ((name, collider) in registry.colliders) {
+            putString(buffer, name)
+            buffer.put(if (collider.active) 1 else 0)
+        }
+        buffer.putInt(registry.groupEnabled.size)
+        for ((name, enabled) in registry.groupEnabled) {
+            putString(buffer, name)
+            buffer.put(if (enabled) 1 else 0)
         }
         buffer.putInt(colliders.size)
         for (collider in colliders) {
@@ -332,6 +356,8 @@ object BinaryFrame {
             constraints = getNameList(buf),
             surfaces = getNameList(buf),
             groups = getGroupList(buf),
+            colliders = getColliderRegistryList(buf),
+            groupEnabled = getBoolNameList(buf),
         )
         val colliderCount = buf.int
         val colliders = (0 until colliderCount).map {
@@ -370,6 +396,12 @@ object BinaryFrame {
 
     private fun groupListSize(groups: Map<String, Set<Int>>) =
         REGISTRY_LIST_HEADER_SIZE + groups.entries.sumOf { (name, members) -> stringSize(name) + 4 + members.size * 4 }
+
+    /** Size of a `{name, u8 bool}` list — [registry.colliders]'s `active` flag and
+     * [registry.groupEnabled] share this shape (the size doesn't depend on the flag's value,
+     * only the name), so one helper covers both instead of two near-identical ones. */
+    private fun boolNameListSize(names: Collection<String>) =
+        REGISTRY_LIST_HEADER_SIZE + names.sumOf { stringSize(it) + 1 }
 
     private fun colliderEntrySize(collider: Collider): Int {
         val shapeSize = when (collider) {
@@ -418,6 +450,29 @@ object BinaryFrame {
             DecodedGroupEntry(name, memberIds)
         }
     }
+
+    private fun getColliderRegistryList(buffer: ByteBuffer): List<DecodedColliderEntry> {
+        val count = buffer.int
+        return (0 until count).map {
+            val name = getString(buffer)
+            val active = buffer.get().toInt() != 0
+            DecodedColliderEntry(name, active)
+        }
+    }
+
+    /** Decodes a `{name, u8 bool}` list — see [boolNameListSize] for why colliders' `active`
+     * flag has its own typed decoder ([getColliderRegistryList]) while [registry.groupEnabled]
+     * (no other per-entry data to carry) uses this generic one instead. */
+    private fun getBoolNameList(buffer: ByteBuffer): Map<String, Boolean> {
+        val count = buffer.int
+        val result = LinkedHashMap<String, Boolean>(count)
+        repeat(count) {
+            val name = getString(buffer)
+            val value = buffer.get().toInt() != 0
+            result[name] = value
+        }
+        return result
+    }
 }
 
 data class DecodedParticle(val id: Int, val position: Vector3, val velocity: Vector3)
@@ -452,6 +507,11 @@ sealed class DecodedCollider {
     data class Box(override val name: String, override val position: Vector3, val halfExtents: Vector3) : DecodedCollider()
 }
 
+/** One named collider's §10.4 activation state — kept in the registry (unlike the unconditional
+ * wireframe [DecodedCollider] section) so an inactive collider's name is still reachable to
+ * reactivate it, even though it's no longer drawn. */
+data class DecodedColliderEntry(val name: String, val active: Boolean)
+
 /** §10.3's outliner data — see [SceneRegistry] for what "named" means per kind and why groups
  * carry member ids while the other three kinds are plain name lists. */
 data class DecodedRegistry(
@@ -459,6 +519,8 @@ data class DecodedRegistry(
     val constraints: List<String> = emptyList(),
     val surfaces: List<String> = emptyList(),
     val groups: List<DecodedGroupEntry> = emptyList(),
+    val colliders: List<DecodedColliderEntry> = emptyList(),
+    val groupEnabled: Map<String, Boolean> = emptyMap(),
 )
 
 data class DecodedFrame(

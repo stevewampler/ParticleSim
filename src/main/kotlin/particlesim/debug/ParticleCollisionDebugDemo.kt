@@ -134,6 +134,10 @@ fun main() {
                     liveColliderRules = liveColliderRules.filter { it.collider.name != message.name }
                     floorCollisions = CollisionSystem(liveColliderRules.map { it.rule })
                 }
+                is SceneControlMessage.SetColliderActive -> {
+                    liveColliderRules.find { it.collider.name == message.name }?.collider?.active = message.active
+                }
+                is SceneControlMessage.SetGroupEnabled -> groups.setEnabled(message.name, message.enabled)
                 is SceneControlMessage.DeleteParticle -> {
                     val result = destruction.resolve(store, groups, listOf(gravity), t, dt, explicitIds = setOf(message.particleId))
                     ids.removeAll(result.destroyedIds.toSet())

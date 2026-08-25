@@ -2187,42 +2187,94 @@ real prerequisite, not just unstarted — see the note below.
       controls), which the old hardcoded dispatch path isn't built to
       carry. This is now a real prerequisite for that work, not deferred
       mechanical cleanup with no consumer.
-- [ ] Live parameter tweaking (viewer writes back into a running
+- [~] Live parameter tweaking (viewer writes back into a running
       entity's numeric parameters) — fully specified via a direct
-      entity-by-entity walkthrough with the user (requirements.md §10.4);
-      no longer `[stretch]` as a design, though none of it is built yet.
-      Covers colliders (position, orientation — currently fixed, needs to
-      become expression-capable like position already is — shape fields,
-      and a new activation toggle: fully inert *and* hidden, reactivatable
-      from its own tab, no special handling for a pile resting on a
-      deactivated collider - it just falls through), particles/groups
-      (dual selection - picking a particle from a group's list or via a
-      3D click selects both and shows both panels; mass/radius editable
-      per-particle *and* per-group; position/velocity stay per-particle
-      only, via the existing drag-and-throw interaction, §9.4; a group's
-      tab also surfaces spring/damper params for every Spring/Damper/
-      MeshSprings where *all* endpoints belong to that group; group
-      enable/disable with the same semantics as collider activation),
-      standalone forces (UniformGravity/NBodyGravity/Wind gain real
-      parameter editing in their existing per-force tab), constraints
-      (FixedPosition's shared-position variant only, not its
-      per-particle-pinned variant; FixedVelocity; DragConstraint
-      explicitly gets no tab - it's documented as viewer-ephemeral and
-      the drag interaction already is its UI), surfaces (own tab: mesh
-      render toggle + read-only grid params, no separate mass control -
-      that's the underlying group's job), and emitters (a new outliner
-      category; rate + maxAlive/capPolicy editable, per-spawn
-      distributions not yet, since a distribution is a shape/range rather
-      than a single editable value and nothing's needed it). Two
-      cross-cutting rules apply everywhere: a simulation-wide "pause on
-      edit" toggle, and every edit is queued and applied only at a step
-      boundary, never mid-step, since §9.3's fixed-chunk deterministic
-      reduction assumes every chunk in a step reads the same parameter
-      value. Also surfaces a real implementation gap, not just a UI one:
-      most of the fields above (spring/damper stiffness/damping, gravity
-      acceleration, wind density, ...) are `private val`s fixed at
-      construction today - live-editing needs them to become mutable
-      state, a real code change per field, not just wire-protocol work.
+      entity-by-entity walkthrough with the user (requirements.md §10.4).
+      Implemented on the `viewer-live-editing` branch, in this order:
+    - [x] Collider activation: `Collider.active` (mutable, `contact()`
+          returns `null` unconditionally while inactive, a single choke
+          point every existing caller already goes through). Hidden while
+          inactive too — `DebugRenderer.broadcast` filters the wireframe
+          draw list to `active` colliders before it reaches
+          `BinaryFrame.encode`; the *registry* section carries every
+          collider's name + active flag regardless, specifically so a
+          deactivated collider's own outliner entry (and its reactivate
+          checkbox) never disappears alongside its wireframe. Write path
+          reuses the existing `SceneControlMessage`/`SceneControlMessageQueue`
+          channel (`SetColliderActive`) rather than a new message type -
+          this is the same "scene mutation" category `RemoveCollider`/
+          `Restart` already live in. **Verified live in Chrome**
+          (`SpatialGridDebugDemo`, 2000-ball sealed box): unchecking
+          "floor"'s new "active" checkbox removed its wireframe from the
+          scene and the entire ball cloud immediately poured out through
+          the now-open bottom face - the "pile falls straight through,
+          not a case this guards against" behavior from the spec, not
+          just a UI checkbox with nothing behind it. Re-checking it
+          restored the wireframe and re-contained the balls. No console
+          errors.
+    - [x] Group enable/disable: `Groups.isEnabled`/`setEnabled`, a
+          *separate* flag from `membersOf` (deliberately - filtering
+          `membersOf` itself would blank a disabled group out of the
+          registry snapshot and the dual-selection lookup a 3D click
+          resolves through, stranding the very checkbox meant to turn it
+          back on). Gated at every per-step call site that resolves a
+          named group each step: `UniformGravity`/`Drag`/`NBodyGravity`/
+          `ConstantForce`'s `accumulate`, `FixedPosition`/`FixedVelocity`'s
+          `applyPosition`/`applyVelocity`/`pinnedIds`,
+          `CollisionSystem.resolve`, `SurfaceCollisionSystem.resolve`, and
+          `ParticleCollisionSystem.candidatePairs` (either side disabled →
+          the whole rule contributes no pairs that step). Deliberately
+          *not* gated: `MeshSprings`/`Spring`/`Damper` (built once from a
+          fixed particle-id pair, not a live group lookup) and `Wind`
+          (bound to a fixed triangle list) - disabling a group does not
+          freeze its own structural springs or wind loading, an accepted
+          gap, not an oversight (see `Groups.isEnabled`'s doc comment). A
+          disabled group's members stay ordinary particles otherwise -
+          base integration isn't gated by group membership at all, so
+          they keep coasting on residual velocity, exactly like a
+          deactivated collider's "no special-casing, it just falls
+          through" stance. Write path: `SceneControlMessage.SetGroupEnabled`,
+          same channel as collider activation. **Verified live in
+          Chrome** on the same running demo: unchecking "balls"'s new
+          "enabled" checkbox made the entire 2000-particle cloud pass
+          straight through every wall of the box *and* through each
+          other (both `CollisionSystem` and `ParticleCollisionSystem`
+          skipped it in the same step) - re-checking it recovered normal
+          containment. Component test coverage:
+          `ForceComponentTest`'s "group disable" test (gravity
+          contributes zero force while disabled, resumes when
+          re-enabled) and `GroupsTest`'s enable/disable tests (including
+          that `membersOf` itself is untouched by disabling).
+    - [ ] Numeric field editing (gravity acceleration, N-body g/softening,
+          wind density, spring/damper stiffness/damping, FixedVelocity's
+          velocity, FixedPosition's shared position) - none of this is
+          built yet. Needs both a generalized read path (today's registry
+          wire section only carries names/booleans, no numeric values -
+          the client has nothing to pre-fill a field with) and turning
+          each of those `private val`s into mutable state, a real
+          per-field code change, not just wire-protocol work.
+    - [ ] Module migration: constraints/surfaces/colliders still render
+          via the old hardcoded per-kind dispatch path in `viewer.html`,
+          not the self-registering `entityKindModules` system
+          groups/forces already use. The collider panel's new "active"
+          checkbox above was added directly to that hardcoded path as a
+          minimal, scoped addition - it works, but doesn't yet get this
+          migration's benefits (a consistent shape for adding the
+          numeric controls above).
+    - [ ] Particles/groups: dual selection (3D click or group-list click
+          selects both particle and group), per-particle/per-group
+          mass/radius editing, a group's tab surfacing spring/damper
+          params for every fully-contained Spring/Damper/MeshSprings,
+          per-particle render override, per-group color override +
+          visibility toggle - not built yet, beyond the enable/disable
+          checkbox above.
+    - [ ] Constraints/surfaces/emitters editing (FixedPosition's shared
+          variant, FixedVelocity, surfaces' mesh-style toggle, emitters as
+          a new outliner category with rate/maxAlive/capPolicy) - not
+          built yet.
+    - [ ] The "pause on edit" toggle - not built yet. Purely a client
+          change when it happens (send the existing pause
+          `TimeControlMessage` before an edit message), no server work.
 
 ## Shape library (§4.5, new requirement) — not yet phased
 - [x] Kotlin DSL: `ShapePlacement` (`particlesim.examples`) — an

@@ -399,16 +399,9 @@ function updateColliders(colliders) {
   }
   lastColliderSignature = signature;
 
-  // §10.3's outliner, extended to colliders (name-only - unnamed ones aren't individually
-  // reachable, same convention as every other outliner kind). Gated on the same "did the set
-  // actually change" signature as the wireframe rebuild below, not every frame.
-  renderNameList(outlinerSections.colliders, "colliders", colliders.filter((c) => c.name !== "").map((c) => c.name));
-  if (selectedKind === "colliders" && !colliders.some((c) => c.name === selectedName)) {
-    selectedKind = null; // the selected collider was just removed - close its panel
-    selectedName = null;
-  }
-  updateSelectionHighlight();
-  renderObjectPanel();
+  // §10.3's outliner for colliders is driven by the registry (updateOutliner), not this list -
+  // this array is filtered to `active` colliders only (see DebugRenderer.broadcast), so an
+  // inactive collider would otherwise vanish from the outliner along with its wireframe.
 
   while (colliderObjects.length < colliders.length) {
     const obj = new THREE.LineSegments(new THREE.BufferGeometry(), colliderMaterial);
@@ -650,6 +643,30 @@ function decodeFrame(buffer) {
     }
     return groups;
   };
+  // §10.4's collider activation state - kept in the registry (unlike the unconditional
+  // wireframe section below, which a deactivated collider drops out of entirely) so its name
+  // and current "active" flag stay reachable to reactivate it from the outliner.
+  const readColliderRegistryList = () => {
+    const count = view.getInt32(offset, true); offset += 4;
+    const colliders = new Array(count);
+    for (let i = 0; i < count; i++) {
+      const name = readString();
+      const active = view.getUint8(offset) !== 0; offset += 1;
+      colliders[i] = { name, active };
+    }
+    return colliders;
+  };
+  // §10.4's group enable/disable state - a plain name->bool map, same {name, u8 bool} shape as
+  // the collider registry list above but with nothing else to carry per entry.
+  const readBoolNameMap = () => {
+    const count = view.getInt32(offset, true); offset += 4;
+    const result = {};
+    for (let i = 0; i < count; i++) {
+      const name = readString();
+      result[name] = view.getUint8(offset) !== 0; offset += 1;
+    }
+    return result;
+  };
 
   const t = view.getFloat64(offset, true); offset += 8;
   const step = Number(view.getBigInt64(offset, true)); offset += 8;
@@ -734,6 +751,8 @@ function decodeFrame(buffer) {
     constraints: readNameList(),
     surfaces: readNameList(),
     groups: readGroupList(),
+    colliders: readColliderRegistryList(),
+    groupEnabled: readBoolNameMap(),
   };
 
   // §10.2's "debug/--render-all mode... draws every collider as wireframe" - unconditional,
@@ -938,7 +957,7 @@ const objectPanelTitleEl = document.getElementById("objectPanelTitle");
 const objectPanelBodyEl = document.getElementById("objectPanelBody");
 
 let lastRegistrySignature = null;
-let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [] };
+let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [], colliders: [], groupEnabled: {} };
 let selectedKind = null; // "groups" | "forces" | "constraints" | "surfaces" | "colliders"
 let selectedName = null;
 let latestVisibleIds = null; // this frame's server-side dot filter, updated every frame in applyFrame
@@ -968,6 +987,10 @@ function registrySignature(registry) {
     constraints: registry.constraints,
     surfaces: registry.surfaces,
     groups: registry.groups.map((g) => ({ name: g.name, memberIds: [...g.memberIds].sort((a, b) => a - b) })),
+    // §10.4: active is the one per-entry field that can flip without the collider *set*
+    // changing, so it has to be part of the signature or a toggle would never repaint.
+    colliders: registry.colliders.map((c) => [c.name, c.active]),
+    groupEnabled: registry.groupEnabled,
   });
 }
 
@@ -1084,6 +1107,22 @@ registerEntityKind({
   getNames: (registry) => registry.groups.map((g) => g.name),
   renderPanel: () => {
     addPanelToggle("show particles", hiddenGroups);
+
+    // §10.4's group enable/disable - see Groups.isEnabled's own doc comment for what this does
+    // and, just as importantly, what it doesn't (structural springs/wind keep acting on a
+    // disabled group's members; only field forces/constraints/collision rules that resolve this
+    // group by name each step stop).
+    const enabledLabel = document.createElement("label");
+    const enabledCheckbox = document.createElement("input");
+    enabledCheckbox.type = "checkbox";
+    enabledCheckbox.checked = latestRegistry.groupEnabled[selectedName] !== false;
+    enabledCheckbox.addEventListener("change", (e) => {
+      send({ type: "set_group_enabled", name: selectedName, enabled: e.target.checked });
+    });
+    enabledLabel.appendChild(enabledCheckbox);
+    enabledLabel.appendChild(document.createTextNode(" enabled"));
+    objectPanelBodyEl.appendChild(enabledLabel);
+
     const info = document.createElement("div");
     info.className = "objectInfo";
     info.textContent = groupPanelInfoText(selectedName);
@@ -1182,10 +1221,28 @@ function renderObjectPanel() {
     addPanelNote("no renderer or live data defined for constraints (§10.2)");
   } else if (selectedKind === "colliders") {
     const collider = latestColliders.find((c) => c.name === selectedName);
+    const registryEntry = latestRegistry.colliders.find((c) => c.name === selectedName);
     const info = document.createElement("div");
     info.className = "objectInfo";
-    info.textContent = collider ? collider.kind : "";
+    // `collider` (the wireframe/geometry entry) is undefined while inactive - see
+    // updateColliders' own doc comment on why that list is filtered - so its shape ("plane"
+    // etc.) just isn't shown for a deactivated collider rather than being tracked separately.
+    info.textContent = collider ? collider.kind : "(inactive)";
     objectPanelBodyEl.appendChild(info);
+
+    // §10.4's activation toggle: fully inert and hidden while unchecked, same convention as a
+    // group's own enable/disable checkbox below.
+    const activeLabel = document.createElement("label");
+    const activeCheckbox = document.createElement("input");
+    activeCheckbox.type = "checkbox";
+    activeCheckbox.checked = registryEntry ? registryEntry.active : true;
+    activeCheckbox.addEventListener("change", (e) => {
+      send({ type: "set_collider_active", name: selectedName, active: e.target.checked });
+    });
+    activeLabel.appendChild(activeCheckbox);
+    activeLabel.appendChild(document.createTextNode(" active"));
+    objectPanelBodyEl.appendChild(activeLabel);
+
     const removeBtn = document.createElement("button");
     removeBtn.textContent = "remove";
     removeBtn.addEventListener("click", () => {
@@ -1212,6 +1269,13 @@ function updateOutliner(registry) {
   }
   renderNameList(outlinerSections.constraints, "constraints", registry.constraints);
   renderNameList(outlinerSections.surfaces, "surfaces", registry.surfaces);
+  // Driven by the registry, not the (active-only) wireframe collider list in updateColliders -
+  // a deactivated collider must stay listed here so its own panel can turn it back on.
+  renderNameList(outlinerSections.colliders, "colliders", registry.colliders.map((c) => c.name));
+  if (selectedKind === "colliders" && !registry.colliders.some((c) => c.name === selectedName)) {
+    selectedKind = null; // the selected collider was actually removed, not just deactivated
+    selectedName = null;
+  }
   updateSelectionHighlight();
   renderObjectPanel();
 }

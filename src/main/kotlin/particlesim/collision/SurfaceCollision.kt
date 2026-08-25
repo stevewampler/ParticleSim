@@ -60,6 +60,7 @@ class SurfaceCollisionSystem(
 ) {
     fun resolve(store: ParticleStore, groups: Groups, t: Double, dt: Double) {
         for (rule in rules) {
+            if (!groups.isEnabled(rule.group)) continue
             for (id in groups.membersOf(rule.group)) {
                 val radius = store.radius(id) ?: continue
                 val contact = deepestContact(store, rule.surface, store.position(id), radius) ?: continue

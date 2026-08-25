@@ -111,4 +111,19 @@ class ForceComponentTest {
         assertEquals(Vector3(0.0, -9.8, 0.0), gravity.sampleAt(Vector3(50.0, 50.0, 50.0), t = 123.0))
         assertEquals(Vector3(0.0, -9.8, 0.0), gravity.sampleAt(Vector3.ZERO, t = 0.0))
     }
+
+    @Test
+    fun `group disable (§10_4) - a disabled group's field force contributes nothing`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val id = store.create(position = Vector3.ZERO)
+        groups.add("g", id)
+        val gravity = UniformGravity("g", Vector3(0.0, -9.8, 0.0))
+
+        assertEquals(Vector3(0.0, -9.8, 0.0), netForceOn(id, store, groups, gravity))
+        groups.setEnabled("g", false)
+        assertEquals(Vector3.ZERO, netForceOn(id, store, groups, gravity))
+        groups.setEnabled("g", true)
+        assertEquals(Vector3(0.0, -9.8, 0.0), netForceOn(id, store, groups, gravity))
+    }
 }
