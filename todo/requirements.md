@@ -883,20 +883,16 @@ readout to debug a scene without a separate tool.
   specified in §9.1 but are UI surface, not just engine capability —
   listed here as part of what this viewer needs to actually expose, not
   a new requirement.
-- `[stretch]` **Live parameter tweaking**: editing a force/constraint's
-  numeric parameters (stiffness, wind strength, restitution, ...) from
-  its per-object panel, with the change taking effect immediately in the
-  running simulation. Deliberately deferred, and deliberately distinct
-  from everything else in this section: every other item here is the
-  viewer *reading* engine state, the same direction §9.1's state stream
-  already flows; this is the viewer *writing back*, which means
-  generalizing §9.4's drag-target channel (currently the only case of
-  viewer-to-engine input, and narrowly typed to "a position") into
-  something that can carry an arbitrary named parameter edit instead.
-  That's a materially bigger protocol and validation surface (what
-  happens to a running simulation when `stiffness` goes negative
-  mid-step?) than a read-only inspector, which is why it stays `[stretch]`
-  rather than bundled in with the rest of this UI.
+- **Live parameter tweaking**: editing an entity's numeric parameters
+  from its per-object panel, with the change taking effect in the
+  running simulation. Deliberately distinct from everything else in this
+  section: every other item here is the viewer *reading* engine state,
+  the same direction §9.1's state stream already flows; this is the
+  viewer *writing back*, generalizing §9.4's drag-target channel
+  (currently the only case of viewer-to-engine input, narrowly typed to
+  "a position") into something that can carry an arbitrary named
+  parameter edit instead. Fully specified below (§10.4) — no longer
+  `[stretch]` as a design, though none of it is built yet.
 - **Per-entity-type UI modules, self-registered**: each entity kind's
   outliner section and per-object panel is owned by a module —
   `{kind, getNames(registry), renderPanel(), updateLive()?}` — that
@@ -919,6 +915,124 @@ readout to debug a scene without a separate tool.
   settings would live (e.g. a future lighting/materials control panel,
   once that `[stretch]` item above is built) instead of one more
   hardcoded case.
+
+### 10.4 Live editing (viewer writes back into the running simulation)
+
+Specified in full via a direct entity-by-entity walkthrough with the user;
+nothing below is built yet. Two cross-cutting decisions apply to every
+entity type before the per-type detail:
+
+- **"Pause on edit: Yes/No"** is a single simulation-wide toggle, not a
+  per-entity setting — when on, any edit anywhere pauses the run (via the
+  existing time controls, §10.3) so the effect can be inspected at rest;
+  when off, edits apply to the live run.
+- **Edits are queued and applied at a step boundary, never mid-step** —
+  the same pattern §9.4's drag target and §10.3's `SceneControlMessage`
+  already use (drained once per frame/physics-step at a defined point,
+  not mutated at an arbitrary time from the WebSocket I/O thread). This
+  isn't just consistency for its own sake: §9.3/§11's fixed-chunk
+  deterministic reduction assumes every chunk reads the same parameter
+  value for a given step, so a force/constraint parameter mutated
+  mid-step, read by chunk 0 before the edit and chunk 3 after, would
+  silently break both determinism and chunk-order-independence. Applying
+  every edit only between steps avoids the question entirely.
+
+Most of what follows also surfaces a real implementation gap, not just a
+UI one: `Spring`/`Damper`/`MeshSprings`' stiffness/damping and most
+force/constraint fields (`UniformGravity.acceleration`, `NBodyGravity.g`/
+`softening`, `Wind.density`, `FixedVelocity.velocity`, ...) are `private
+val`s fixed at construction today. Making any of them live-editable means
+making them mutable state the physics loop reads fresh each step, subject
+to the queued-at-a-boundary rule above — a real code change per field,
+not just wiring an existing value into the wire protocol. Fields already
+expression-capable (`Wind.velocity`, any collider's position, `Emitter
+.rate`) are comparatively cheap, since the machinery to vary them already
+exists; a plain constant is the more common case, though.
+
+**Colliders** (`PlaneCollider`/`SphereCollider`/`BoxCollider`):
+- Position — already expression-capable; live-editing means authoring/
+  overriding that expression.
+- Orientation (a plane's `normal`) — currently a fixed `Vector3` set at
+  construction, not an expression. Live-editing this needs the same
+  expression-capable treatment position already has, not just a mutable
+  field.
+- Shape fields (`radius`, `halfExtents`).
+- **Activation**: a live boolean, distinct from `SceneControlMessage
+  .RemoveCollider`'s permanent removal — a deactivated collider is fully
+  inert *and* hidden, reactivatable from its own tab. No special handling
+  for anything resting on it: deactivating a collider a pile is resting
+  on means the pile falls through immediately, the same as if the
+  collider had never been there. This is intended behavior, not an edge
+  case to guard against.
+- Per-rule physics parameters (restitution, friction, damping) belong to
+  the collider *rule*, not the collider itself, and one collider can be
+  referenced by multiple rules — out of scope for this pass; only the
+  collider's own geometry/activation are covered here.
+
+**Particles & groups**:
+- **Selection is dual**: picking a particle — from a group's member list
+  in its own tab, or by clicking it in the 3D view — selects both the
+  particle and its group, opening both panels together. Both entry
+  points drive the same selection state.
+- **Mass, radius**: editable both per-particle (an override) and
+  per-group (bulk, applied to every current member) — both controls
+  shown together whenever a particle is selected.
+- **Position, velocity**: per-particle only, no group-level bulk control.
+  The existing drag-and-throw interaction (§9.4) *is* this entity's
+  position/velocity editing UI — not replaced by a numeric-only form.
+- **A group's springs/dampers**: a group's tab also exposes the
+  stiffness/damping parameters of every `Spring`/`Damper`/`MeshSprings`
+  where **all** endpoints belong to that group — found by scanning
+  membership (these forces target explicit particle ids, not a group
+  name, so there's no live "targets this group" reference to follow).
+  A spring with endpoints split across two different groups belongs to
+  neither group's tab under this rule; that case doesn't arise in any
+  shape built so far (every structural spring set is generated within
+  one shape's own group), so it isn't specced further here.
+- **Group enable/disable**: same fully-inert-and-hidden/reactivatable-
+  from-its-tab semantics as a collider's activation, above.
+- Rendering: a per-particle render override, plus per-group color
+  override and visibility toggle.
+
+**Forces** (`UniformGravity`, `NBodyGravity`, `Wind` — standalone, not a
+surface's auto-generated `MeshSprings`, which is covered under "particles
+& groups" above via its owning group): the existing per-force tab
+(§10.3's self-registered module, currently just an arrow-visibility
+toggle) gains real numeric-parameter editing — `acceleration`, `g`/
+`softening`, `velocity`/`density` respectively. `Wind` is associated with
+a specific surface via its triangle list, the same "belongs to" lookup as
+a group's springs, not a named-group target like the other two.
+
+**Constraints**:
+- `FixedPosition`: only the shared-position variant (one `Vector3` for
+  the whole group) is editable. The per-particle-pinned variant (e.g.
+  `atCurrentPositions`, used for the flag's pole edge) is view-only —
+  editing it would mean editing individual entries in a map, which isn't
+  in scope here.
+- `FixedVelocity`: the group's `velocity` is editable.
+- `DragConstraint`: **no tab at all**. It's explicitly documented as an
+  ephemeral, viewer-driven object never meant to be outliner-listed —
+  the existing drag-and-throw interaction is already its complete UI.
+
+**Surfaces**: keep their own tab, separate from the underlying group's —
+a mesh render-style toggle (shaded vs. wireframe) and read-only
+generation parameters (grid dimensions, etc. — not live-editable, since
+the mesh is built once at construction). No dedicated mass control: a
+surface's particle mass is edited entirely through its group's tab
+(above), and its structural stiffness/damping through that same group's
+spring/damper controls.
+
+**Emitters**: not currently in the outliner at all (no `EMITTERS`
+section exists alongside groups/forces/constraints/surfaces/colliders)
+— this is a new tab category. Editable: `rate` (already expression-
+capable) and `maxAlive`/`capPolicy`. The per-spawn distributions
+(`position`, `velocity`, `mass`, `radius`, `lifetime` — each a
+`VectorDistribution`/`ScalarDistribution`, not a single value) are
+**not** live-editable for now — a distribution is a shape/range, not a
+value a simple control naturally edits, and nothing has needed it yet.
+Any edit here only ever affects particles spawned *after* the edit;
+already-alive particles from this emitter are never retroactively
+touched.
 
 ## 11. Non-Functional Requirements
 

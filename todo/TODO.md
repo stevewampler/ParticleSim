@@ -2180,18 +2180,49 @@ real prerequisite, not just unstarted — see the note below.
       unmigrated surfaces/constraints panels still render exactly as
       before (no regression from the module-lookup fallback path). No
       console errors on a fresh page load or after interaction.
-- [ ] `[stretch]` Migrate constraints/surfaces/colliders to the
-      self-registering entity-kind module system above — deferred, not
-      forgotten; two real modules (groups, forces) already proved the
-      shape, so this is mechanical work with low risk/reward until a
-      third kind actually needs a module-specific behavior the shared
-      hardcoded path can't express.
-- [ ] `[stretch]` Live parameter tweaking (viewer writes back into a
-      running force/constraint's numeric parameters) — deliberately kept
-      out of this phase's main scope; needs generalizing §9.4's
-      drag-target channel from "a position" to an arbitrary named
-      parameter edit, a materially bigger protocol/validation surface
-      than the rest of this phase's read-only inspection
+- [ ] Migrate constraints/surfaces/colliders to the self-registering
+      entity-kind module system above — no longer `[stretch]`/low-reward:
+      §10.4's live-editing spec (below) needs a real per-object panel for
+      colliders and constraints (activation toggle, numeric parameter
+      controls), which the old hardcoded dispatch path isn't built to
+      carry. This is now a real prerequisite for that work, not deferred
+      mechanical cleanup with no consumer.
+- [ ] Live parameter tweaking (viewer writes back into a running
+      entity's numeric parameters) — fully specified via a direct
+      entity-by-entity walkthrough with the user (requirements.md §10.4);
+      no longer `[stretch]` as a design, though none of it is built yet.
+      Covers colliders (position, orientation — currently fixed, needs to
+      become expression-capable like position already is — shape fields,
+      and a new activation toggle: fully inert *and* hidden, reactivatable
+      from its own tab, no special handling for a pile resting on a
+      deactivated collider - it just falls through), particles/groups
+      (dual selection - picking a particle from a group's list or via a
+      3D click selects both and shows both panels; mass/radius editable
+      per-particle *and* per-group; position/velocity stay per-particle
+      only, via the existing drag-and-throw interaction, §9.4; a group's
+      tab also surfaces spring/damper params for every Spring/Damper/
+      MeshSprings where *all* endpoints belong to that group; group
+      enable/disable with the same semantics as collider activation),
+      standalone forces (UniformGravity/NBodyGravity/Wind gain real
+      parameter editing in their existing per-force tab), constraints
+      (FixedPosition's shared-position variant only, not its
+      per-particle-pinned variant; FixedVelocity; DragConstraint
+      explicitly gets no tab - it's documented as viewer-ephemeral and
+      the drag interaction already is its UI), surfaces (own tab: mesh
+      render toggle + read-only grid params, no separate mass control -
+      that's the underlying group's job), and emitters (a new outliner
+      category; rate + maxAlive/capPolicy editable, per-spawn
+      distributions not yet, since a distribution is a shape/range rather
+      than a single editable value and nothing's needed it). Two
+      cross-cutting rules apply everywhere: a simulation-wide "pause on
+      edit" toggle, and every edit is queued and applied only at a step
+      boundary, never mid-step, since §9.3's fixed-chunk deterministic
+      reduction assumes every chunk in a step reads the same parameter
+      value. Also surfaces a real implementation gap, not just a UI one:
+      most of the fields above (spring/damper stiffness/damping, gravity
+      acceleration, wind density, ...) are `private val`s fixed at
+      construction today - live-editing needs them to become mutable
+      state, a real code change per field, not just wire-protocol work.
 
 ## Shape library (§4.5, new requirement) — not yet phased
 - [x] Kotlin DSL: `ShapePlacement` (`particlesim.examples`) — an
