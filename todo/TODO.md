@@ -2317,14 +2317,30 @@ real prerequisite, not just unstarted — see the note below.
           checked, deactivating a collider immediately flipped the
           play/pause button to "play" and steps/s dropped to 0 - the edit
           and the pause both visibly took effect from one click.
-    - [ ] Module migration: constraints/surfaces/colliders still render
-          via the old hardcoded per-kind dispatch path in `viewer.html`,
-          not the self-registering `entityKindModules` system
-          groups/forces already use. The collider panel's "active"
-          checkbox and the constraints panel's new editable-fields
-          support were both added directly to that hardcoded path as
-          minimal, scoped additions - they work, but don't yet get this
-          migration's benefit of one consistent per-kind panel shape.
+    - [x] Module migration: constraints/surfaces/colliders now render via
+          the same self-registering `entityKindModules` system
+          groups/forces already used, rather than the old hardcoded
+          per-kind branches in `renderObjectPanel`/`updateOutliner`/
+          `updateInspection` - a pure code-move, no behavior change
+          intended (each module's `renderPanel`/`updateLive` body is the
+          same code that used to live in the hardcoded branch).
+          `updateInspection`/`renderObjectPanel` collapse to a single
+          `entityKindModules.get(selectedKind)` lookup with no more
+          per-kind branching, and the now-redundant `outlinerSections`
+          map is gone. **Verified live in Chrome, across two demos since
+          no single existing demo wires every kind into its `broadcast()`
+          call**: first tried `MultiShapeDebugDemo`, which turned out to
+          call `renderer.broadcast(t, step, store, allIds, connections())`
+          with no `registry`/`meshes`/`colliders` arguments at all - every
+          outliner section is empty on that demo regardless of this
+          migration, a pre-existing gap unrelated to this change, not a
+          regression. Switched to `FlagDebugDemo` (wires groups/forces/
+          constraints/a surface mesh) - outliner populated, panels for
+          all four kinds opened correctly via both an outliner click and
+          a right-click in the 3D view. Then `SpatialGridDebugDemo` (has
+          a named "floor" collider) to confirm the migrated collider
+          panel specifically - active checkbox, shape info, and remove
+          button all worked. No console errors either run.
     - [ ] Particles/groups: dual selection (3D click or group-list click
           selects both particle and group), per-particle/per-group
           mass/radius editing, a group's tab surfacing spring/damper

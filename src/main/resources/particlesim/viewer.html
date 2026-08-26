@@ -962,18 +962,10 @@ function updateEventLog(frame) {
 // same per-object panel a right-click would" - right-click-in-3D itself is still separate,
 // unstarted future work).
 //
-// "groups" and "forces" are self-registered entity-kind modules (see registerEntityKind below):
-// each owns its own outliner list contents and per-object panel body, so a new kind is additive
-// rather than another branch in renderObjectPanel/updateOutliner every other kind already
-// depends on. "constraints"/"surfaces"/"colliders" are still on the older hardcoded path - two
-// real modules (one with just a toggle, one with a toggle *and* live inspection text) already
-// prove the shape; migrating the rest is deferred rather than risking three working panels in one
-// pass for no functional gain (see TODO.md).
-const outlinerSections = {
-  constraints: document.getElementById("outlinerConstraints"),
-  surfaces: document.getElementById("outlinerSurfaces"),
-  colliders: document.getElementById("outlinerColliders"),
-};
+// Every entity kind ("groups", "forces", "constraints", "surfaces", "colliders") is a
+// self-registered entity-kind module (see registerEntityKind below): each owns its own outliner
+// list contents and per-object panel body, so a new kind is additive rather than another branch
+// in renderObjectPanel/updateOutliner every other kind already depends on.
 const objectPanelEl = document.getElementById("objectPanel");
 const objectPanelTitleEl = document.getElementById("objectPanelTitle");
 const objectPanelBodyEl = document.getElementById("objectPanelBody");
@@ -1083,12 +1075,11 @@ function renderNameList(container, kind, names) {
 // its own container from scratch), so registering is purely additive to what's already on the
 // page - section order and header text stay exactly where the page put them.
 //
-// Two kinds are migrated here - "groups" (a toggle, live info text, *and* live inspection,
-// exercising every hook a module can have) and "forces" (this feature's actual new consumer: a
-// per-force arrow-visibility toggle, real only when that force has arrow samples this frame).
-// "constraints"/"surfaces"/"colliders" stay on the pre-existing hardcoded path below - two real
-// modules already prove the shape; migrating the rest is deferred (see TODO.md) rather than
-// risking three working panels in one pass for no functional gain.
+// All five kinds are migrated here - "groups" (a toggle, live info text, *and* live inspection),
+// "forces" (a per-force arrow-visibility toggle, real only when that force has arrow samples this
+// frame, plus editable fields), "constraints" (editable fields only - §10.2 defines no constraint
+// renderer), "surfaces" (a mesh-visibility toggle plus live triangle/vertex-speed inspection), and
+// "colliders" (an active toggle, a remove button, and the collider's shape when active).
 const entityKindModules = new Map(); // kind -> { getNames(registry), renderPanel(), updateLive()? }
 
 function registerEntityKind(module) {
@@ -1097,9 +1088,8 @@ function registerEntityKind(module) {
   entityKindModules.set(module.kind, module);
 }
 
-// Shared per-object-panel building blocks - available to every kind, migrated or not, so the
-// hardcoded constraints/surfaces/colliders branches below and the two modules above build their
-// panel bodies the exact same way.
+// Shared per-object-panel building blocks - available to every entity-kind module, so they all
+// build their panel bodies the exact same way.
 function addPanelNote(text) {
   const note = document.createElement("div");
   note.className = "noRenderer";
@@ -1255,22 +1245,28 @@ registerEntityKind({
   updateLive: () => updateEditableFieldsLive("force", selectedName),
 });
 
-// Updates whichever per-object panel is currently open with this frame's live data - called
-// every frame from applyFrame. A module with an updateLive hook gets it; "surfaces" (not yet
-// migrated) keeps its own inline logic, same single-writer discipline (never recreates the
-// checkbox its inspect text sits next to).
-function updateInspection() {
-  const module = entityKindModules.get(selectedKind);
-  if (module) {
-    if (module.updateLive) module.updateLive();
-    return;
-  }
-  if (selectedKind === "constraints") {
-    updateEditableFieldsLive("constraint", selectedName);
-    return;
-  }
-  if (!objectPanelInspectEl) return;
-  if (selectedKind === "surfaces") {
+registerEntityKind({
+  kind: "constraints",
+  getNames: (registry) => registry.constraints,
+  // §10.2 defines no constraint renderer at all - editable fields are the only panel content.
+  renderPanel: () => {
+    renderEditableFields("constraint", selectedName);
+    if (latestRegistry.fields.every((f) => !(f.kind === "constraint" && f.name === selectedName))) {
+      addPanelNote("no renderer or editable numeric fields for this constraint yet (§10.2/§10.4)");
+    }
+  },
+  updateLive: () => updateEditableFieldsLive("constraint", selectedName),
+});
+
+registerEntityKind({
+  kind: "surfaces",
+  getNames: (registry) => registry.surfaces,
+  renderPanel: () => {
+    addPanelToggle("show mesh", hiddenSurfaces);
+    addPanelInspect();
+  },
+  updateLive: () => {
+    if (!objectPanelInspectEl) return;
     const meshDecl = latestMeshes.find((m) => m.name === selectedName);
     if (!meshDecl) { objectPanelInspectEl.textContent = "no live data"; return; }
     const vertexIds = new Set();
@@ -1285,33 +1281,13 @@ function updateInspection() {
     objectPanelInspectEl.textContent = count === 0
       ? "no live data"
       : `${meshDecl.triangles.length} triangle(s)\navg vertex speed: ${(sumSpeed / count).toFixed(3)} m/s`;
-  }
-}
+  },
+});
 
-function renderObjectPanel() {
-  // The body is about to be cleared - drop stale references to nodes that won't exist anymore.
-  objectPanelInfoEl = null;
-  objectPanelInspectEl = null;
-  if (selectedKind === null) {
-    objectPanelEl.style.display = "none";
-    return;
-  }
-  objectPanelEl.style.display = "block";
-  objectPanelTitleEl.textContent = selectedName;
-  objectPanelBodyEl.innerHTML = "";
-
-  const module = entityKindModules.get(selectedKind);
-  if (module) {
-    module.renderPanel();
-  } else if (selectedKind === "surfaces") {
-    addPanelToggle("show mesh", hiddenSurfaces);
-    addPanelInspect();
-  } else if (selectedKind === "constraints") {
-    renderEditableFields("constraint", selectedName);
-    if (latestRegistry.fields.every((f) => !(f.kind === "constraint" && f.name === selectedName))) {
-      addPanelNote("no renderer or editable numeric fields for this constraint yet (§10.2/§10.4)");
-    }
-  } else if (selectedKind === "colliders") {
+registerEntityKind({
+  kind: "colliders",
+  getNames: (registry) => registry.colliders.map((c) => c.name),
+  renderPanel: () => {
     const collider = latestColliders.find((c) => c.name === selectedName);
     const registryEntry = latestRegistry.colliders.find((c) => c.name === selectedName);
     const info = document.createElement("div");
@@ -1323,7 +1299,7 @@ function renderObjectPanel() {
     objectPanelBodyEl.appendChild(info);
 
     // §10.4's activation toggle: fully inert and hidden while unchecked, same convention as a
-    // group's own enable/disable checkbox below.
+    // group's own enable/disable checkbox above.
     const activeLabel = document.createElement("label");
     const activeCheckbox = document.createElement("input");
     activeCheckbox.type = "checkbox";
@@ -1347,7 +1323,31 @@ function renderObjectPanel() {
       renderObjectPanel();
     });
     objectPanelBodyEl.appendChild(removeBtn);
+  },
+});
+
+// Updates whichever per-object panel is currently open with this frame's live data - called
+// every frame from applyFrame. Every kind is a module now; one without an updateLive hook (e.g.
+// "colliders", whose panel only changes on a registry-signature-triggered rebuild) just does
+// nothing here.
+function updateInspection() {
+  const module = entityKindModules.get(selectedKind);
+  if (module && module.updateLive) module.updateLive();
+}
+
+function renderObjectPanel() {
+  // The body is about to be cleared - drop stale references to nodes that won't exist anymore.
+  objectPanelInfoEl = null;
+  objectPanelInspectEl = null;
+  if (selectedKind === null) {
+    objectPanelEl.style.display = "none";
+    return;
   }
+  objectPanelEl.style.display = "block";
+  objectPanelTitleEl.textContent = selectedName;
+  objectPanelBodyEl.innerHTML = "";
+
+  entityKindModules.get(selectedKind).renderPanel();
   updateInspection(); // populate immediately rather than waiting for the next frame
 }
 
@@ -1359,11 +1359,9 @@ function updateOutliner(registry) {
   for (const module of entityKindModules.values()) {
     renderNameList(module.sectionEl, module.kind, module.getNames(registry));
   }
-  renderNameList(outlinerSections.constraints, "constraints", registry.constraints);
-  renderNameList(outlinerSections.surfaces, "surfaces", registry.surfaces);
-  // Driven by the registry, not the (active-only) wireframe collider list in updateColliders -
-  // a deactivated collider must stay listed here so its own panel can turn it back on.
-  renderNameList(outlinerSections.colliders, "colliders", registry.colliders.map((c) => c.name));
+  // The colliders module's getNames is driven by the registry, not the (active-only) wireframe
+  // collider list in updateColliders - a deactivated collider must stay listed here so its own
+  // panel can turn it back on.
   if (selectedKind === "colliders" && !registry.colliders.some((c) => c.name === selectedName)) {
     selectedKind = null; // the selected collider was actually removed, not just deactivated
     selectedName = null;
