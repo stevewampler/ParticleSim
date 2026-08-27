@@ -2347,17 +2347,62 @@ real prerequisite, not just unstarted — see the note below.
           params for every fully-contained Spring/Damper/MeshSprings,
           per-particle render override, per-group color override +
           visibility toggle - not built yet, beyond the enable/disable
-          checkbox above. **One open question left for the user before
-          building this, not decided unilaterally:** a particle can
-          belong to more than one group at once (`Groups.groupsOf(id)`
-          returns a `Set`, and the existing 3D-click code already computes
-          a *plural* candidate list -
+          checkbox above.
+          **Multi-group selection - resolved via direct walkthrough with
+          the user, not implemented yet:** a particle can belong to more
+          than one group at once (`Groups.groupsOf(id)` returns a `Set`,
+          and the existing 3D-click code already computes a *plural*
+          candidate list -
           `latestRegistry.groups.filter(g => g.memberIds.has(particleId))`
-          - for exactly this reason). "Picking a particle also picks its
-          group" doesn't say which one wins when there's more than one -
-          show every containing group's panel at once, or pick one (e.g.
-          the first by creation order) and let the user reselect from the
-          particle's own panel? Also still unchecked: whether a connection
+          - for exactly this reason), and "picking a particle also picks
+          its group" doesn't say which one wins when there's more than
+          one.
+          - **Pick one deterministically; don't render every containing
+            group's panel at once.** The object panel is single-selection
+            top to bottom - `objectPanelInfoEl`/`objectPanelInspectEl` are
+            singleton globals, `renderObjectPanel` clears one
+            `objectPanelBodyEl` and calls exactly one module's
+            `renderPanel()`, `updateInspection` dispatches to exactly one
+            `updateLive()`. Showing every containing group's panel
+            simultaneously needs each of those per-selection node
+            references turned into a per-panel collection - real
+            structural cost for this one case, not a rendering-style
+            choice.
+          - **Reuse the existing right-click-to-open-panel heuristic
+            (`viewer.html`'s `contextmenu` handler,
+            `candidates.sort((a, b) => a.memberIds.size - b.memberIds.size)`
+            then take the smallest) - don't introduce a second,
+            different tie-break rule for the same ambiguity.** This
+            supersedes this bullet's own original "e.g. the first by
+            creation order" suggestion, which predates that code and is
+            now stale - noted here so a future reader doesn't reintroduce
+            a second rule that disagrees with the first (right-click
+            picks "cloth", a particle panel's pairing picks "pole" for
+            the same particle). Confirmed the tie-break is already
+            deterministic even for equal-size groups: `SceneRegistry
+            .build`'s `groups` map is `LinkedHashMap`-backed (creation
+            order, §11), the wire and the JS-side `latestRegistry.groups`
+            array preserve that order, and `Array.prototype.sort` is
+            stable - so the full rule is "smallest member count, ties
+            broken by group creation order," deterministic today with no
+            new bookkeeping needed.
+          - **The particle's own panel (not built yet) lists every
+            containing group as a reselectable entry**, letting the user
+            switch which group's panel is showing - full access to every
+            containing group without needing simultaneous multi-panel
+            rendering.
+          - **Not yet solved, blocking actual implementation**: particle
+            selection doesn't fit the `entityKindModules` shape
+            constraints/surfaces/colliders were just migrated onto -
+            that contract is `getNames(registry)` producing an outliner
+            list, but particles are 3D-pick-only and never listed (N can
+            be thousands). Building the particle panel needs either a
+            special case living outside that abstraction, or the
+            abstraction itself to grow a "not outliner-listed" variant -
+            the same class of open gap as the still-unresolved
+            wire-addressing problem noted under mass/radius editing
+            above, not covered by this walkthrough.
+          Also still unchecked: whether a connection
           (`(id, id)` pair) is name-tagged back to its owning
           Spring/Damper/MeshSprings on the wire - needed for "every
           spring/damper where all endpoints belong to this group" and not
