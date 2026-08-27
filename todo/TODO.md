@@ -2347,28 +2347,85 @@ real prerequisite, not just unstarted — see the note below.
           params for every fully-contained Spring/Damper/MeshSprings,
           per-particle render override, per-group color override +
           visibility toggle - not built yet, beyond the enable/disable
-          checkbox above. **Two open questions for the user before
-          building this, not decided unilaterally:**
-          (1) A particle can belong to more than one group at once
-          (`Groups.groupsOf(id)` returns a `Set`, and the existing 3D-click
-          code already computes a *plural* candidate list -
+          checkbox above. **One open question left for the user before
+          building this, not decided unilaterally:** a particle can
+          belong to more than one group at once (`Groups.groupsOf(id)`
+          returns a `Set`, and the existing 3D-click code already computes
+          a *plural* candidate list -
           `latestRegistry.groups.filter(g => g.memberIds.has(particleId))`
           - for exactly this reason). "Picking a particle also picks its
           group" doesn't say which one wins when there's more than one -
           show every containing group's panel at once, or pick one (e.g.
           the first by creation order) and let the user reselect from the
-          particle's own panel?
-          (2) `mass`/`radius` are stored as `ScalarExpr` in `ParticleStore`
-          (already expression-capable, e.g. `"2.0 + 0.1*sin(t)"`), not
-          plain doubles - making them live-editable is a storage design
-          decision (does an edit replace the expression outright, losing
-          any authored time-variance? or does it need a separate
-          "override" layer sitting on top of the expression?), not just
-          UI wiring. Also still unchecked: whether a connection
+          particle's own panel? Also still unchecked: whether a connection
           (`(id, id)` pair) is name-tagged back to its owning
           Spring/Damper/MeshSprings on the wire - needed for "every
           spring/damper where all endpoints belong to this group" and not
           yet confirmed one way or the other.
+          **Mass/radius live-editing design - resolved via direct
+          walkthrough with the user, not implemented yet:**
+          `mass`/`radius` are stored as `ScalarExpr` in `ParticleStore`
+          (already expression-capable, e.g. `"2.0 + 0.1*sin(t)"`), not
+          plain doubles, so live-editing them is a storage decision, not
+          just UI wiring:
+          - **Edit input is an expression string, parsed via the existing
+            `ExpressionParser.parseScalar` (§4.1/Phase 7), not a bare
+            number.** This dissolves the "replace outright vs. overlay
+            on top of the expression" framing the question started from -
+            once the edit itself can be `"sin(t)"`, replacing the
+            particle's stored `ScalarExpr` outright *is* the
+            time-variance-preserving option, with no separate override
+            layer/map needed. A plain `"5.0"` parses to
+            `ScalarExpr.Constant` exactly as today; reuses the same
+            parser Phase 7's YAML front-end already has, rather than a
+            second parsing path for this one feature (the architecture
+            doc's own "one shared expression language" rule).
+          - **The edit fully replaces the stored expression** - same
+            `setOrClearExpr` behavior `ParticleStore.create` already has
+            (add/remove the id's `massExprs`/`radiusExprs` entry to match
+            whether the freshly-parsed expression is `OfTime` or
+            `Constant`), the same demotion-to-constant operation
+            `restoreParticle` already performs for checkpoint-restore.
+          - **Validation, all non-throwing (reject and return `false`,
+            never propagate an exception up through the live wire path)**:
+            a parse failure (bad syntax, or a vector expression typed into
+            a scalar field - `ExpressionParser.parseScalar` throws
+            `ExpressionException` for both) rejects the edit outright. For
+            mass specifically, a successfully-parsed expression that
+            evaluates *right now* to non-positive/NaN/Infinite also
+            rejects the edit (mass unchanged) rather than clamping to
+            `MASS_EPSILON` - extending `evaluateMassGuarded`'s existing
+            constant-mass throw (at particle creation) to the live-edit
+            path as a rejection instead of a throw. Radius has no
+            equivalent positivity guard anywhere else in this codebase
+            (`create` never validates radius sign), so no new range check
+            was invented for it beyond a successful scalar parse.
+          - **The panel shows the live evaluated number, never the
+            original expression source** - matches how `Force`/
+            `Constraint` `editableFields()` already behave (its own doc
+            comment: exposed "as their currently-evaluated numeric
+            snapshot, not as a live-editable expression source"), and
+            `ParticleStore` doesn't retain expression source text anywhere
+            today either. Accepted tradeoff: re-editing a currently-dynamic
+            mass/radius means typing a fresh formula blind (no prefilled
+            "2.0 + 0.1*sin(t)" to start from) rather than adding new
+            per-particle string storage just to support that one display
+            case.
+          - **A particle with no authored radius (`radius() == null`) can
+            have one added via edit** - null is just another editable
+            "current value" state, no hide-the-field special-casing.
+          - **Not yet solved, blocking actual implementation**: the
+            existing field-entry wire section is keyed `(kind, name,
+            field)`, matching how forces/constraints are addressed by
+            name; particles are id-addressed with no name, and there's no
+            mechanism yet to emit a per-particle field snapshot without
+            doing it for every live particle every frame (breaks at the
+            2000-ball demo's scale). Needs a selection-scoped emission
+            design (the server would need to know which particle id is
+            currently selected, mirroring what the client already tracks
+            client-side as `selectedName`) before this can actually ship -
+            a wire-protocol decision, not covered by the walkthrough
+            above.
     - [ ] Constraints/surfaces/emitters editing still to do: FixedPosition's
           shared-position variant (deferred above alongside Spring/Damper),
           surfaces' mesh-style toggle, and emitters as a new outliner
