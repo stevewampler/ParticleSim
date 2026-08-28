@@ -2459,18 +2459,89 @@ real prerequisite, not just unstarted — see the note below.
           - **A particle with no authored radius (`radius() == null`) can
             have one added via edit** - null is just another editable
             "current value" state, no hide-the-field special-casing.
-          - **Not yet solved, blocking actual implementation**: the
-            existing field-entry wire section is keyed `(kind, name,
-            field)`, matching how forces/constraints are addressed by
-            name; particles are id-addressed with no name, and there's no
-            mechanism yet to emit a per-particle field snapshot without
-            doing it for every live particle every frame (breaks at the
-            2000-ball demo's scale). Needs a selection-scoped emission
-            design (the server would need to know which particle id is
-            currently selected, mirroring what the client already tracks
-            client-side as `selectedName`) before this can actually ship -
-            a wire-protocol decision, not covered by the walkthrough
-            above.
+          **Wire addressing - resolved via direct walkthrough with the
+          user, not implemented yet:** the existing field-entry section is
+          keyed `(kind, name, field)`, matching how forces/constraints are
+          addressed by name; particles are id-addressed with no name, and
+          a selection-scoped design (server tracks which particle id each
+          client currently has selected) was considered and rejected -
+          `DebugRenderer.broadcast` → `wsServer.broadcastFrame` sends one
+          identical buffer to every connection today, and nothing in this
+          codebase customizes a frame per client. Making mass/radius
+          selection-scoped would mean building that capability from
+          scratch for this one panel, a bigger cost than the bandwidth it
+          would save.
+          - **Read path: put mass and radius directly in the main
+            per-particle array** (`BinaryFrame`'s `id, x, y, z, vx, vy,
+            vz` per particle), unconditionally, for every live particle
+            every frame - not a new id-keyed section. This is the exact
+            precedent `BinaryFrame.kt`'s own doc comment already states
+            for why velocity is unconditional: "so that §10.3's selection
+            & inspection... has something to read without a second wire
+            section keyed by id." Mass/radius is the identical case, one
+            step further down that same list of expression-capable
+            per-particle fields (§3). Grows `PARTICLE_SIZE` from 52 to 68
+            bytes (`+2 f64`, kept as `f64` like every other field - no
+            `f32` shrink for this); accepted the same way the
+            28→52-byte jump already was, since this is a debug tool
+            talking to `localhost`, not a bandwidth-constrained remote
+            link. Unset radius is encoded as `NaN`, matching
+            `radiusArr`'s own existing internal sentinel - no new
+            encoding invented. The panel must render that `NaN` as an
+            empty input, never the literal string `"NaN"`.
+          - **This is a different radius than `sphereRadii`.** The
+            existing `sphereCount`/`sphereRadii` wire section is an
+            opt-in, author-declared *render* size (§10.2); the new field
+            is `ParticleStore.radius(id)`, the physics/collision radius.
+            Both now travel on the wire, independently. Accepted gap:
+            editing radius on a particle whose demo passes an explicit
+            `sphereRadii` override (e.g. `FlagDebugDemo`'s
+            `poleSphereRadii`) changes collision geometry with no visible
+            change in the rendered sphere size - a real surprise for
+            whoever hits it, not a bug to fix now.
+          - **Write path: a new id-addressed `SceneControlMessage`**, not
+            a repurposed `SetScalarField` (which carries an
+            already-evaluated `Double`, not an expression string) -
+            `SetParticleScalarField(particleId: Int, field: String, expr:
+            ScalarExpr)`. `SceneControlMessage.parse` calls
+            `ExpressionParser.parseScalar` on the raw string itself and
+            returns `null` (dropping the message) on `ExpressionException`
+            - the same "malformed input becomes `null`, connection stays
+            up" convention this file already applies to every other
+            message kind, just extended to cover expression syntax too.
+          - **No central message dispatcher exists to slot into** -
+            checked by grepping `SetScalarField`/`SetVectorField` outside
+            `SceneControlMessage.kt`: every demo (`ParticleCollisionDebugDemo`,
+            `DragDebugDemo`, `SpatialGridDebugDemo`) has its own `when
+            (message)` block and matches force/constraint edits by hand
+            (`if (message.kind == "force" && message.name ==
+            gravity.name) ...`). `SetParticleScalarField` needs the same
+            one-branch-per-demo treatment, but the branch body is uniform
+            across every demo (no per-entity name matching, since a
+            demo's `store.setMass(message.particleId, message.expr, t)`
+            targets any id directly) - simpler than the force-field
+            branches, but still boilerplate every demo wanting particle
+            editing has to add for itself, same as every `SceneControlMessage`
+            case before it.
+          - **New `ParticleStore.setMass`/`setRadius`, not existing
+            `evaluateMassGuarded` reused as-is** - that function throws
+            for a non-positive `Constant` and clamps-and-warns for a
+            non-positive `OfTime`, which is correct for *creation* and
+            *per-step* re-evaluation respectively but wrong for a live
+            edit: the mass/radius design above already decided a bad edit
+            rejects outright regardless of whether the freshly-parsed
+            expression is constant or dynamic. `setMass(id, expr, t)`
+            evaluates once at `t` (mass/radius edits need sim time in
+            scope, unlike `setPosition`/`setVelocity`, which don't - note
+            this on the signature), rejects (returns `false`, no mutation)
+            on NaN/Infinite/non-positive, else writes the array slot and
+            updates `massExprs` via the same `setOrClearExpr` helper
+            `create` already uses. `setRadius` is identical minus the
+            positivity check (no existing radius guard to extend, per the
+            mass/radius decision above).
+          Untouched by this decision: the `entityKindModules`/outliner-shape
+          gap for particle selection stays open (a UI-selection problem,
+          not a wire-format one) - noted separately above.
     - [ ] Constraints/surfaces/emitters editing still to do: FixedPosition's
           shared-position variant (deferred above alongside Spring/Damper),
           surfaces' mesh-style toggle, and emitters as a new outliner
