@@ -894,26 +894,28 @@ readout to debug a scene without a separate tool.
   parameter edit instead. Fully specified below (§10.4) — no longer
   `[stretch]` as a design, though none of it is built yet.
 - **Per-entity-type UI modules, self-registered**: each entity kind's
-  outliner section and per-object panel is owned by a module —
-  `{kind, getNames(registry), renderPanel(), updateLive()?}` — that
+  per-object panel is owned by a module —
+  `{kind, getNames(registry)?, renderPanel(), updateLive()?}` — that
   registers itself with the viewer via `registerEntityKind`, claiming the
   outliner section the page already declares for that kind rather than
   building DOM from scratch, so registering is purely additive to what's
   already on the page. Introducing a new visualizable kind means writing
   and registering a module, not editing shared dispatch code every other
-  kind already depends on. Proven against two kinds — **groups** (a
-  visibility toggle, live "N drawable" info text, and live centroid/
-  avg-speed inspection, exercising every hook a module can have) and
+  kind already depends on. `getNames` is the one optional hook: a kind
+  with no outliner presence (particles — see "Selection & inspection"
+  above; there are potentially thousands, never listed) omits it, and is
+  reachable only via 3D-view selection setting `selectedKind`/`selectedName`
+  directly, never via an outliner click. Proven against three kinds —
+  **groups** (a visibility toggle, live "N drawable" info text, and live
+  centroid/avg-speed inspection, exercising every hook a module can have),
   **forces** (a per-force arrow-visibility toggle, real only when that
   force has arrow samples in the current frame — see §10.2's arrow-sample
-  wire format, now grouped by source-force name for exactly this reason).
-  `[stretch]` **constraints/surfaces/colliders are not yet migrated** —
-  they still work, on the older hardcoded dispatch path that predates
-  this module system; migrating them is deferred as low-risk/low-reward
-  mechanical work rather than a design gap (see `todo/TODO.md`). Once a
-  kind is migrated, its own module is also where kind-specific rendering
-  settings would live (e.g. a future lighting/materials control panel,
-  once that `[stretch]` item above is built) instead of one more
+  wire format, now grouped by source-force name for exactly this reason),
+  and **constraints/surfaces/colliders** (migrated onto this same module
+  system from an older hardcoded dispatch path that predated it — see
+  `todo/TODO.md`). Each kind's own module is also where kind-specific
+  rendering settings would live (e.g. a future lighting/materials control
+  panel, once that `[stretch]` item is built) instead of one more
   hardcoded case.
 
 ### 10.4 Live editing (viewer writes back into the running simulation)

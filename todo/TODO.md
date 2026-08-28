@@ -2391,17 +2391,66 @@ real prerequisite, not just unstarted — see the note below.
             switch which group's panel is showing - full access to every
             containing group without needing simultaneous multi-panel
             rendering.
-          - **Not yet solved, blocking actual implementation**: particle
-            selection doesn't fit the `entityKindModules` shape
-            constraints/surfaces/colliders were just migrated onto -
-            that contract is `getNames(registry)` producing an outliner
-            list, but particles are 3D-pick-only and never listed (N can
-            be thousands). Building the particle panel needs either a
-            special case living outside that abstraction, or the
-            abstraction itself to grow a "not outliner-listed" variant -
-            the same class of open gap as the still-unresolved
-            wire-addressing problem noted under mass/radius editing
-            above, not covered by this walkthrough.
+          **`entityKindModules`/outliner-shape gap - resolved via direct
+          walkthrough with the user, not implemented yet:** particle
+          selection didn't fit the module shape constraints/surfaces/
+          colliders were migrated onto - that contract's `getNames(registry)`
+          produces an outliner list, but particles are 3D-pick-only and
+          never listed (N can be thousands).
+          - **`getNames` becomes optional on the module contract** (both
+            here and in `requirements.md`'s own copy of the shape, updated
+            in the same pass) - a kind that omits it has no outliner
+            section and is reachable only by something setting
+            `selectedKind`/`selectedName` directly (3D pick, for
+            particles), never via an outliner click. `registerEntityKind`
+            needs no change - `document.getElementById("outlinerParticles")`
+            already returns `null` harmlessly for a kind with no such
+            element; `updateOutliner`'s per-module loop just needs an
+            `if (module.getNames)` guard before calling `renderNameList`
+            (currently unconditional) so a `getNames`-less module doesn't
+            crash the loop for every other kind. `selectedName` holds
+            `String(particleId)` - no type change to that pair, every
+            existing `dataset.name`/`selectedName` string comparison stays
+            correct.
+          - **Right-click on a particle now opens the particle's own
+            panel, not its (disambiguated) group's** - a deliberate change
+            to the already-shipped, already-Chrome-verified behavior from
+            the collider-activation/group-enable/disable round, not an
+            oversight. Two things make this the right call rather than a
+            regression: (1) it's the literal reading of §10.3's own
+            "right-clicking a rendered object in the 3D view opens its
+            per-object panel directly" - a dot is a rendered object, its
+            own panel is the particle panel, and the old group-opening
+            behavior was a placeholder from before a particle panel
+            existed, not a designed endpoint; (2) it's what the multi-group
+            decision above already committed to - "the particle's own
+            panel lists every containing group as a reselectable entry"
+            presupposes landing on the particle panel with groups as links
+            *out* of it, not the reverse. Nothing becomes unreachable: the
+            outliner still lists every group by name (its whole stated
+            purpose - "how do I reach an object's UI when it isn't
+            visible"), and the particle panel links to every group it's
+            in, disambiguated by the same smallest-member-count heuristic
+            already decided. A particle with zero group memberships - today
+            silently uninspectable at all, since the old handler `return`s
+            on an empty candidate list - now just works: panel opens, group
+            link list is empty. That's evidence for this direction, not a
+            new gap.
+          - **Selection must clear when the selected particle is destroyed**,
+            the same way `updateOutliner` already clears a selected-and-
+            removed collider (`if (selectedKind === "colliders" &&
+            !registry.colliders.some(...))`) - particles have no registry
+            entry to check membership against, so this needs its own path.
+            The wire already carries the hook: `SimEvent` kind 1
+            (`particleDestroyed`, §9.1's discrete-event channel) fires the
+            frame it happens - clear `selectedKind`/`selectedName` when a
+            `destroyed` event names the currently-selected particle,
+            mirroring the collider case's "stale selection, not a crash"
+            concern (`latestById.get(id)` returning `undefined` forever
+            otherwise, silently freezing the panel on stale data rather
+            than closing it). Double-click delete (already shipped) and
+            future §14 lifecycle destruction both go through this same
+            event, so one fix covers both.
           Also still unchecked: whether a connection
           (`(id, id)` pair) is name-tagged back to its owning
           Spring/Damper/MeshSprings on the wire - needed for "every
