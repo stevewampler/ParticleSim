@@ -24,6 +24,10 @@ class BallBounceScene : DemoScene {
 
     override fun ids(): List<Int> = ids
 
+    override fun handleControl(message: SceneControlMessage, t: Double) {
+        applyEditableFieldMessage(message, scenario.forces, emptyList())
+    }
+
     override fun step(t: Double) {
         if (t - cycleStart >= cycleSeconds) {
             scenario.store.setPosition(scenario.ballId, dropPosition)

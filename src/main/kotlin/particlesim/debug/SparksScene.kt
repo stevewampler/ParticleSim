@@ -22,6 +22,10 @@ class SparksScene : DemoScene {
 
     override fun ids(): List<Int> = scenario.store.liveIds()
 
+    override fun handleControl(message: SceneControlMessage, t: Double) {
+        applyEditableFieldMessage(message, scenario.forces, emptyList())
+    }
+
     override fun step(t: Double) {
         integrator.step(scenario.store, scenario.groups, scenario.forces, emptyList(), t, dt)
         val destroyed = scenario.destruction.resolve(scenario.store, scenario.groups, scenario.forces, t, dt)

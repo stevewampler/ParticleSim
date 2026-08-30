@@ -6,8 +6,6 @@ import particlesim.examples.FLAG_DT
 import particlesim.examples.buildFlag
 import particlesim.physics.Constraint
 import particlesim.physics.DragConstraint
-import particlesim.physics.EditableFields
-import particlesim.physics.FieldValue
 import particlesim.physics.Integrator
 import particlesim.physics.Wind
 import particlesim.render.ArrowRenderer
@@ -63,23 +61,8 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
     override fun ids(): List<Int> = allIds
 
     override fun handleControl(message: SceneControlMessage, t: Double) {
+        if (applyEditableFieldMessage(message, scenario.forces, scenario.constraints)) return
         when (message) {
-            is SceneControlMessage.SetScalarField -> {
-                val target: EditableFields? = when (message.kind) {
-                    "force" -> scenario.forces.find { it.name == message.name } as? EditableFields
-                    "constraint" -> scenario.constraints.find { it.name == message.name } as? EditableFields
-                    else -> null
-                }
-                target?.setField(message.field, FieldValue.Scalar(message.value))
-            }
-            is SceneControlMessage.SetVectorField -> {
-                val target: EditableFields? = when (message.kind) {
-                    "force" -> scenario.forces.find { it.name == message.name } as? EditableFields
-                    "constraint" -> scenario.constraints.find { it.name == message.name } as? EditableFields
-                    else -> null
-                }
-                target?.setField(message.field, FieldValue.Vector(message.value))
-            }
             is SceneControlMessage.SetGroupEnabled -> scenario.groups.setEnabled(message.name, message.enabled)
             is SceneControlMessage.SetParticleScalarField -> {
                 if (scenario.store.contains(message.particleId)) {

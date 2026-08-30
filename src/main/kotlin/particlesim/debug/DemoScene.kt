@@ -2,6 +2,10 @@ package particlesim.debug
 
 import particlesim.collision.Collider
 import particlesim.core.ParticleStore
+import particlesim.physics.Constraint
+import particlesim.physics.EditableFields
+import particlesim.physics.FieldValue
+import particlesim.physics.Force
 import particlesim.render.CameraPose
 import particlesim.render.Color
 import particlesim.render.NamedArrowSamples
@@ -64,4 +68,32 @@ interface DemoScene {
     fun handleControl(message: SceneControlMessage, t: Double) {}
 
     fun frame(t: Double): SceneFrame
+}
+
+/**
+ * §10.4's generic (kind, name) -> [EditableFields] dispatch, shared by every [DemoScene] instead
+ * of each one hand-rolling its own copy of the same `when (message.kind) { "force" -> ...;
+ * "constraint" -> ... }` block - that duplication is exactly what let `FlagDebugDemo` silently
+ * drop every field edit for its entire lifetime (never caught precisely because it was one
+ * demo's own copy, not shared code every scene's tests exercise). A scene's [DemoScene
+ * .handleControl] calls this first and only falls through to its own handling for whatever this
+ * returns `false` for (message types this function doesn't recognize at all).
+ */
+fun applyEditableFieldMessage(message: SceneControlMessage, forces: List<Force>, constraints: List<Constraint>): Boolean {
+    fun target(kind: String, name: String): EditableFields? = when (kind) {
+        "force" -> forces.find { it.name == name } as? EditableFields
+        "constraint" -> constraints.find { it.name == name } as? EditableFields
+        else -> null
+    }
+    return when (message) {
+        is SceneControlMessage.SetScalarField -> {
+            target(message.kind, message.name)?.setField(message.field, FieldValue.Scalar(message.value))
+            true
+        }
+        is SceneControlMessage.SetVectorField -> {
+            target(message.kind, message.name)?.setField(message.field, FieldValue.Vector(message.value))
+            true
+        }
+        else -> false
+    }
 }
