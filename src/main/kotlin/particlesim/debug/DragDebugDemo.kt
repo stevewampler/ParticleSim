@@ -259,7 +259,14 @@ fun main() {
         val lineColors = springs.associate { spring ->
             (spring.particleA to spring.particleB) to LineRendering.colorFor(LineRenderer(spring, ColorBy.BREAK_PROXIMITY), store)!!
         }
-        renderer.broadcast(t, step, store, ids, springs.map { it.particleA to it.particleB }, lineColors = lineColors, events = events)
+        // Each link is individually named ("link-0", "link-1", ...) - infrastructure for a
+        // not-yet-built feature (a group's own tab surfacing its springs/dampers), verified live
+        // here since this demo's springs already carry real per-connection names.
+        val connectionNames = springs.mapNotNull { spring -> spring.name?.let { (spring.particleA to spring.particleB) to it } }.toMap()
+        renderer.broadcast(
+            t, step, store, ids, springs.map { it.particleA to it.particleB },
+            lineColors = lineColors, connectionNames = connectionNames, events = events,
+        )
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)
     }

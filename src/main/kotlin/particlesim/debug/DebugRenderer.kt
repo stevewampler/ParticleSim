@@ -44,6 +44,7 @@ class DebugRenderer(
         connections: List<Pair<Int, Int>>,
         camera: CameraPose? = null,
         lineColors: Map<Pair<Int, Int>, Color> = emptyMap(),
+        connectionNames: Map<Pair<Int, Int>, String> = emptyMap(),
         sphereRadii: Map<Int, Double> = emptyMap(),
         meshes: List<SurfaceRenderer> = emptyList(),
         arrowGroups: List<NamedArrowSamples> = emptyList(),
@@ -54,8 +55,8 @@ class DebugRenderer(
     ) {
         wsServer.broadcastFrame(
             BinaryFrame.encode(
-                t, step, store, ids, connections, camera, lineColors, sphereRadii, meshes, arrowGroups, visibleIds, registry,
-                colliders.filter { it.active }, events,
+                t, step, store, ids, connections, camera, lineColors, connectionNames, sphereRadii, meshes, arrowGroups,
+                visibleIds, registry, colliders.filter { it.active }, events,
             ),
         )
     }

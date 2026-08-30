@@ -2524,6 +2524,33 @@ real prerequisite, not just unstarted — see the note below.
           pole's small anchor spheres are unaffected) and
           `SpatialGridDebugDemo` (editing a ball's radius now visibly
           resizes its dot).
+    - [x] Connection name-tagging on the wire - resolves this section's own
+          long-standing open question ("whether a connection is name-tagged
+          back to its owning Spring/Damper/MeshSprings"), built as pure
+          infrastructure ahead of its actual consumer (a group's tab
+          surfacing "every spring/damper where all endpoints belong to
+          this group," still not built - same "infra before UI" pattern
+          `EditableFields` itself followed). `BinaryFrame.encode` gained
+          `connectionNames: Map<Pair<Int, Int>, String> = emptyMap()`,
+          keyed and defaulted exactly like the existing `lineColors` -
+          including that map's same limitation: two different named
+          forces sharing one connection pair collide, last-writer-wins.
+          Checked rather than assumed that this doesn't matter today -
+          grepped every demo's springs/dampers for a shared pair, found
+          none (`DragDebugDemo`'s dampers are unnamed and never drawn as
+          their own line; nothing else names both a spring and a damper on
+          the same pair). Wire adds one `i32 nameLen` + UTF-8 bytes per
+          connection (empty string = untagged, same convention as an
+          unnamed mesh's own `nameLen == 0`). **Verified live in Chrome**
+          against `DragDebugDemo` (its spring chain already names each
+          link `"link-0"`, `"link-1"`, ...) - logged the decoded
+          `frame.connections` array directly (removed after verifying,
+          not shipped) and confirmed real `forceName` values decoded
+          correctly with no corruption to sections that decode after the
+          connection list in the same frame, the same specific risk the
+          original scalar-field wire-path bug taught this project to
+          check for rather than assume away. No consuming UI yet - the
+          decoded `forceName` isn't read anywhere in `viewer.html` today.
     - [ ] Constraints/surfaces/emitters editing still to do: FixedPosition's
           shared-position variant (deferred above alongside Spring/Damper),
           surfaces' mesh-style toggle, and emitters as a new outliner

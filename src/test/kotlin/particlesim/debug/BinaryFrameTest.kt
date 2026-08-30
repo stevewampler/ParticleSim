@@ -122,6 +122,29 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `a connectionNames entry tags that connection back to its owning force, other connections stay unnamed`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+        val b = store.create(position = Vector3.ZERO)
+        val c = store.create(position = Vector3.ZERO)
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = listOf(a, b, c),
+            connections = listOf(a to b, b to c),
+            connectionNames = mapOf((a to b) to "link-0"),
+        )
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(
+            listOf(
+                DecodedConnection(a, b, Color.DEFAULT_LINE, forceName = "link-0"),
+                DecodedConnection(b, c, Color.DEFAULT_LINE, forceName = null),
+            ),
+            decoded.connections,
+        )
+    }
+
+    @Test
     fun `round-trips sphere radii`() {
         val store = ParticleStore()
         val a = store.create(position = Vector3.ZERO)

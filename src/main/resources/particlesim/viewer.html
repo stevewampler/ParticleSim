@@ -737,7 +737,8 @@ function decodeFrame(buffer) {
     const r = view.getFloat64(offset, true); offset += 8;
     const g = view.getFloat64(offset, true); offset += 8;
     const bl = view.getFloat64(offset, true); offset += 8;
-    connections[i] = { a, b, color: { r, g, b: bl } };
+    const forceName = readString(); // "" = not tagged back to a named Spring/Damper/MeshSprings
+    connections[i] = { a, b, color: { r, g, b: bl }, forceName };
   }
   const hasCamera = view.getUint8(offset); offset += 1;
   const cam = hasCamera ? { position: readVec(), lookAt: readVec(), up: readVec() } : null;

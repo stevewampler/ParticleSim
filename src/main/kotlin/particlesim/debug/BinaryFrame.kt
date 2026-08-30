@@ -36,7 +36,10 @@ import java.nio.charset.StandardCharsets
  *                   (radius is NaN when the particle has none — matches ParticleStore.radius's
  *                   own NaN-means-unset sentinel, no new encoding invented)
  * i32  connectionCount
- * connectionCount * { i32 a, i32 b, f64 r, f64 g, f64 b }
+ * connectionCount * { i32 a, i32 b, f64 r, f64 g, f64 b, i32 nameLen, nameLen UTF-8 bytes }
+ *                     (nameLen 0 = this connection isn't tagged back to a named
+ *                     Spring/Damper/MeshSprings — same "empty name never matches anything"
+ *                     convention an unnamed mesh's own nameLen already uses)
  * u8   hasCamera (0 or 1); if set: 9x f64 (position.xyz, lookAt.xyz, up.xyz)
  * i32  sphereCount
  * sphereCount * { i32 id, f64 radius }
@@ -146,6 +149,17 @@ import java.nio.charset.StandardCharsets
  * `FlagDebugDemo`'s pole spheres) will show no visible change when a particle's collision radius
  * is edited, an accepted gap, not a bug.
  *
+ * [connectionNames] tags a connection back to the named [particlesim.physics.Spring]/
+ * [particlesim.physics.Damper]/[particlesim.physics.MeshSprings] it belongs to — infrastructure
+ * for a not-yet-built feature (a group's own tab surfacing "every spring/damper where all
+ * endpoints belong to this group," see `todo/TODO.md`), not consumed by any panel yet. Keyed by
+ * `(a, b)` exactly like [lineColors] already is, including the same limitation: two different
+ * named forces sharing one connection pair (e.g. a `Spring` and a `Damper` between the same two
+ * particles) collide in one map key, and whichever was inserted last wins — accepted here for
+ * the same reason [lineColors] already accepts it (a connection is visually one line; today's
+ * demos never actually name both a spring and a damper on the same pair, so this has never
+ * mattered in practice, checked by inspection rather than assumed).
+ *
  * [visibleIds], when supplied, is the *only* set of particles the viewer draws as a standalone
  * dot/sphere — every particle still travels in the main particle list (needed for connection
  * endpoints and mesh vertices regardless), but one with no renderer of its own (§10.2: "the
@@ -157,7 +171,7 @@ object BinaryFrame {
     private const val HEADER_SIZE = 8 + 8 + 4 // t, step, particleCount
     private const val PARTICLE_SIZE = 4 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 8 // id, x, y, z, vx, vy, vz, mass, radius
     private const val CONNECTION_HEADER_SIZE = 4 // connectionCount
-    private const val CONNECTION_SIZE = 4 + 4 + 8 + 8 + 8 // a, b, r, g, b
+    private const val CONNECTION_FIXED_SIZE = 4 + 4 + 8 + 8 + 8 // a, b, r, g, b (nameLen+bytes is variable)
     private const val CAMERA_FLAG_SIZE = 1
     private const val CAMERA_SIZE = 9 * 8 // position, lookAt, up
     private const val SPHERE_HEADER_SIZE = 4
@@ -200,6 +214,7 @@ object BinaryFrame {
         connections: List<Pair<Int, Int>>,
         camera: CameraPose? = null,
         lineColors: Map<Pair<Int, Int>, Color> = emptyMap(),
+        connectionNames: Map<Pair<Int, Int>, String> = emptyMap(),
         sphereRadii: Map<Int, Double> = emptyMap(),
         meshes: List<SurfaceRenderer> = emptyList(),
         arrowGroups: List<NamedArrowSamples> = emptyList(),
@@ -210,7 +225,7 @@ object BinaryFrame {
     ): ByteBuffer {
         val fieldEntries = collectEditableFields(registry)
         val size = HEADER_SIZE + ids.size * PARTICLE_SIZE +
-            CONNECTION_HEADER_SIZE + connections.size * CONNECTION_SIZE +
+            CONNECTION_HEADER_SIZE + connections.sumOf { CONNECTION_FIXED_SIZE + stringSize(connectionNames[it] ?: "") } +
             CAMERA_FLAG_SIZE + (if (camera != null) CAMERA_SIZE else 0) +
             SPHERE_HEADER_SIZE + sphereRadii.size * SPHERE_SIZE +
             MESH_HEADER_SIZE + meshes.sumOf {
@@ -246,6 +261,7 @@ object BinaryFrame {
             val color = lineColors[connection] ?: Color.DEFAULT_LINE
             buffer.putInt(a); buffer.putInt(b)
             buffer.putDouble(color.r); buffer.putDouble(color.g); buffer.putDouble(color.b)
+            putString(buffer, connectionNames[connection] ?: "")
         }
         if (camera != null) {
             buffer.put(1)
@@ -370,7 +386,8 @@ object BinaryFrame {
             val a = buf.int
             val b = buf.int
             val color = Color(buf.double, buf.double, buf.double)
-            DecodedConnection(a, b, color)
+            val name = getString(buf)
+            DecodedConnection(a, b, color, name.ifEmpty { null })
         }
         val hasCamera = buf.get().toInt() != 0
         val camera = if (hasCamera) {
@@ -564,7 +581,7 @@ object BinaryFrame {
 
 data class DecodedParticle(val id: Int, val position: Vector3, val velocity: Vector3, val mass: Double, val radius: Double?)
 
-data class DecodedConnection(val a: Int, val b: Int, val color: Color)
+data class DecodedConnection(val a: Int, val b: Int, val color: Color, val forceName: String? = null)
 
 data class DecodedSphere(val id: Int, val radius: Double)
 
