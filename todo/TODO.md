@@ -3060,6 +3060,33 @@ next session picks them up instead of losing them.
       afterward updated independently without disturbing the ongoing
       gusting velocity, confirming the two fields stay decoupled as
       required. No console errors observed.
+
+      **Follow-up fix**: typing a bare scalar expression (e.g. `sin(t)`)
+      into this field did nothing visible - `ExpressionParser.parseVector`
+      rejects it server-side (it's a scalar, not a vector), and every
+      expression-editable field in this app silently drops a message that
+      fails to parse, so the UI gave zero feedback. Added a minimal
+      client-side check in `viewer.html`, scoped to this field only:
+      `Parser.parsePrimary`'s `LBRACKET` case is the *only* production
+      that yields `ValueType.VECTOR`, so anything not starting with `[` is
+      guaranteed to be rejected server-side - checking that one structural
+      fact client-side (not re-implementing the grammar) lets the input
+      show a red outline and an explanatory tooltip instead of silently
+      no-op'ing, and skips sending the edit at all. Deliberately narrow:
+      this does *not* catch malformed syntax or bad arity/identifiers
+      inside the brackets (e.g. `[1, 2]`, `[a, b, c]`) - those still parse
+      server-side and still fail silently, the same as every other
+      expression field (mass, radius, emitter rate), none of which got
+      this treatment since a bare scalar is valid input for a scalar
+      field. The invalid-state flag suppresses `updateLive`'s per-frame
+      overwrite so the bad text and its red outline survive until
+      corrected, and clears on the next keystroke or a successful edit.
+      **Verified live in Chrome**: typing `sin(t)` and blurring the field
+      showed the red outline and tooltip immediately and left the text in
+      place across several seconds of running frames (proving `updateLive`
+      wasn't stomping it); correcting it to `[0, 20, 0]` cleared the
+      outline, sent the edit, and visibly reoriented the wind arrows and
+      flag mesh. No console errors.
 - [ ] Texture-mapped surfaces - an image (e.g. a flag graphic) rendered
       onto a surface's mesh instead of/alongside its flat shaded color
       (requirements.md §10.2). Two real gaps to close, neither trivial:

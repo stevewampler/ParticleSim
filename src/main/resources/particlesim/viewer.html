@@ -1484,6 +1484,10 @@ registerEntityKind({
 });
 
 let windVelocityInput = null; // the open forces panel's Wind.velocity text input, or null otherwise
+// True while windVelocityInput holds text rejected by the client-side vector-literal check
+// below - suppresses updateLive's live-value overwrite so the user's bad text (and its error
+// styling) isn't stomped by the very next frame.
+let windVelocityInvalid = false;
 registerEntityKind({
   kind: "forces",
   getNames: (registry) => registry.forces,
@@ -1512,8 +1516,34 @@ registerEntityKind({
       windVelocityInput = document.createElement("input");
       windVelocityInput.type = "text";
       windVelocityInput.value = formatVectorExprLiteral(windEntry.velocity.x, windEntry.velocity.y, windEntry.velocity.z);
+      windVelocityInvalid = false;
+      // Minimal client-side check for the one structural rule the grammar guarantees: a vector
+      // expression can only be produced by a "[x, y, z]" literal (see Parser.parsePrimary -
+      // LBRACKET is the only production with ValueType.VECTOR), so anything not starting with
+      // "[" is certain to be rejected server-side. This is NOT a re-implementation of the
+      // expression grammar - malformed syntax or a bad arity/identifier inside the brackets
+      // still parses server-side and still fails silently, same as every other expression field
+      // (mass, radius, emitter rate). It only catches the specific "typed a bare scalar into a
+      // vector field" mistake that prompted this.
+      windVelocityInput.addEventListener("input", () => {
+        if (windVelocityInvalid) {
+          windVelocityInvalid = false;
+          windVelocityInput.style.outline = "";
+          windVelocityInput.title = "";
+        }
+      });
       windVelocityInput.addEventListener("change", () => {
-        sendEdit({ type: "set_wind_velocity", name: selectedName, expression: windVelocityInput.value });
+        const expression = windVelocityInput.value.trim();
+        if (!expression.startsWith("[")) {
+          windVelocityInvalid = true;
+          windVelocityInput.style.outline = "2px solid #d33";
+          windVelocityInput.title = "expected a vector expression like [0, 0, sin(t)], not a bare scalar";
+          return;
+        }
+        windVelocityInvalid = false;
+        windVelocityInput.style.outline = "";
+        windVelocityInput.title = "";
+        sendEdit({ type: "set_wind_velocity", name: selectedName, expression });
       });
       velocityRow.appendChild(windVelocityInput);
       objectPanelBodyEl.appendChild(velocityRow);
@@ -1526,7 +1556,7 @@ registerEntityKind({
   updateLive: () => {
     updateEditableFieldsLive("force", selectedName, currentFieldInputs);
     const windEntry = latestRegistry.winds.find((w) => w.name === selectedName);
-    if (windEntry && windVelocityInput && document.activeElement !== windVelocityInput) {
+    if (windEntry && windVelocityInput && document.activeElement !== windVelocityInput && !windVelocityInvalid) {
       windVelocityInput.value = formatVectorExprLiteral(windEntry.velocity.x, windEntry.velocity.y, windEntry.velocity.z);
     }
   },
@@ -1809,6 +1839,7 @@ function renderObjectPanel() {
   particleFieldInputs = null;
   emitterFieldInputs = null;
   windVelocityInput = null;
+  windVelocityInvalid = false;
   if (selectedKind === null) {
     objectPanelEl.style.display = "none";
     return;
