@@ -2978,6 +2978,61 @@ real prerequisite, not just unstarted — see the note below.
       other post-Phase-7 YAML gap; needs the DSL side built first to know
       what a shape actually needs to parameterize
 
+## Force-arrow selection, wind gust/direction editing, and textured surfaces (§5.2/§10.2/§10.3/§10.4, new requirements) — not yet phased
+Raised by the user in three `/btw`-style comments during the
+`viewer-live-editing` work, recorded in `requirements.md` (§5.2, §10.2,
+§10.3, §10.4) rather than implemented immediately - captured here so the
+next session picks them up instead of losing them. None of the three has
+been started.
+- [ ] Right-click a force's sampled arrow (wind, or any other directional
+      field force) to select and open *that force's* per-object panel,
+      the arrow-picking counterpart to right-clicking a mesh triangle to
+      open its surface's panel (requirements.md §10.3). Today's
+      right-click raycast (`viewer.html`'s `contextmenu` handler) only
+      intersects `dots` and `meshObjects` - `arrowObjects` isn't in the
+      hit-test list at all, and an arrow has no `userData` tagging it
+      back to its owning force's name the way a mesh triangle's
+      `userData.surfaceName` does. Needs: tagging each `ArrowHelper`
+      instance with its source force's name at construction (the data's
+      already there - `frame.arrowGroups[i].name` - just not attached to
+      the three.js object), adding `arrowObjects` to the raycast target
+      list, and resolving a hit back to `selectObject("forces", name)`.
+- [ ] `Wind`'s direction and gusting independently live-editable from the
+      viewer, not just `density` (requirements.md §5.2/§10.4). Blocked on
+      a real design decision, not just wiring: `Wind.velocity` is
+      currently one opaque `VectorExpr` baked at construction (e.g.
+      `buildSparks`-style time-varying expressions bundle direction and
+      magnitude together), and `EditableFields`/`FieldValue` (Scalar or
+      Vector only) has no slot for "the direction and gust-shape that
+      combine into this expression" - only for the expression's *current
+      evaluated value* as a whole. Needs deciding, before any code
+      changes: (1) what "gust" means as independently-editable numbers -
+      a periodic amplitude/frequency added on top of a steady direction
+      and base strength? a stochastic/turbulence model with its own
+      tunable parameters? - and (2) how `Wind` then recomputes its
+      effective per-step velocity from those named parts instead of
+      evaluating one pre-composed expression. Only after that's settled
+      does this become "add fields to `Wind`, expose via
+      `EditableFields`" the same way `density` already works.
+- [ ] Texture-mapped surfaces - an image (e.g. a flag graphic) rendered
+      onto a surface's mesh instead of/alongside its flat shaded color
+      (requirements.md §10.2). Two real gaps to close, neither trivial:
+      (1) no UV coordinates exist anywhere in this codebase today
+      (`Triangle`/`Surface` carry none; `TriangleClosestPoint`'s u/v/w
+      are barycentric closest-point coordinates, unrelated) - for a
+      grid-generated shape like the flag these fall out directly from
+      each vertex's row/col position, so generating them for that case
+      specifically is likely the practical starting point rather than
+      solving UV generation for arbitrary meshes first; (2) no mechanism
+      exists to get an image asset from the engine process to the browser
+      client - most likely a static file served once and referenced by
+      URL from a surface's renderer declaration, not pushed through the
+      binary per-frame protocol (§9.1) the way per-frame vertex positions
+      are, since the image itself doesn't change every step. Related to
+      but distinct from the `[stretch]` Lighting & materials item below -
+      that's general per-object material properties (color, shininess),
+      this is specifically an external image asset mapped onto a mesh.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

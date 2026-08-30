@@ -313,7 +313,19 @@ targeted for visualization.
 - **Wind**: a force field with direction and strength, both **expression-
   capable** (function of time and/or position) so wind can gust, oscillate,
   or vary spatially. Applies to particles directly and/or to surface
-  triangles (see §7.2).
+  triangles (see §7.2). *(New requirement)* Direction and gusting need to
+  be independently live-editable from the viewer (§10.4), not just
+  authorable as an expression string up front — today's implementation
+  bakes both into a single `velocity` expression evaluated once per step,
+  with only overall `density` exposed for live editing. Making direction
+  and gust independently editable means decomposing `velocity` into named
+  sub-parameters the viewer can present as separate numeric fields (e.g. a
+  `direction` vector plus gust amplitude/frequency parameters combined
+  internally into the effective velocity), rather than one opaque
+  expression a live edit would have to overwrite wholesale — the exact
+  parameterization (what "gust" means as independent numbers: amplitude
+  and frequency of a periodic variation? a stochastic/turbulence model?)
+  is still an open design question, not resolved here.
 - **Drag / air resistance**: force opposing velocity, proportional to speed
   (linear) or speed² (quadratic), useful for damping runaway simulations and
   for realistic cloth/flag behavior.
@@ -817,6 +829,25 @@ it's being built, before its real renderers exist.
 
 **Particle & surface renderers**: `dot`, `sphere` (§10, using the group's
 particles' `radius` by default), or a shaded/wireframe mesh for a surface.
+*(New requirement)* A surface mesh should also be able to render with an
+**image texture** instead of (or as) its shaded material — e.g. an actual
+flag graphic mapped onto §7.3's flag surface, rather than a flat solid
+color. This needs two things neither exists today: **UV coordinates**
+per triangle vertex (`Surface`/`Triangle` currently carry none — for a
+grid-generated shape like the flag, UVs fall out directly from each
+vertex's row/col position in the grid, so no separate authoring is
+needed for that case, but an arbitrary/non-grid surface would need them
+supplied explicitly) and a way to **reference an image asset** from a
+surface's renderer declaration (a file path or URL, alongside `kind:
+mesh` in the YAML example below) that reaches the browser client — most
+naturally served once as a static asset and referenced by URL rather than
+pushed through the binary per-frame protocol (§9.1) the way per-frame
+mesh/particle state is, since a texture image doesn't change every step
+the way vertex positions do. Related to, but distinct from, the
+`[stretch]` **Lighting & materials** item below: that's about general
+per-object material properties (color, shininess) with no asset
+involved, this is specifically about mapping an external image onto a
+mesh's surface.
 
 **Force renderers**:
 - Directional field forces (wind, uniform gravity) render as **arrows**
@@ -917,7 +948,15 @@ readout to debug a scene without a separate tool.
   the outliner or via right-click.
 - **Right-click to open**: right-clicking a rendered object in the 3D
   view opens its per-object panel directly, without going through the
-  outliner first — the fast path for something already visible.
+  outliner first — the fast path for something already visible. This
+  includes a directional field force's arrow renderer (§10.2, e.g. wind):
+  right-clicking any one sampled arrow selects the *force* that produced
+  it (by the arrow group's source-force name), the same way right-
+  clicking a mesh triangle already selects its owning surface — a field
+  force has no single particle to click, so its arrows are the only
+  clickable surface it has. *(New requirement — not yet built; today's
+  right-click picking only resolves against particle dots and surface
+  meshes, not arrows.)*
 - **Selection & inspection**: selecting an object (via the 3D view or the
   outliner) shows live numeric readout for it — a particle's position/
   velocity, a force's current magnitude, a breakable connection's current
@@ -1055,9 +1094,15 @@ surface's auto-generated `MeshSprings`, which is covered under "particles
 & groups" above via its owning group): the existing per-force tab
 (§10.3's self-registered module, currently just an arrow-visibility
 toggle) gains real numeric-parameter editing — `acceleration`, `g`/
-`softening`, `velocity`/`density` respectively. `Wind` is associated with
-a specific surface via its triangle list, the same "belongs to" lookup as
-a group's springs, not a named-group target like the other two.
+`softening` respectively, and for `Wind`, `density` (built) plus
+`direction` and gust amplitude/frequency (§5.2, new requirement — not
+built; needs `Wind.velocity` decomposed into named sub-parameters before
+they're independently editable rather than one opaque expression).
+`Wind` is associated with a specific surface via its triangle list, the
+same "belongs to" lookup as a group's springs, not a named-group target
+like the other two. Also new: right-clicking one of `Wind`'s sampled
+arrows (§10.2/§10.3) opens this same tab directly, the arrow-picking
+counterpart to right-clicking a mesh triangle to open its surface's tab.
 
 **Constraints**:
 - `FixedPosition`: only the shared-position variant (one `Vector3` for
