@@ -2662,13 +2662,43 @@ real prerequisite, not just unstarted — see the note below.
         unknown scene name is ignored (stays on whatever was active)
         rather than crashing the connection. The original four standalone
         `run*Demo` gradle tasks are untouched and still work.
-- [ ] Not yet built: any viewer UI. No wire format change either
-      (`availableScenes`/`activeScene` per frame, so the client can
-      populate a picker without hardcoding scene names) - deliberately
-      deferred to land in the same round as the JS decoder update it
-      requires, per this project's hard rule against a wire-format change
-      landing on only one side. Until then, switch scenes by sending
-      `{"type": "load_scene", "name": "..."}` over the WebSocket by hand.
+- [x] Viewer UI: a "scene" section at the top of the control panel
+      (hidden unless a frame reports non-empty `availableScenes`), a
+      `<select>` populated from the wire and kept in sync with
+      `activeScene`. `BinaryFrame` gained `availableScenes`/`activeScene`
+      (a name list plus one string, appended after everything else in the
+      frame - `stringSize(activeScene)` for "none"/empty, same convention
+      as every other optional name in this format) - round-tripped in
+      `BinaryFrameTest`, and independently checked against a live
+      `runSceneLibraryDemo` process via a Python port of the exact field
+      order the JS decoder uses, confirming the buffer decodes to exactly
+      zero bytes remaining before touching the JS side at all. Picking an
+      entry sends `load_scene` and resets every bit of viewer-side state
+      the new scene has no way to know about (stats, event log,
+      selection, hidden-group/-surface/-force toggles, camera) via one
+      shared `resetViewerStateForSceneChange()`, also now used by
+      `restart` (the same "reload by name" operation underneath).
+      Two bugs caught live in Chrome and fixed:
+      - **Camera stuck on switch**: the reset was gated on already being
+        in scripted mode, so once a person had ever manually orbited the
+        view (any scene, any time before), `cameraMode` stayed `"manual"`
+        indefinitely and the reset silently no-oped forever after. Fixed
+        by unconditionally forcing scripted mode back on during a scene
+        switch, not just resetting the pose while already in it.
+      - **Particle mass/radius edits reverting on every non-flag scene**:
+        `applyEditableFieldMessage` (the shared dispatch added to kill
+        `FlagScene`'s copy-pasted force/constraint dispatch) didn't yet
+        cover `SetParticleScalarField` - that path was still only wired
+        inside `FlagScene`'s own `handleControl`, hand-copied there and
+        nowhere else, so `TrampolineScene`/`BallBounceScene`/
+        `SparksScene` silently dropped every particle edit - the exact
+        `FlagDebugDemo` bug from earlier this session, recurring for a
+        different message type in new code. Folded into the same shared
+        function rather than extracting yet another one-off copy;
+        `DemoSceneTest` covers it directly, and verified end-to-end
+        against the live trampoline scene over a raw WebSocket connection
+        (edit a mat particle's mass, confirm it holds across several
+        subsequent frames instead of reverting).
 - [ ] The other four demos (`Drag`, `ParticleCollision`, `SpatialGrid`,
       `MultiShape`) still standalone - would need their own `buildX():
       XScenario` extraction (they currently build inline in `main()`)
