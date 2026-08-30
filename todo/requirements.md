@@ -313,19 +313,18 @@ targeted for visualization.
 - **Wind**: a force field with direction and strength, both **expression-
   capable** (function of time and/or position) so wind can gust, oscillate,
   or vary spatially. Applies to particles directly and/or to surface
-  triangles (see §7.2). *(New requirement)* Direction and gusting need to
-  be independently live-editable from the viewer (§10.4), not just
-  authorable as an expression string up front — today's implementation
-  bakes both into a single `velocity` expression evaluated once per step,
-  with only overall `density` exposed for live editing. Making direction
-  and gust independently editable means decomposing `velocity` into named
-  sub-parameters the viewer can present as separate numeric fields (e.g. a
-  `direction` vector plus gust amplitude/frequency parameters combined
-  internally into the effective velocity), rather than one opaque
-  expression a live edit would have to overwrite wholesale — the exact
-  parameterization (what "gust" means as independent numbers: amplitude
-  and frequency of a periodic variation? a stochastic/turbulence model?)
-  is still an open design question, not resolved here.
+  triangles (see §7.2). *(New requirement, resolved)* `velocity` is
+  live-editable from the viewer (§10.4) as a single expression string —
+  the whole `VectorExpr` (e.g. `[15*sin(t), 0, 15*cos(t)]`), not
+  decomposed into named direction/gust sub-parameters. Decomposing gust
+  into independent amplitude/frequency numbers was considered and
+  rejected: the shared expression language (§4.1) already lets one string
+  encode any gust/direction behavior, so a second, narrower gust-specific
+  UI would just duplicate that grammar for no added capability — the same
+  "one opaque expression, edited wholesale" pattern already used for
+  particle mass/radius (§9.4/§10.4) and emitter rate. `density` stays a
+  separate, independently editable numeric field exactly as it worked
+  before this change.
 - **Drag / air resistance**: force opposing velocity, proportional to speed
   (linear) or speed² (quadratic), useful for damping runaway simulations and
   for realistic cloth/flag behavior.
@@ -1093,10 +1092,10 @@ surface's auto-generated `MeshSprings`, which is covered under "particles
 (§10.3's self-registered module, currently just an arrow-visibility
 toggle) gains real numeric-parameter editing — `acceleration`, `g`/
 `softening` respectively, and for `Wind`, `density` (built) plus
-`direction` and gust amplitude/frequency (§5.2, new requirement — not
-built; needs `Wind.velocity` decomposed into named sub-parameters before
-they're independently editable rather than one opaque expression).
-`Wind` is associated with a specific surface via its triangle list, the
+`velocity` (§5.2, new requirement — built) as a single editable
+expression-string field, mirroring particle mass/radius and emitter rate
+rather than decomposing into separate direction/gust parameters. `Wind`
+is associated with a specific surface via its triangle list, the
 same "belongs to" lookup as a group's springs, not a named-group target
 like the other two. Right-clicking one of `Wind`'s sampled arrows
 (§10.2/§10.3, built) opens this same tab directly, the arrow-picking

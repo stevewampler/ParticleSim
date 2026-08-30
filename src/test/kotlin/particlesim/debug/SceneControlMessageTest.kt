@@ -1,6 +1,8 @@
 package particlesim.debug
 
 import particlesim.core.ScalarExpr
+import particlesim.core.Vector3
+import particlesim.core.VectorExpr
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -152,6 +154,37 @@ class SceneControlMessageTest {
     fun `rejects set_emitter_cap_policy missing any required key`() {
         assertNull(SceneControlMessage.parse("""{"type": "set_emitter_cap_policy", "evictOldest": true}"""))
         assertNull(SceneControlMessage.parse("""{"type": "set_emitter_cap_policy", "name": "fountain"}"""))
+    }
+
+    @Test
+    fun `parses set_wind_velocity with a constant vector-literal expression`() {
+        assertEquals(
+            SceneControlMessage.SetWindVelocity("wind", VectorExpr.of(Vector3(1.0, 0.0, 5.0))),
+            SceneControlMessage.parse("""{"type": "set_wind_velocity", "name": "wind", "expression": "[1, 0, 5]"}"""),
+        )
+    }
+
+    @Test
+    fun `parses set_wind_velocity with a time-varying expression as OfTime`() {
+        val parsed = SceneControlMessage.parse(
+            """{"type": "set_wind_velocity", "name": "wind", "expression": "[0, 0, 5 + 2*sin(t)]"}""",
+        )
+        val message = assertIs<SceneControlMessage.SetWindVelocity>(parsed)
+        assertEquals("wind", message.name)
+        assertIs<VectorExpr.OfTime>(message.expr)
+        assertEquals(Vector3(0.0, 0.0, 5.0), message.expr.evaluate(0.0))
+    }
+
+    @Test
+    fun `rejects set_wind_velocity with a scalar expression typed into a vector field`() {
+        assertNull(SceneControlMessage.parse("""{"type": "set_wind_velocity", "name": "wind", "expression": "5.0"}"""))
+    }
+
+    @Test
+    fun `rejects set_wind_velocity with malformed expression syntax or a missing key`() {
+        assertNull(SceneControlMessage.parse("""{"type": "set_wind_velocity", "name": "wind", "expression": "not an expression((("}"""))
+        assertNull(SceneControlMessage.parse("""{"type": "set_wind_velocity", "expression": "[1, 0, 0]"}"""))
+        assertNull(SceneControlMessage.parse("""{"type": "set_wind_velocity", "name": "wind"}"""))
     }
 
     @Test

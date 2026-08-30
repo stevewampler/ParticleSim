@@ -758,6 +758,15 @@ function decodeFrame(buffer) {
     }
     return entries;
   };
+  // §10.4's Wind.velocity read path: one entry per named Wind force - kept off the generic
+  // fields list (unlike density, still read that way) since velocity is expression-capable and
+  // needs the frame's own t to evaluate, same reason the emitter list above exists separately.
+  const readWindEntryList = () => {
+    const count = view.getInt32(offset, true); offset += 4;
+    const entries = new Array(count);
+    for (let i = 0; i < count; i++) entries[i] = { name: readString(), velocity: readVec() };
+    return entries;
+  };
 
   const t = view.getFloat64(offset, true); offset += 8;
   const step = Number(view.getBigInt64(offset, true)); offset += 8;
@@ -849,6 +858,7 @@ function decodeFrame(buffer) {
     groupEnabled: readBoolNameMap(),
     fields: readFieldEntryList(),
     emitters: readEmitterEntryList(),
+    winds: readWindEntryList(),
   };
 
   // §10.2's "debug/--render-all mode... draws every collider as wireframe" - unconditional,
@@ -1136,7 +1146,7 @@ const objectPanelTitleEl = document.getElementById("objectPanelTitle");
 const objectPanelBodyEl = document.getElementById("objectPanelBody");
 
 let lastRegistrySignature = null;
-let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [], colliders: [], groupEnabled: {}, fields: [], emitters: [] };
+let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [], colliders: [], groupEnabled: {}, fields: [], emitters: [], winds: [] };
 let selectedKind = null; // "groups" | "forces" | "constraints" | "surfaces" | "colliders"
 let selectedName = null;
 let latestVisibleIds = null; // this frame's server-side dot filter, updated every frame in applyFrame
@@ -1246,6 +1256,13 @@ function containedForceNamesForGroup(groupName) {
 function vectorLength(x, y, z) { return Math.sqrt(x * x + y * y + z * z); }
 
 function formatVec(x, y, z) { return `(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)})`; }
+
+// §10.4's vector-expression editing display value - a valid `[x, y, z]` literal the expression
+// grammar (ExpressionParser.parseVector) actually accepts, unlike formatVec's rounded "(x, y, z)"
+// read-only display text, which isn't parseable input and would silently fail to round-trip if
+// left unedited. Raw values (not toFixed), same "full precision, not rounded for display"
+// convention as a particle's mass/radius text inputs (String(p.mass), not p.mass.toFixed(2)).
+function formatVectorExprLiteral(x, y, z) { return `[${x}, ${y}, ${z}]`; }
 
 function renderNameList(container, kind, names) {
   container.innerHTML = "";
@@ -1466,6 +1483,7 @@ registerEntityKind({
   },
 });
 
+let windVelocityInput = null; // the open forces panel's Wind.velocity text input, or null otherwise
 registerEntityKind({
   kind: "forces",
   getNames: (registry) => registry.forces,
@@ -1478,11 +1496,40 @@ registerEntityKind({
     if (hasArrows) addPanelToggle("show arrows", hiddenForces);
     currentFieldInputs = {};
     renderEditableFields("force", selectedName, currentFieldInputs);
-    if (!hasArrows && latestRegistry.fields.every((f) => !(f.kind === "force" && f.name === selectedName))) {
+
+    // §10.4's Wind.velocity editing: only present when this force is actually a named Wind
+    // (latestRegistry.winds has an entry for it) - density keeps going through the ordinary
+    // renderEditableFields call above, unaffected. A plain text input, not three x/y/z number
+    // boxes, since velocity is expression-capable - parsed server-side via
+    // ExpressionParser.parseVector, so "[0, 0, 5 + 2*sin(t)]" is exactly as valid an edit as
+    // "[0, 0, 5]". Always shows the live evaluated vector, never the original expression source,
+    // same convention as a particle's mass/radius or an emitter's rate.
+    const windEntry = latestRegistry.winds.find((w) => w.name === selectedName);
+    if (windEntry) {
+      const velocityRow = document.createElement("div");
+      velocityRow.className = "objectField";
+      velocityRow.appendChild(document.createTextNode("velocity: "));
+      windVelocityInput = document.createElement("input");
+      windVelocityInput.type = "text";
+      windVelocityInput.value = formatVectorExprLiteral(windEntry.velocity.x, windEntry.velocity.y, windEntry.velocity.z);
+      windVelocityInput.addEventListener("change", () => {
+        sendEdit({ type: "set_wind_velocity", name: selectedName, expression: windVelocityInput.value });
+      });
+      velocityRow.appendChild(windVelocityInput);
+      objectPanelBodyEl.appendChild(velocityRow);
+    }
+
+    if (!hasArrows && !windEntry && latestRegistry.fields.every((f) => !(f.kind === "force" && f.name === selectedName))) {
       addPanelNote("no arrow renderer or editable numeric fields for this force yet (§10.2/§10.4)");
     }
   },
-  updateLive: () => updateEditableFieldsLive("force", selectedName, currentFieldInputs),
+  updateLive: () => {
+    updateEditableFieldsLive("force", selectedName, currentFieldInputs);
+    const windEntry = latestRegistry.winds.find((w) => w.name === selectedName);
+    if (windEntry && windVelocityInput && document.activeElement !== windVelocityInput) {
+      windVelocityInput.value = formatVectorExprLiteral(windEntry.velocity.x, windEntry.velocity.y, windEntry.velocity.z);
+    }
+  },
 });
 
 registerEntityKind({
@@ -1761,6 +1808,7 @@ function renderObjectPanel() {
   objectPanelInspectEl = null;
   particleFieldInputs = null;
   emitterFieldInputs = null;
+  windVelocityInput = null;
   if (selectedKind === null) {
     objectPanelEl.style.display = "none";
     return;

@@ -424,6 +424,40 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `a named Wind force's live evaluated velocity round-trips in the registry, independent of density`() {
+        val store = ParticleStore()
+        val wind = particlesim.physics.Wind(
+            triangles = emptyList(),
+            velocity = VectorExpr.of { t -> Vector3(0.0, 0.0, 5.0 + 2.0 * t) },
+            density = 1.2,
+            name = "wind",
+        )
+        val registry = SceneRegistry.build(forces = listOf(wind))
+
+        val buffer = BinaryFrame.encode(
+            t = 3.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), registry = registry,
+        )
+        val decoded = BinaryFrame.decode(buffer).registry
+
+        assertEquals(1, decoded.winds.size)
+        val entry = decoded.winds.single()
+        assertEquals("wind", entry.name)
+        assertEquals(Vector3(0.0, 0.0, 11.0), entry.velocity)
+        // density is unaffected - it keeps traveling in the ordinary fields list exactly as before.
+        assertEquals(
+            DecodedFieldEntry("force", "wind", "density", particlesim.physics.FieldValue.Scalar(1.2)),
+            decoded.fields.single(),
+        )
+    }
+
+    @Test
+    fun `no winds passed round-trips to an empty winds list, not an error`() {
+        val store = ParticleStore()
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList())
+        assertEquals(emptyList(), BinaryFrame.decode(buffer).registry.winds)
+    }
+
+    @Test
     fun `round-trips a plane collider with its render half-size`() {
         val store = ParticleStore()
         val floor = PlaneCollider(VectorExpr.of(Vector3(0.0, 1.0, 0.0)), normal = Vector3(0.0, 1.0, 0.0), name = "floor")

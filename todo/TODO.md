@@ -3012,23 +3012,54 @@ next session picks them up instead of losing them.
       caused the switch rather than it already being selected; particle
       and surface right-click-to-open still worked unaffected (their own
       raycast logic wasn't touched, only appended to). No console errors.
-- [ ] `Wind`'s direction and gusting independently live-editable from the
-      viewer, not just `density` (requirements.md §5.2/§10.4). Blocked on
-      a real design decision, not just wiring: `Wind.velocity` is
-      currently one opaque `VectorExpr` baked at construction (e.g.
-      `buildSparks`-style time-varying expressions bundle direction and
-      magnitude together), and `EditableFields`/`FieldValue` (Scalar or
-      Vector only) has no slot for "the direction and gust-shape that
-      combine into this expression" - only for the expression's *current
-      evaluated value* as a whole. Needs deciding, before any code
-      changes: (1) what "gust" means as independently-editable numbers -
-      a periodic amplitude/frequency added on top of a steady direction
-      and base strength? a stochastic/turbulence model with its own
-      tunable parameters? - and (2) how `Wind` then recomputes its
-      effective per-step velocity from those named parts instead of
-      evaluating one pre-composed expression. Only after that's settled
-      does this become "add fields to `Wind`, expose via
-      `EditableFields`" the same way `density` already works.
+- [x] `Wind`'s velocity independently live-editable from the viewer, not
+      just `density` (requirements.md §5.2/§10.4). The user resolved the
+      open design question directly rather than decomposing "gust" into
+      named amplitude/frequency sub-parameters: edit the entire
+      `Wind.velocity` `VectorExpr` as one text field (e.g.
+      `[15*sin(t), 0, 15*cos(t)]`), parsed server-side by the existing
+      shared expression engine - the same "one opaque expression, edited
+      wholesale" pattern already used for particle mass/radius and
+      emitter rate, not a new mechanism. `density` was explicitly kept as
+      a separate, independently-editable field, untouched by this change.
+      **What was built**: `Wind.velocity` changed from `private val` to
+      `private var`, with `currentVelocity(t)`/`setVelocity(expr)` added
+      (`sampleAt`/`accumulate` now read through `currentVelocity`); a new
+      `SceneControlMessage.SetWindVelocity(name, expr)` wire message
+      (Wind-specific rather than a generalized field-edit message, same
+      rationale as the emitter messages) dispatched from
+      `applyEditableFieldMessage` in `DemoScene.kt`; a new `winds` binary
+      registry section (`BinaryFrame.kt`) carrying each named `Wind`'s
+      live-evaluated velocity per frame so the viewer can display the
+      *current* value of a time-varying expression, not just what was
+      last typed; and a `viewer.html` velocity text input in the forces
+      panel (alongside the existing `density` field), refreshed from the
+      registry every frame unless focused, mirroring the mass/radius
+      inputs' "raw value, not toFixed" display convention - and, like
+      those, an accepted tradeoff that submitting a no-op edit while the
+      expression is time-varying freezes it at the momentarily-displayed
+      constant. Component tests added: `WindTest.kt` (`currentVelocity`
+      reflects a live-evaluated time-varying expression; `setVelocity`
+      replaces the expression outright and the new value actually drives
+      `accumulate`, not just `currentVelocity`; `setVelocity` leaves
+      `density`'s `editableFields()` entry untouched),
+      `SceneControlMessageTest.kt` (parses a constant vector literal and a
+      time-varying expression; rejects a scalar expression in this vector
+      field, malformed syntax, and missing keys),
+      `DemoSceneTest.kt` (dispatches to the matching named `Wind`; a
+      non-matching name and a non-`Wind` force with the same name are
+      both silently ignored, not errors), `BinaryFrameTest.kt` (a named
+      `Wind`'s live-evaluated velocity round-trips through the wire
+      independent of `density`, which still round-trips via the ordinary
+      `fields` list; no winds round-trips to an empty list). **Verified
+      live in Chrome** against `SceneLibraryDebugDemo`'s `flag` scene:
+      editing velocity to a constant `[0, 20, 0]` visibly reoriented all
+      wind arrows and billowed the flag mesh; editing to a time-varying
+      `[15*sin(t), 0, 15*cos(t)]` showed the displayed value ticking live
+      frame to frame (e.g. 9.84 → 12.01); editing `density` to `3`
+      afterward updated independently without disturbing the ongoing
+      gusting velocity, confirming the two fields stay decoupled as
+      required. No console errors observed.
 - [ ] Texture-mapped surfaces - an image (e.g. a flag graphic) rendered
       onto a surface's mesh instead of/alongside its flat shaded color
       (requirements.md §10.2). Two real gaps to close, neither trivial:

@@ -4,6 +4,7 @@ import org.yaml.snakeyaml.Yaml
 import org.yaml.snakeyaml.error.YAMLException
 import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
+import particlesim.core.VectorExpr
 import particlesim.expr.ExpressionException
 import particlesim.expr.ExpressionParser
 
@@ -77,6 +78,19 @@ sealed interface SceneControlMessage {
     data class SetEmitterMaxAlive(val name: String, val maxAlive: Int) : SceneControlMessage
     data class SetEmitterCapPolicy(val name: String, val evictOldest: Boolean) : SceneControlMessage
 
+    /** §10.4's `Wind.velocity` live-editing write path - the vector-expression counterpart to
+     * [SetParticleScalarField]/[SetEmitterRate]: [expr] is parsed here via
+     * [ExpressionParser.parseVector], not sent as a bare `{x,y,z}` the way [SetVectorField]
+     * carries a plain [Vector3] - `velocity` is expression-capable
+     * ([particlesim.core.VectorExpr]), so a full replace of the expression, not just its
+     * current evaluated value, is what preserves (or changes) time-variance. Kept Wind-specific
+     * rather than generalized to `(kind, name, field)` like [SetScalarField]/[SetVectorField]:
+     * `Wind.velocity` is the only vector-expression-capable field anywhere in this codebase
+     * today, so a single concrete message matches the "no premature abstraction" stance
+     * `SetEmitterRate`/`SetEmitterMaxAlive`/`SetEmitterCapPolicy` already took over one generic
+     * `SetEmitterField`. */
+    data class SetWindVelocity(val name: String, val expr: VectorExpr) : SceneControlMessage
+
     companion object {
         /** Returns `null` for anything malformed or unrecognized, same "ignore, don't tear down
          * the connection" stance as [DragMessage.parse]/[TimeControlMessage.parse]. */
@@ -147,6 +161,16 @@ sealed interface SceneControlMessage {
                     val name = data["name"] as? String ?: return null
                     val evictOldest = data["evictOldest"] as? Boolean ?: return null
                     SetEmitterCapPolicy(name, evictOldest)
+                }
+                "set_wind_velocity" -> {
+                    val name = data["name"] as? String ?: return null
+                    val expression = data["expression"] as? String ?: return null
+                    val expr = try {
+                        ExpressionParser.parseVector(expression)
+                    } catch (e: ExpressionException) {
+                        return null
+                    }
+                    SetWindVelocity(name, expr)
                 }
                 else -> null
             }

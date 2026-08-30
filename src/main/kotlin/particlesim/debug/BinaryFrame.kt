@@ -13,6 +13,7 @@ import particlesim.render.Color
 import particlesim.render.NamedArrowSamples
 import particlesim.physics.EditableFields
 import particlesim.physics.FieldValue
+import particlesim.physics.Wind
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
 import particlesim.surface.Triangle
@@ -234,6 +235,7 @@ object BinaryFrame {
     ): ByteBuffer {
         val fieldEntries = collectEditableFields(registry)
         val emitterEntries = collectEmitterEntries(registry, t)
+        val windEntries = collectWindEntries(registry, t)
         val size = HEADER_SIZE + ids.size * PARTICLE_SIZE +
             CONNECTION_HEADER_SIZE + connections.sumOf { CONNECTION_FIXED_SIZE + stringSize(connectionNames[it] ?: "") } +
             CAMERA_FLAG_SIZE + (if (camera != null) CAMERA_SIZE else 0) +
@@ -250,6 +252,7 @@ object BinaryFrame {
             boolNameListSize(registry.colliders.keys) + boolNameListSize(registry.groupEnabled.keys) +
             fieldEntryListSize(fieldEntries) +
             emitterEntryListSize(emitterEntries) +
+            windEntryListSize(windEntries) +
             COLLIDER_HEADER_SIZE + colliders.sumOf { colliderEntrySize(it) } +
             EVENT_HEADER_SIZE + events.sumOf { eventEntrySize(it) } +
             nameListSize(availableScenes) + stringSize(activeScene)
@@ -347,6 +350,11 @@ object BinaryFrame {
             buffer.putDouble(entry.rate)
             buffer.putInt(entry.maxAlive)
             buffer.put(if (entry.evictOldest) 1 else 0)
+        }
+        buffer.putInt(windEntries.size)
+        for (entry in windEntries) {
+            putString(buffer, entry.name)
+            putVector(buffer, entry.velocity)
         }
         buffer.putInt(colliders.size)
         for (collider in colliders) {
@@ -449,6 +457,7 @@ object BinaryFrame {
             groupEnabled = getBoolNameList(buf),
             fields = getFieldEntryList(buf),
             emitters = getEmitterEntryList(buf),
+            winds = getWindEntryList(buf),
         )
         val colliderCount = buf.int
         val colliders = (0 until colliderCount).map {
@@ -536,6 +545,20 @@ object BinaryFrame {
     private fun emitterEntryListSize(entries: List<RegistryEmitterEntry>): Int =
         REGISTRY_LIST_HEADER_SIZE + entries.sumOf { stringSize(it.name) + 8 + 4 + 1 }
 
+    /** §10.4's `Wind.velocity` read path: one entry per named [Wind] force in the registry -
+     * kept off the generic `fields`/[EditableFields] list the same reason [collectEmitterEntries]
+     * keeps `rate` off it: the value is a live-evaluated expression, and [collectEditableFields]
+     * has no `t` to evaluate one against. `velocity` is the live evaluated vector at this
+     * frame's [t], never the expression source - same convention as `rate`. `density` is
+     * unaffected - it keeps traveling in the ordinary `fields` list exactly as before. */
+    private fun collectWindEntries(registry: SceneRegistry, t: Double): List<RegistryWindEntry> =
+        registry.forces.entries.mapNotNull { (name, force) ->
+            (force as? Wind)?.let { RegistryWindEntry(name, it.currentVelocity(t)) }
+        }
+
+    private fun windEntryListSize(entries: List<RegistryWindEntry>): Int =
+        REGISTRY_LIST_HEADER_SIZE + entries.sumOf { stringSize(it.name) + 24 }
+
     private fun colliderEntrySize(collider: Collider): Int {
         val shapeSize = when (collider) {
             is PlaneCollider -> 24 + 8
@@ -618,6 +641,11 @@ object BinaryFrame {
         }
     }
 
+    private fun getWindEntryList(buffer: ByteBuffer): List<DecodedWindEntry> {
+        val count = buffer.int
+        return (0 until count).map { DecodedWindEntry(getString(buffer), getVector(buffer)) }
+    }
+
     private fun getBoolNameList(buffer: ByteBuffer): Map<String, Boolean> {
         val count = buffer.int
         val result = LinkedHashMap<String, Boolean>(count)
@@ -680,6 +708,13 @@ private data class RegistryEmitterEntry(val name: String, val rate: Double, val 
  * [particlesim.debug.SceneControlMessage.SetEmitterCapPolicy]'s own convention. */
 data class DecodedEmitterEntry(val name: String, val rate: Double, val maxAlive: Int, val evictOldest: Boolean)
 
+/** One named [Wind] force's §10.4 `velocity` read path - used internally by [encode] only,
+ * mirroring [RegistryEmitterEntry]'s split from its decoded counterpart. */
+private data class RegistryWindEntry(val name: String, val velocity: Vector3)
+
+/** [RegistryWindEntry], decoded. */
+data class DecodedWindEntry(val name: String, val velocity: Vector3)
+
 /** One named collider's §10.4 activation state — kept in the registry (unlike the unconditional
  * wireframe [DecodedCollider] section) so an inactive collider's name is still reachable to
  * reactivate it, even though it's no longer drawn. */
@@ -696,6 +731,7 @@ data class DecodedRegistry(
     val groupEnabled: Map<String, Boolean> = emptyMap(),
     val fields: List<DecodedFieldEntry> = emptyList(),
     val emitters: List<DecodedEmitterEntry> = emptyList(),
+    val winds: List<DecodedWindEntry> = emptyList(),
 )
 
 data class DecodedFrame(

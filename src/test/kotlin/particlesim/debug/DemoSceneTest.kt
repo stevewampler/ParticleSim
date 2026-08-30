@@ -3,11 +3,13 @@ package particlesim.debug
 import particlesim.core.ParticleStore
 import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
+import particlesim.core.VectorExpr
 import particlesim.lifecycle.Emitter
 import particlesim.lifecycle.EmitterCapPolicy
 import particlesim.lifecycle.VectorDistribution
 import particlesim.physics.NBodyGravity
 import particlesim.physics.UniformGravity
+import particlesim.physics.Wind
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -42,6 +44,48 @@ class DemoSceneTest {
             t = 0.0,
         )
         assertEquals(Vector3(1.0, 2.0, 3.0), gravity.sampleAt(Vector3.ZERO, t = 0.0))
+    }
+
+    @Test
+    fun `applies a wind velocity edit to the matching named Wind force and reports handled`() {
+        val wind = Wind(emptyList(), VectorExpr.of(Vector3.ZERO), name = "wind")
+        val handled = applyEditableFieldMessage(
+            SceneControlMessage.SetWindVelocity("wind", VectorExpr.of(Vector3(1.0, 0.0, 0.0))),
+            forces = listOf(wind),
+            constraints = emptyList(),
+            store = ParticleStore(),
+            t = 0.0,
+        )
+        assertTrue(handled)
+        assertEquals(Vector3(1.0, 0.0, 0.0), wind.currentVelocity(t = 0.0))
+    }
+
+    @Test
+    fun `a wind velocity edit for a name that doesn't match anything is silently ignored, not an error`() {
+        val wind = Wind(emptyList(), VectorExpr.of(Vector3.ZERO), name = "wind")
+        val handled = applyEditableFieldMessage(
+            SceneControlMessage.SetWindVelocity("nonexistent", VectorExpr.of(Vector3(1.0, 0.0, 0.0))),
+            forces = listOf(wind),
+            constraints = emptyList(),
+            store = ParticleStore(),
+            t = 0.0,
+        )
+        assertTrue(handled) // the message *type* was recognized, even though nothing matched
+        assertEquals(Vector3.ZERO, wind.currentVelocity(t = 0.0))
+    }
+
+    @Test
+    fun `a wind velocity edit targeting a non-Wind force by the same name is silently ignored`() {
+        val gravity = UniformGravity("g", Vector3(0.0, -9.8, 0.0), name = "wind")
+        val handled = applyEditableFieldMessage(
+            SceneControlMessage.SetWindVelocity("wind", VectorExpr.of(Vector3(1.0, 0.0, 0.0))),
+            forces = listOf(gravity),
+            constraints = emptyList(),
+            store = ParticleStore(),
+            t = 0.0,
+        )
+        assertTrue(handled)
+        assertEquals(Vector3(0.0, -9.8, 0.0), gravity.sampleAt(Vector3.ZERO, t = 0.0))
     }
 
     @Test

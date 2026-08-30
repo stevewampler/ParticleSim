@@ -155,6 +155,9 @@ fun main() {
                 is SceneControlMessage.SetEmitterRate -> {} // this demo has no emitters
                 is SceneControlMessage.SetEmitterMaxAlive -> {} // this demo has no emitters
                 is SceneControlMessage.SetEmitterCapPolicy -> {} // this demo has no emitters
+                // Not wired here (this demo hand-rolls its own dispatch above rather than
+                // calling applyEditableFieldMessage) - see FlagScene for the wired equivalent.
+                is SceneControlMessage.SetWindVelocity -> {}
             }
         }
         // §9.1's pacing policy, honored literally: dt (FLAG_DT) never changes here - only how

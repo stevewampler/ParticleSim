@@ -91,4 +91,35 @@ class WindTest {
         assertEquals(Vector3(3.0, 0.0, 0.0), wind.sampleAt(Vector3(100.0, -50.0, 7.0), t = 3.0))
         assertEquals(Vector3(3.0, 0.0, 0.0), wind.sampleAt(Vector3.ZERO, t = 3.0), "position is unused - wind is spatially uniform today")
     }
+
+    @Test
+    fun `currentVelocity reflects the live evaluated value of a time-varying expression`() {
+        val wind = Wind(emptyList(), VectorExpr.of { t -> Vector3(t, 0.0, 0.0) })
+        assertEquals(Vector3(3.0, 0.0, 0.0), wind.currentVelocity(t = 3.0))
+        assertEquals(Vector3(7.0, 0.0, 0.0), wind.currentVelocity(t = 7.0))
+    }
+
+    @Test
+    fun `setVelocity replaces the expression outright, taking effect on both currentVelocity and accumulate`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val a = store.create(position = Vector3(0.0, 0.0, 0.0))
+        val b = store.create(position = Vector3(1.0, 0.0, 0.0))
+        val c = store.create(position = Vector3(0.0, 1.0, 0.0))
+        val wind = Wind(listOf(Triangle(a, b, c)), VectorExpr.of(Vector3(0.0, 0.0, 5.0)), density = 1.0)
+
+        wind.setVelocity(VectorExpr.of(Vector3(0.0, 0.0, 10.0)))
+
+        assertEquals(Vector3(0.0, 0.0, 10.0), wind.currentVelocity(t = 0.0))
+        // area = 0.5, pressure magnitude = 1 * 0.5 * 10 = 5.0, split three ways - doubled from
+        // the original 5.0 velocity's 2.5, proving the replacement actually drives accumulate.
+        assertVectorEquals(Vector3(0.0, 0.0, 5.0 / 3.0), netForceOn(a, store, groups, wind))
+    }
+
+    @Test
+    fun `setVelocity does not disturb density's independent editable field`() {
+        val wind = Wind(emptyList(), VectorExpr.of(Vector3.ZERO), density = 2.5)
+        wind.setVelocity(VectorExpr.of(Vector3(1.0, 0.0, 0.0)))
+        assertEquals(FieldValue.Scalar(2.5), wind.editableFields()["density"])
+    }
 }

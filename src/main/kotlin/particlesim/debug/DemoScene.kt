@@ -8,6 +8,7 @@ import particlesim.physics.Constraint
 import particlesim.physics.EditableFields
 import particlesim.physics.FieldValue
 import particlesim.physics.Force
+import particlesim.physics.Wind
 import particlesim.render.CameraPose
 import particlesim.render.Color
 import particlesim.render.NamedArrowSamples
@@ -116,6 +117,14 @@ fun applyEditableFieldMessage(
                     "radius" -> store.setRadius(message.particleId, message.expr, t)
                 }
             }
+            true
+        }
+        // Wind.velocity is expression-capable, unlike every other EditableFields field, so it
+        // can't go through the target()/FieldValue path above (see SetWindVelocity's own doc
+        // comment) - handled here instead, alongside the id-addressed particle expression edit
+        // above, since forces is already a parameter every caller of this function passes.
+        is SceneControlMessage.SetWindVelocity -> {
+            (forces.find { it.name == message.name } as? Wind)?.setVelocity(message.expr)
             true
         }
         else -> false
