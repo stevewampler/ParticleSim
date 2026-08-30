@@ -61,17 +61,9 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
     override fun ids(): List<Int> = allIds
 
     override fun handleControl(message: SceneControlMessage, t: Double) {
-        if (applyEditableFieldMessage(message, scenario.forces, scenario.constraints)) return
+        if (applyEditableFieldMessage(message, scenario.forces, scenario.constraints, scenario.store, t)) return
         when (message) {
             is SceneControlMessage.SetGroupEnabled -> scenario.groups.setEnabled(message.name, message.enabled)
-            is SceneControlMessage.SetParticleScalarField -> {
-                if (scenario.store.contains(message.particleId)) {
-                    when (message.field) {
-                        "mass" -> scenario.store.setMass(message.particleId, message.expr, t)
-                        "radius" -> scenario.store.setRadius(message.particleId, message.expr, t)
-                    }
-                }
-            }
             else -> {} // colliders/delete-particle/restart-scene aren't features of this scene
         }
     }

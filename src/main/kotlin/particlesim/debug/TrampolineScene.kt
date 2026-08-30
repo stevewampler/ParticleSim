@@ -48,7 +48,7 @@ class TrampolineScene : DemoScene {
     }
 
     override fun handleControl(message: SceneControlMessage, t: Double) {
-        if (applyEditableFieldMessage(message, scenario.forces, scenario.constraints)) return
+        if (applyEditableFieldMessage(message, scenario.forces, scenario.constraints, scenario.store, t)) return
         if (message is SceneControlMessage.SetGroupEnabled) scenario.groups.setEnabled(message.name, message.enabled)
     }
 

@@ -23,7 +23,7 @@ class SparksScene : DemoScene {
     override fun ids(): List<Int> = scenario.store.liveIds()
 
     override fun handleControl(message: SceneControlMessage, t: Double) {
-        applyEditableFieldMessage(message, scenario.forces, emptyList())
+        applyEditableFieldMessage(message, scenario.forces, emptyList(), scenario.store, t)
     }
 
     override fun step(t: Double) {

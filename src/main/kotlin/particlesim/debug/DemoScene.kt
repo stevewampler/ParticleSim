@@ -71,15 +71,28 @@ interface DemoScene {
 }
 
 /**
- * §10.4's generic (kind, name) -> [EditableFields] dispatch, shared by every [DemoScene] instead
- * of each one hand-rolling its own copy of the same `when (message.kind) { "force" -> ...;
- * "constraint" -> ... }` block - that duplication is exactly what let `FlagDebugDemo` silently
- * drop every field edit for its entire lifetime (never caught precisely because it was one
- * demo's own copy, not shared code every scene's tests exercise). A scene's [DemoScene
- * .handleControl] calls this first and only falls through to its own handling for whatever this
- * returns `false` for (message types this function doesn't recognize at all).
+ * §10.4's generic §10.4-editing dispatch, shared by every [DemoScene] instead of each one
+ * hand-rolling its own copy - that duplication is exactly what let `FlagDebugDemo` silently
+ * drop every field edit for its entire lifetime, and what let `TrampolineScene` drop
+ * [SceneControlMessage.SetParticleScalarField] specifically even after the force/constraint
+ * half of this was first extracted (caught live: mass edits reverted every frame on the
+ * trampoline scene, same symptom, different message type this time). Covers both the
+ * name-addressed [EditableFields] path (`SetScalarField`/`SetVectorField`, resolved by `(kind,
+ * name)` against whichever force/constraint actually implements it) and the id-addressed
+ * particle mass/radius path (`SetParticleScalarField`) - the two other things every scene needs
+ * as soon as it has anything selectable, so a scene calls this once from its own
+ * [DemoScene.handleControl] and only falls through to its own handling for whatever this
+ * returns `false` for (message types this function doesn't recognize at all, e.g.
+ * `SetGroupEnabled` or collider messages, which need scene-specific state this function has no
+ * business touching).
  */
-fun applyEditableFieldMessage(message: SceneControlMessage, forces: List<Force>, constraints: List<Constraint>): Boolean {
+fun applyEditableFieldMessage(
+    message: SceneControlMessage,
+    forces: List<Force>,
+    constraints: List<Constraint>,
+    store: ParticleStore,
+    t: Double,
+): Boolean {
     fun target(kind: String, name: String): EditableFields? = when (kind) {
         "force" -> forces.find { it.name == name } as? EditableFields
         "constraint" -> constraints.find { it.name == name } as? EditableFields
@@ -92,6 +105,15 @@ fun applyEditableFieldMessage(message: SceneControlMessage, forces: List<Force>,
         }
         is SceneControlMessage.SetVectorField -> {
             target(message.kind, message.name)?.setField(message.field, FieldValue.Vector(message.value))
+            true
+        }
+        is SceneControlMessage.SetParticleScalarField -> {
+            if (store.contains(message.particleId)) {
+                when (message.field) {
+                    "mass" -> store.setMass(message.particleId, message.expr, t)
+                    "radius" -> store.setRadius(message.particleId, message.expr, t)
+                }
+            }
             true
         }
         else -> false
