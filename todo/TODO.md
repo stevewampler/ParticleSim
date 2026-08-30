@@ -2755,9 +2755,11 @@ real prerequisite, not just unstarted — see the note below.
         mechanic specifically exercised: `dragScene` start/move/end on a
         non-anchor link, `particleCollision`'s `delete_particle` (victim
         removed, `ParticleDestroyed` event seen), `spatialGrid`'s
-        `remove_collider('floor')`. Not yet re-verified live in Chrome by
-        the user (the automated WebSocket check doesn't touch the
-        picker UI or 3D rendering).
+        `remove_collider('floor')`. **Confirmed live in Chrome** by the
+        user too - the picker lists all eight, `drag`'s click-and-drag,
+        `particleCollision`'s collider removal/delete, `spatialGrid`'s
+        2000-ball box, and `multiShape`'s new outliner presence all work
+        as rendered, not just at the wire level.
 
 ## Shape library (§4.5, new requirement) — not yet phased
 - [x] Kotlin DSL: `ShapePlacement` (`particlesim.examples`) — an
