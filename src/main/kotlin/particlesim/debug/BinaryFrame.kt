@@ -32,7 +32,9 @@ import java.nio.charset.StandardCharsets
  * f64  t
  * i64  step
  * i32  particleCount
- * particleCount * { i32 id, f64 x, f64 y, f64 z, f64 vx, f64 vy, f64 vz }
+ * particleCount * { i32 id, f64 x, f64 y, f64 z, f64 vx, f64 vy, f64 vz, f64 mass, f64 radius }
+ *                   (radius is NaN when the particle has none — matches ParticleStore.radius's
+ *                   own NaN-means-unset sentinel, no new encoding invented)
  * i32  connectionCount
  * connectionCount * { i32 a, i32 b, f64 r, f64 g, f64 b }
  * u8   hasCamera (0 or 1); if set: 9x f64 (position.xyz, lookAt.xyz, up.xyz)
@@ -128,9 +130,21 @@ import java.nio.charset.StandardCharsets
  * Every particle carries velocity alongside position — unconditionally, doubling the per-particle
  * payload from 28 to 52 bytes, not opt-in — so that §10.3's selection & inspection ("a particle's
  * position/velocity... live numeric readout") has something to read without a second wire
- * section keyed by id. This is the more expensive of this frame's per-particle additions (it
- * scales with every particle, not just a named group's members like the registry section does),
- * worth remembering if a future large-N scenario ever needs to trim frame size.
+ * section keyed by id. Mass and radius ([ParticleStore.mass]/[ParticleStore.radius]) are the
+ * identical case, one step further down §3's list of expression-capable per-particle fields —
+ * added here rather than as a `(kind, name, field)` field-value entry like a force/constraint's,
+ * since particles are id-addressed with no name and a selection-scoped per-client emission
+ * (the alternative) would need per-connection frame customization this codebase has nowhere else
+ * ([particlesim.debug.DebugRenderer.broadcast] sends one identical buffer to every connection).
+ * Growing `PARTICLE_SIZE` from 52 to 68 bytes is the more expensive of this frame's per-particle
+ * additions (it scales with every particle, not just a named group's members like the registry
+ * section does), worth remembering if a future large-N scenario ever needs to trim frame size —
+ * accepted for now since this is a debug tool talking to `localhost`, not a bandwidth-constrained
+ * remote link. This is a *different* radius than the [sphereRadii] section below: that one is an
+ * opt-in, author-declared render size (§10.2); this is the physics/collision radius. Editing one
+ * doesn't move the other — a demo that passes an explicit `sphereRadii` override (e.g.
+ * `FlagDebugDemo`'s pole spheres) will show no visible change when a particle's collision radius
+ * is edited, an accepted gap, not a bug.
  *
  * [visibleIds], when supplied, is the *only* set of particles the viewer draws as a standalone
  * dot/sphere — every particle still travels in the main particle list (needed for connection
@@ -141,7 +155,7 @@ import java.nio.charset.StandardCharsets
  */
 object BinaryFrame {
     private const val HEADER_SIZE = 8 + 8 + 4 // t, step, particleCount
-    private const val PARTICLE_SIZE = 4 + 8 + 8 + 8 + 8 + 8 + 8 // id, x, y, z, vx, vy, vz
+    private const val PARTICLE_SIZE = 4 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 8 // id, x, y, z, vx, vy, vz, mass, radius
     private const val CONNECTION_HEADER_SIZE = 4 // connectionCount
     private const val CONNECTION_SIZE = 4 + 4 + 8 + 8 + 8 // a, b, r, g, b
     private const val CAMERA_FLAG_SIZE = 1
@@ -223,6 +237,8 @@ object BinaryFrame {
             buffer.putInt(id)
             buffer.putDouble(p.x); buffer.putDouble(p.y); buffer.putDouble(p.z)
             buffer.putDouble(v.x); buffer.putDouble(v.y); buffer.putDouble(v.z)
+            buffer.putDouble(store.mass(id))
+            buffer.putDouble(store.radius(id) ?: Double.NaN)
         }
         buffer.putInt(connections.size)
         for (connection in connections) {
@@ -345,7 +361,9 @@ object BinaryFrame {
             val vx = buf.double
             val vy = buf.double
             val vz = buf.double
-            DecodedParticle(id, Vector3(x, y, z), Vector3(vx, vy, vz))
+            val mass = buf.double
+            val radius = buf.double
+            DecodedParticle(id, Vector3(x, y, z), Vector3(vx, vy, vz), mass, if (radius.isNaN()) null else radius)
         }
         val connectionCount = buf.int
         val connections = (0 until connectionCount).map {
@@ -544,7 +562,7 @@ object BinaryFrame {
     }
 }
 
-data class DecodedParticle(val id: Int, val position: Vector3, val velocity: Vector3)
+data class DecodedParticle(val id: Int, val position: Vector3, val velocity: Vector3, val mass: Double, val radius: Double?)
 
 data class DecodedConnection(val a: Int, val b: Int, val color: Color)
 

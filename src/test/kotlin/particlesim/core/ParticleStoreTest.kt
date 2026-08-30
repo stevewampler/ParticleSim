@@ -81,4 +81,78 @@ class ParticleStoreTest {
         assertEquals(0.5, store.radius(id))
         assertEquals(10.0, store.lifetime(id))
     }
+
+    @Test
+    fun `setMass replaces a constant mass outright and reports success`() {
+        val store = ParticleStore()
+        val id = store.create(mass = ScalarExpr.of(2.5))
+        assertTrue(store.setMass(id, ScalarExpr.of(9.0), t = 0.0))
+        assertEquals(9.0, store.mass(id))
+        assertFalse(store.hasDynamicMass(id))
+    }
+
+    @Test
+    fun `setMass with a time-varying expression demotes-to-dynamic and evaluates at t`() {
+        val store = ParticleStore()
+        val id = store.create(mass = ScalarExpr.of(2.5))
+        assertTrue(store.setMass(id, ScalarExpr.of { t -> 2.0 + t }, t = 3.0))
+        assertEquals(5.0, store.mass(id))
+        assertTrue(store.hasDynamicMass(id))
+    }
+
+    @Test
+    fun `setMass rejects a non-positive result and leaves mass unchanged`() {
+        val store = ParticleStore()
+        val id = store.create(mass = ScalarExpr.of(2.5))
+        assertFalse(store.setMass(id, ScalarExpr.of(0.0), t = 0.0))
+        assertFalse(store.setMass(id, ScalarExpr.of(-1.0), t = 0.0))
+        assertEquals(2.5, store.mass(id))
+        assertFalse(store.hasDynamicMass(id))
+    }
+
+    @Test
+    fun `setMass rejects NaN or Infinite and leaves mass unchanged`() {
+        val store = ParticleStore()
+        val id = store.create(mass = ScalarExpr.of(2.5))
+        assertFalse(store.setMass(id, ScalarExpr.of(Double.NaN), t = 0.0))
+        assertFalse(store.setMass(id, ScalarExpr.of(Double.POSITIVE_INFINITY), t = 0.0))
+        assertEquals(2.5, store.mass(id))
+    }
+
+    @Test
+    fun `setMass rejects a dynamic expression whose value right now is non-positive`() {
+        val store = ParticleStore()
+        val id = store.create(mass = ScalarExpr.of(2.5))
+        // Evaluates to -1.0 at t=0, even though it would be positive at other times - the edit
+        // is judged by its value right now, not clamped like the per-step dynamic-mass path.
+        assertFalse(store.setMass(id, ScalarExpr.of { t -> t - 1.0 }, t = 0.0))
+        assertEquals(2.5, store.mass(id))
+        assertFalse(store.hasDynamicMass(id))
+    }
+
+    @Test
+    fun `setRadius can add a radius to a particle that had none`() {
+        val store = ParticleStore()
+        val id = store.create()
+        assertNull(store.radius(id))
+        assertTrue(store.setRadius(id, ScalarExpr.of(1.25), t = 0.0))
+        assertEquals(1.25, store.radius(id))
+    }
+
+    @Test
+    fun `setRadius accepts a non-positive value - no positivity guard exists for radius`() {
+        val store = ParticleStore()
+        val id = store.create(radius = ScalarExpr.of(0.5))
+        assertTrue(store.setRadius(id, ScalarExpr.of(-1.0), t = 0.0))
+        assertEquals(-1.0, store.radius(id))
+    }
+
+    @Test
+    fun `setRadius rejects NaN or Infinite and leaves radius unchanged`() {
+        val store = ParticleStore()
+        val id = store.create(radius = ScalarExpr.of(0.5))
+        assertFalse(store.setRadius(id, ScalarExpr.of(Double.NaN), t = 0.0))
+        assertFalse(store.setRadius(id, ScalarExpr.of(Double.POSITIVE_INFINITY), t = 0.0))
+        assertEquals(0.5, store.radius(id))
+    }
 }

@@ -129,6 +129,7 @@ fun main() {
 
     while (true) {
         val frameStart = System.nanoTime()
+        val events = mutableListOf<SimEvent>()
         for (message in viewerInput.sceneControlQueue.drainAll()) {
             when (message) {
                 is SceneControlMessage.RemoveCollider -> {
@@ -143,9 +144,20 @@ fun main() {
                 // comment) - see ParticleCollisionDebugDemo for the wired field-edit equivalent.
                 is SceneControlMessage.SetScalarField -> {}
                 is SceneControlMessage.SetVectorField -> {}
+                // Particles are id-addressed, unlike the name-addressed fields above, so this
+                // works here even though this demo names no forces/constraints.
+                is SceneControlMessage.SetParticleScalarField -> {
+                    if (store.contains(message.particleId)) {
+                        when (message.field) {
+                            "mass" -> store.setMass(message.particleId, message.expr, t)
+                            "radius" -> store.setRadius(message.particleId, message.expr, t)
+                        }
+                    }
+                }
                 is SceneControlMessage.DeleteParticle -> {
                     val result = destruction.resolve(store, groups, emptyList<Force>(), t, dt, explicitIds = setOf(message.particleId))
                     ids.removeAll(result.destroyedIds.toSet())
+                    for (id in result.destroyedIds) events += SimEvent.ParticleDestroyed(id)
                 }
                 SceneControlMessage.Restart -> {
                     random = Random(seed = 1)
@@ -172,6 +184,7 @@ fun main() {
             sphereRadii = ids.associateWith { radius },
             colliders = liveColliderRules.map { it.collider },
             registry = SceneRegistry.build(groups = groups, colliders = liveColliderRules.map { it.collider }),
+            events = events,
         )
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)

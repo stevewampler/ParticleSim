@@ -5,6 +5,7 @@ import particlesim.collision.PlaneCollider
 import particlesim.collision.SphereCollider
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
+import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
 import particlesim.core.VectorExpr
 import particlesim.physics.FixedPosition
@@ -39,7 +40,10 @@ class BinaryFrameTest {
         assertEquals(1.5, decoded.t)
         assertEquals(42L, decoded.step)
         assertEquals(
-            listOf(DecodedParticle(a, Vector3(1.0, 2.0, 3.0), Vector3.ZERO), DecodedParticle(b, Vector3(-1.5, 0.25, 100.0), Vector3.ZERO)),
+            listOf(
+                DecodedParticle(a, Vector3(1.0, 2.0, 3.0), Vector3.ZERO, mass = 1.0, radius = null),
+                DecodedParticle(b, Vector3(-1.5, 0.25, 100.0), Vector3.ZERO, mass = 1.0, radius = null),
+            ),
             decoded.particles,
             "neither particle was given a velocity -> Vector3.ZERO",
         )
@@ -56,6 +60,21 @@ class BinaryFrameTest {
         val decoded = BinaryFrame.decode(buffer)
 
         assertEquals(Vector3(4.0, -5.0, 6.5), decoded.particles.single().velocity)
+    }
+
+    @Test
+    fun `a particle's mass and radius round-trip, radius null when unset`() {
+        val store = ParticleStore()
+        val withRadius = store.create(mass = ScalarExpr.of(2.5), radius = ScalarExpr.of(0.75))
+        val withoutRadius = store.create(mass = ScalarExpr.of(3.0))
+
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(withRadius, withoutRadius), connections = emptyList())
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(2.5, decoded.particles[0].mass)
+        assertEquals(0.75, decoded.particles[0].radius)
+        assertEquals(3.0, decoded.particles[1].mass)
+        assertNull(decoded.particles[1].radius)
     }
 
     @Test

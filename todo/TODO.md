@@ -2341,256 +2341,142 @@ real prerequisite, not just unstarted — see the note below.
           a named "floor" collider) to confirm the migrated collider
           panel specifically - active checkbox, shape info, and remove
           button all worked. No console errors either run.
-    - [ ] Particles/groups: dual selection (3D click or group-list click
-          selects both particle and group), per-particle/per-group
-          mass/radius editing, a group's tab surfacing spring/damper
-          params for every fully-contained Spring/Damper/MeshSprings,
-          per-particle render override, per-group color override +
-          visibility toggle - not built yet, beyond the enable/disable
-          checkbox above.
-          **Multi-group selection - resolved via direct walkthrough with
-          the user, not implemented yet:** a particle can belong to more
-          than one group at once (`Groups.groupsOf(id)` returns a `Set`,
-          and the existing 3D-click code already computes a *plural*
-          candidate list -
-          `latestRegistry.groups.filter(g => g.memberIds.has(particleId))`
-          - for exactly this reason), and "picking a particle also picks
-          its group" doesn't say which one wins when there's more than
-          one.
-          - **Pick one deterministically; don't render every containing
-            group's panel at once.** The object panel is single-selection
-            top to bottom - `objectPanelInfoEl`/`objectPanelInspectEl` are
-            singleton globals, `renderObjectPanel` clears one
-            `objectPanelBodyEl` and calls exactly one module's
-            `renderPanel()`, `updateInspection` dispatches to exactly one
-            `updateLive()`. Showing every containing group's panel
-            simultaneously needs each of those per-selection node
-            references turned into a per-panel collection - real
-            structural cost for this one case, not a rendering-style
-            choice.
-          - **Reuse the existing right-click-to-open-panel heuristic
-            (`viewer.html`'s `contextmenu` handler,
-            `candidates.sort((a, b) => a.memberIds.size - b.memberIds.size)`
-            then take the smallest) - don't introduce a second,
-            different tie-break rule for the same ambiguity.** This
-            supersedes this bullet's own original "e.g. the first by
-            creation order" suggestion, which predates that code and is
-            now stale - noted here so a future reader doesn't reintroduce
-            a second rule that disagrees with the first (right-click
-            picks "cloth", a particle panel's pairing picks "pole" for
-            the same particle). Confirmed the tie-break is already
-            deterministic even for equal-size groups: `SceneRegistry
-            .build`'s `groups` map is `LinkedHashMap`-backed (creation
-            order, §11), the wire and the JS-side `latestRegistry.groups`
-            array preserve that order, and `Array.prototype.sort` is
-            stable - so the full rule is "smallest member count, ties
-            broken by group creation order," deterministic today with no
-            new bookkeeping needed.
-          - **The particle's own panel (not built yet) lists every
-            containing group as a reselectable entry**, letting the user
-            switch which group's panel is showing - full access to every
-            containing group without needing simultaneous multi-panel
-            rendering.
-          **`entityKindModules`/outliner-shape gap - resolved via direct
-          walkthrough with the user, not implemented yet:** particle
-          selection didn't fit the module shape constraints/surfaces/
-          colliders were migrated onto - that contract's `getNames(registry)`
-          produces an outliner list, but particles are 3D-pick-only and
-          never listed (N can be thousands).
-          - **`getNames` becomes optional on the module contract** (both
-            here and in `requirements.md`'s own copy of the shape, updated
-            in the same pass) - a kind that omits it has no outliner
-            section and is reachable only by something setting
-            `selectedKind`/`selectedName` directly (3D pick, for
-            particles), never via an outliner click. `registerEntityKind`
-            needs no change - `document.getElementById("outlinerParticles")`
-            already returns `null` harmlessly for a kind with no such
-            element; `updateOutliner`'s per-module loop just needs an
-            `if (module.getNames)` guard before calling `renderNameList`
-            (currently unconditional) so a `getNames`-less module doesn't
-            crash the loop for every other kind. `selectedName` holds
-            `String(particleId)` - no type change to that pair, every
-            existing `dataset.name`/`selectedName` string comparison stays
-            correct.
-          - **Right-click on a particle now opens the particle's own
-            panel, not its (disambiguated) group's** - a deliberate change
-            to the already-shipped, already-Chrome-verified behavior from
-            the collider-activation/group-enable/disable round, not an
-            oversight. Two things make this the right call rather than a
-            regression: (1) it's the literal reading of §10.3's own
-            "right-clicking a rendered object in the 3D view opens its
-            per-object panel directly" - a dot is a rendered object, its
-            own panel is the particle panel, and the old group-opening
-            behavior was a placeholder from before a particle panel
-            existed, not a designed endpoint; (2) it's what the multi-group
-            decision above already committed to - "the particle's own
-            panel lists every containing group as a reselectable entry"
-            presupposes landing on the particle panel with groups as links
-            *out* of it, not the reverse. Nothing becomes unreachable: the
-            outliner still lists every group by name (its whole stated
-            purpose - "how do I reach an object's UI when it isn't
-            visible"), and the particle panel links to every group it's
-            in, disambiguated by the same smallest-member-count heuristic
-            already decided. A particle with zero group memberships - today
-            silently uninspectable at all, since the old handler `return`s
-            on an empty candidate list - now just works: panel opens, group
-            link list is empty. That's evidence for this direction, not a
-            new gap.
-          - **Selection must clear when the selected particle is destroyed**,
-            the same way `updateOutliner` already clears a selected-and-
-            removed collider (`if (selectedKind === "colliders" &&
-            !registry.colliders.some(...))`) - particles have no registry
-            entry to check membership against, so this needs its own path.
-            The wire already carries the hook: `SimEvent` kind 1
-            (`particleDestroyed`, §9.1's discrete-event channel) fires the
-            frame it happens - clear `selectedKind`/`selectedName` when a
-            `destroyed` event names the currently-selected particle,
-            mirroring the collider case's "stale selection, not a crash"
-            concern (`latestById.get(id)` returning `undefined` forever
-            otherwise, silently freezing the panel on stale data rather
-            than closing it). Double-click delete (already shipped) and
-            future §14 lifecycle destruction both go through this same
-            event, so one fix covers both.
-          Also still unchecked: whether a connection
-          (`(id, id)` pair) is name-tagged back to its owning
-          Spring/Damper/MeshSprings on the wire - needed for "every
-          spring/damper where all endpoints belong to this group" and not
-          yet confirmed one way or the other.
-          **Mass/radius live-editing design - resolved via direct
-          walkthrough with the user, not implemented yet:**
-          `mass`/`radius` are stored as `ScalarExpr` in `ParticleStore`
-          (already expression-capable, e.g. `"2.0 + 0.1*sin(t)"`), not
-          plain doubles, so live-editing them is a storage decision, not
-          just UI wiring:
-          - **Edit input is an expression string, parsed via the existing
-            `ExpressionParser.parseScalar` (§4.1/Phase 7), not a bare
-            number.** This dissolves the "replace outright vs. overlay
-            on top of the expression" framing the question started from -
-            once the edit itself can be `"sin(t)"`, replacing the
-            particle's stored `ScalarExpr` outright *is* the
-            time-variance-preserving option, with no separate override
-            layer/map needed. A plain `"5.0"` parses to
-            `ScalarExpr.Constant` exactly as today; reuses the same
-            parser Phase 7's YAML front-end already has, rather than a
-            second parsing path for this one feature (the architecture
-            doc's own "one shared expression language" rule).
-          - **The edit fully replaces the stored expression** - same
-            `setOrClearExpr` behavior `ParticleStore.create` already has
-            (add/remove the id's `massExprs`/`radiusExprs` entry to match
-            whether the freshly-parsed expression is `OfTime` or
-            `Constant`), the same demotion-to-constant operation
-            `restoreParticle` already performs for checkpoint-restore.
-          - **Validation, all non-throwing (reject and return `false`,
-            never propagate an exception up through the live wire path)**:
-            a parse failure (bad syntax, or a vector expression typed into
-            a scalar field - `ExpressionParser.parseScalar` throws
-            `ExpressionException` for both) rejects the edit outright. For
-            mass specifically, a successfully-parsed expression that
-            evaluates *right now* to non-positive/NaN/Infinite also
-            rejects the edit (mass unchanged) rather than clamping to
-            `MASS_EPSILON` - extending `evaluateMassGuarded`'s existing
-            constant-mass throw (at particle creation) to the live-edit
-            path as a rejection instead of a throw. Radius has no
-            equivalent positivity guard anywhere else in this codebase
-            (`create` never validates radius sign), so no new range check
-            was invented for it beyond a successful scalar parse.
-          - **The panel shows the live evaluated number, never the
-            original expression source** - matches how `Force`/
-            `Constraint` `editableFields()` already behave (its own doc
-            comment: exposed "as their currently-evaluated numeric
-            snapshot, not as a live-editable expression source"), and
-            `ParticleStore` doesn't retain expression source text anywhere
-            today either. Accepted tradeoff: re-editing a currently-dynamic
-            mass/radius means typing a fresh formula blind (no prefilled
-            "2.0 + 0.1*sin(t)" to start from) rather than adding new
-            per-particle string storage just to support that one display
-            case.
-          - **A particle with no authored radius (`radius() == null`) can
-            have one added via edit** - null is just another editable
-            "current value" state, no hide-the-field special-casing.
-          **Wire addressing - resolved via direct walkthrough with the
-          user, not implemented yet:** the existing field-entry section is
-          keyed `(kind, name, field)`, matching how forces/constraints are
-          addressed by name; particles are id-addressed with no name, and
-          a selection-scoped design (server tracks which particle id each
-          client currently has selected) was considered and rejected -
-          `DebugRenderer.broadcast` → `wsServer.broadcastFrame` sends one
-          identical buffer to every connection today, and nothing in this
-          codebase customizes a frame per client. Making mass/radius
-          selection-scoped would mean building that capability from
-          scratch for this one panel, a bigger cost than the bandwidth it
-          would save.
-          - **Read path: put mass and radius directly in the main
-            per-particle array** (`BinaryFrame`'s `id, x, y, z, vx, vy,
-            vz` per particle), unconditionally, for every live particle
-            every frame - not a new id-keyed section. This is the exact
-            precedent `BinaryFrame.kt`'s own doc comment already states
-            for why velocity is unconditional: "so that §10.3's selection
-            & inspection... has something to read without a second wire
-            section keyed by id." Mass/radius is the identical case, one
-            step further down that same list of expression-capable
-            per-particle fields (§3). Grows `PARTICLE_SIZE` from 52 to 68
-            bytes (`+2 f64`, kept as `f64` like every other field - no
-            `f32` shrink for this); accepted the same way the
-            28→52-byte jump already was, since this is a debug tool
-            talking to `localhost`, not a bandwidth-constrained remote
-            link. Unset radius is encoded as `NaN`, matching
-            `radiusArr`'s own existing internal sentinel - no new
-            encoding invented. The panel must render that `NaN` as an
-            empty input, never the literal string `"NaN"`.
-          - **This is a different radius than `sphereRadii`.** The
-            existing `sphereCount`/`sphereRadii` wire section is an
-            opt-in, author-declared *render* size (§10.2); the new field
-            is `ParticleStore.radius(id)`, the physics/collision radius.
-            Both now travel on the wire, independently. Accepted gap:
-            editing radius on a particle whose demo passes an explicit
-            `sphereRadii` override (e.g. `FlagDebugDemo`'s
-            `poleSphereRadii`) changes collision geometry with no visible
-            change in the rendered sphere size - a real surprise for
-            whoever hits it, not a bug to fix now.
-          - **Write path: a new id-addressed `SceneControlMessage`**, not
-            a repurposed `SetScalarField` (which carries an
-            already-evaluated `Double`, not an expression string) -
-            `SetParticleScalarField(particleId: Int, field: String, expr:
-            ScalarExpr)`. `SceneControlMessage.parse` calls
-            `ExpressionParser.parseScalar` on the raw string itself and
-            returns `null` (dropping the message) on `ExpressionException`
-            - the same "malformed input becomes `null`, connection stays
-            up" convention this file already applies to every other
-            message kind, just extended to cover expression syntax too.
-          - **No central message dispatcher exists to slot into** -
-            checked by grepping `SetScalarField`/`SetVectorField` outside
-            `SceneControlMessage.kt`: every demo (`ParticleCollisionDebugDemo`,
-            `DragDebugDemo`, `SpatialGridDebugDemo`) has its own `when
-            (message)` block and matches force/constraint edits by hand
-            (`if (message.kind == "force" && message.name ==
-            gravity.name) ...`). `SetParticleScalarField` needs the same
-            one-branch-per-demo treatment, but the branch body is uniform
-            across every demo (no per-entity name matching, since a
-            demo's `store.setMass(message.particleId, message.expr, t)`
-            targets any id directly) - simpler than the force-field
-            branches, but still boilerplate every demo wanting particle
-            editing has to add for itself, same as every `SceneControlMessage`
-            case before it.
-          - **New `ParticleStore.setMass`/`setRadius`, not existing
-            `evaluateMassGuarded` reused as-is** - that function throws
-            for a non-positive `Constant` and clamps-and-warns for a
-            non-positive `OfTime`, which is correct for *creation* and
-            *per-step* re-evaluation respectively but wrong for a live
-            edit: the mass/radius design above already decided a bad edit
-            rejects outright regardless of whether the freshly-parsed
-            expression is constant or dynamic. `setMass(id, expr, t)`
-            evaluates once at `t` (mass/radius edits need sim time in
-            scope, unlike `setPosition`/`setVelocity`, which don't - note
-            this on the signature), rejects (returns `false`, no mutation)
-            on NaN/Infinite/non-positive, else writes the array slot and
-            updates `massExprs` via the same `setOrClearExpr` helper
-            `create` already uses. `setRadius` is identical minus the
-            positivity check (no existing radius guard to extend, per the
-            mass/radius decision above).
-          Untouched by this decision: the `entityKindModules`/outliner-shape
-          gap for particle selection stays open (a UI-selection problem,
-          not a wire-format one) - noted separately above.
+    - [~] Particles/groups: dual selection, per-particle mass/radius
+          editing, and the particle panel's own module shape are now
+          implemented and verified live in Chrome, across four rounds of
+          direct design walkthrough with the user (multi-group selection,
+          the `entityKindModules`/outliner-shape gap, mass/radius storage,
+          and wire addressing) followed by one implementation pass. Still
+          not built: a group's tab surfacing spring/damper params for
+          every fully-contained Spring/Damper/MeshSprings, per-particle
+          render override, per-group color override + visibility toggle.
+          - **Wire**: `BinaryFrame`'s per-particle payload grew from 52 to
+            68 bytes - `mass`/`radius` (`f64`, radius `NaN` when unset,
+            matching `ParticleStore`'s own sentinel) travel unconditionally
+            alongside `id`/position/velocity for every live particle every
+            frame, the same precedent already established for why velocity
+            itself is unconditional ("so selection & inspection has
+            something to read without a second wire section keyed by id").
+            Selection-scoped emission was considered and rejected -
+            `DebugRenderer.broadcast` sends one identical buffer to every
+            connection today, and scoping mass/radius to whichever particle
+            one client has selected would mean building per-client frame
+            customization from scratch for this one panel. This radius is
+            physics/collision (`ParticleStore.radius`), independent of the
+            pre-existing `sphereRadii` *render*-size section - editing one
+            doesn't move the other, confirmed as an accepted gap rather
+            than a bug (a demo with an explicit `sphereRadii` override,
+            e.g. `FlagDebugDemo`'s pole spheres, would show no visible
+            change from a radius edit, though no demo wiring particle
+            edits currently has one). Write path is a new id-addressed
+            `SceneControlMessage.SetParticleScalarField(particleId, field,
+            expr: ScalarExpr)`, distinct from the name-addressed
+            `SetScalarField`/`SetVectorField` (which carry an
+            already-evaluated value, not an expression string) - parsed via
+            `ExpressionParser.parseScalar` inside `SceneControlMessage
+            .parse` itself, returning `null` (dropping the message) on
+            `ExpressionException`, the same stance every other malformed
+            message already gets. No central dispatcher exists to plug
+            into (confirmed by grepping every `SetScalarField` call site) -
+            `ParticleCollisionDebugDemo`, `DragDebugDemo`, and
+            `SpatialGridDebugDemo` each got their own `when (message)`
+            branch, though the branch body is uniform across all three
+            (`store.setMass(message.particleId, message.expr, t)`/
+            `setRadius`, no per-entity name matching needed since particles
+            are id-addressed).
+          - **`ParticleStore.setMass`/`setRadius`**: a full replace of the
+            particle's stored `ScalarExpr` (via the same `setOrClearExpr`
+            promotion/demotion `create` already uses), evaluated once at
+            `t`, rejecting (`false`, no mutation) on NaN/Infinite, and for
+            mass specifically on non-positive too - deliberately not
+            `evaluateMassGuarded`'s throw-for-constant/clamp-for-dynamic
+            split, which is right for authoring/per-step re-evaluation but
+            wrong for live-edit input arriving over the wire. `setRadius`
+            has no positivity guard, matching the absence of one anywhere
+            else in this class. Component-tested (`ParticleStoreTest`) and
+            wire-round-tripped (`BinaryFrameTest`).
+          - **The edit input is an expression string** (a plain `<input
+            type="text">`, not `type="number"`), parsed server-side rather
+            than sent as a bare double - `"2.0 + 0.1*sin(t)"` is exactly as
+            valid an edit as `"5.0"`, which is what actually resolved the
+            original "replace outright vs. overlay a time-varying
+            expression" question: a full replace *is* the time-variance-
+            preserving option once the replacement can itself be dynamic,
+            so no override layer was ever needed. The panel always shows
+            the live evaluated number, never the original source text
+            (`ParticleStore` retains none, matching how a force/
+            constraint's `editableFields()` already behave) - re-editing a
+            currently-dynamic mass/radius means typing a fresh formula
+            blind, an accepted tradeoff over adding per-particle string
+            storage for just that one display case.
+          - **The particle panel** (`registerEntityKind({kind: "particles",
+            ...})`, no `getNames` - see below) shows live id/position/
+            velocity, the two editable fields above, and every containing
+            group as a clickable link (ordered smallest-membership-first,
+            reusing the exact heuristic the old right-click behavior used
+            to pick a single winner, without forcing that single choice) -
+            resolving the multi-group question as "pick one deterministic
+            order, let the user reselect from the particle's own panel,"
+            not "render every containing group's panel at once" (the
+            object panel is single-selection top to bottom;
+            `objectPanelInfoEl`/`objectPanelInspectEl` are singleton
+            globals, one `renderPanel()`/`updateLive()` call per
+            selection - simultaneous multi-panel rendering would need real
+            structural change for this one case).
+          - **`getNames` is now optional** on the `entityKindModules`
+            contract (updated in both this file and `requirements.md`) -
+            "particles" is the one kind with no outliner section at all
+            (3D-pick-only, N potentially in the thousands), reachable only
+            by something setting `selectedKind`/`selectedName` directly.
+            `updateOutliner`'s per-module render loop just skips a module
+            with no `getNames`.
+          - **Right-click on a particle now opens its own panel**, not its
+            disambiguated group's - a deliberate change to the previously-
+            shipped, previously-Chrome-verified group-opening behavior,
+            following directly from §10.3's literal "right-clicking a
+            rendered object opens its per-object panel directly" (a dot is
+            a rendered object) and from the particle-panel-lists-groups
+            design above (which presupposes landing on the particle panel,
+            not the reverse). Nothing became unreachable - the outliner
+            still lists every group by name - and a particle in zero
+            groups, previously silently uninspectable at all, now just
+            opens its own panel with an empty group list.
+          - **Selection clears when the selected particle is destroyed**,
+            via the wire's existing `particleDestroyed` event, mirroring
+            how `updateOutliner` already clears a removed-and-selected
+            collider. Implementing this surfaced a real pre-existing gap
+            in two demos: `ParticleCollisionDebugDemo` and
+            `SpatialGridDebugDemo` both deleted a particle
+            (`SceneControlMessage.DeleteParticle`) without ever emitting a
+            `SimEvent.ParticleDestroyed` onto the wire (unlike
+            `DragDebugDemo`, which already did) - so a destroyed particle's
+            panel just froze on stale data instead of closing. Fixed in
+            both, matching `DragDebugDemo`'s existing pattern.
+          - **Verified live in Chrome**: `FlagDebugDemo` for the read/
+            selection side (right-clicking a cloth particle opens its own
+            panel; right-clicking the pole-edge column - a member of both
+            "cloth" and "pole" - shows both as separate links, and clicking
+            one switches to that group's panel) and `SpatialGridDebugDemo`
+            for the write side (editing a ball's mass to a plain number
+            visibly changed its collision behavior and the field kept
+            showing the live value; editing it to a time-varying expression
+            like `"2 + sin(t)"` was accepted and visibly ticked over time;
+            `"0"`/`"-1"` were rejected with the field snapping back, no
+            console errors; double-click-deleting the selected ball now
+            closes its panel instead of leaving blank input fields). Also
+            confirmed, separately from this feature: `FlagDebugDemo` has
+            never drained `sceneControlQueue` at any point in its git
+            history, meaning an earlier TODO entry's "verified live in
+            Chrome against FlagDebugDemo" claim for wind-density field
+            editing could not have exercised the write path it claimed to -
+            flagged here as a correction to the historical record, not
+            fixed (out of scope for this round; `FlagDebugDemo` still can't
+            process any `SceneControlMessage`, including collider/group/
+            field edits).
+          Still unchecked: whether a connection (`(id, id)` pair) is
+          name-tagged back to its owning Spring/Damper/MeshSprings on the
+          wire - needed for "every spring/damper where all endpoints
+          belong to this group" and not yet confirmed one way or the other.
     - [ ] Constraints/surfaces/emitters editing still to do: FixedPosition's
           shared-position variant (deferred above alongside Spring/Damper),
           surfaces' mesh-style toggle, and emitters as a new outliner

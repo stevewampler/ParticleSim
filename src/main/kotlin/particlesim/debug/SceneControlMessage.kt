@@ -2,7 +2,10 @@ package particlesim.debug
 
 import org.yaml.snakeyaml.Yaml
 import org.yaml.snakeyaml.error.YAMLException
+import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
+import particlesim.expr.ExpressionException
+import particlesim.expr.ExpressionParser
 
 /**
  * Viewer → engine scene-mutation input — a third kind of message on the same bidirectional
@@ -44,6 +47,15 @@ sealed interface SceneControlMessage {
     data class SetScalarField(val kind: String, val name: String, val field: String, val value: Double) : SceneControlMessage
     data class SetVectorField(val kind: String, val name: String, val field: String, val value: Vector3) : SceneControlMessage
 
+    /** §10.4's particle mass/radius live editing — id-addressed, unlike [SetScalarField]/
+     * [SetVectorField]'s name-addressing, since particles have no name. Carries a parsed
+     * [ScalarExpr], not a raw `Double`: the edit input is an expression string (e.g. `"sin(t)"`),
+     * parsed here via [ExpressionParser.parseScalar] rather than as a plain number, so a full
+     * replace of the particle's stored expression is the time-variance-preserving option with no
+     * separate override layer needed (see `ParticleStore.setMass`/`setRadius`). [field] is
+     * `"mass"` or `"radius"`. */
+    data class SetParticleScalarField(val particleId: Int, val field: String, val expr: ScalarExpr) : SceneControlMessage
+
     companion object {
         /** Returns `null` for anything malformed or unrecognized, same "ignore, don't tear down
          * the connection" stance as [DragMessage.parse]/[TimeControlMessage.parse]. */
@@ -82,6 +94,17 @@ sealed interface SceneControlMessage {
                     val field = data["field"] as? String ?: return null
                     val target = vectorOf(data) ?: return null
                     SetVectorField(kind, name, field, target)
+                }
+                "set_particle_scalar_field" -> {
+                    val particleId = (data["particleId"] as? Number)?.toInt() ?: return null
+                    val field = data["field"] as? String ?: return null
+                    val expression = data["expression"] as? String ?: return null
+                    val expr = try {
+                        ExpressionParser.parseScalar(expression)
+                    } catch (e: ExpressionException) {
+                        return null
+                    }
+                    SetParticleScalarField(particleId, field, expr)
                 }
                 else -> null
             }

@@ -1,7 +1,9 @@
 package particlesim.debug
 
+import particlesim.core.ScalarExpr
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 
 class SceneControlMessageTest {
@@ -35,6 +37,51 @@ class SceneControlMessageTest {
     @Test
     fun `parses restart`() {
         assertEquals(SceneControlMessage.Restart, SceneControlMessage.parse("""{"type": "restart"}"""))
+    }
+
+    @Test
+    fun `parses set_particle_scalar_field with a plain-number expression as a Constant`() {
+        assertEquals(
+            SceneControlMessage.SetParticleScalarField(42, "mass", ScalarExpr.Constant(9.0)),
+            SceneControlMessage.parse("""{"type": "set_particle_scalar_field", "particleId": 42, "field": "mass", "expression": "9.0"}"""),
+        )
+    }
+
+    @Test
+    fun `parses set_particle_scalar_field with a time-varying expression as OfTime`() {
+        val parsed = SceneControlMessage.parse(
+            """{"type": "set_particle_scalar_field", "particleId": 7, "field": "radius", "expression": "1.0 + sin(t)"}""",
+        )
+        val message = assertIs<SceneControlMessage.SetParticleScalarField>(parsed)
+        assertEquals(7, message.particleId)
+        assertEquals("radius", message.field)
+        assertIs<ScalarExpr.OfTime>(message.expr)
+        assertEquals(1.0, message.expr.evaluate(0.0), 1e-9)
+    }
+
+    @Test
+    fun `rejects set_particle_scalar_field with malformed expression syntax`() {
+        assertNull(
+            SceneControlMessage.parse(
+                """{"type": "set_particle_scalar_field", "particleId": 42, "field": "mass", "expression": "not an expression((("}""",
+            ),
+        )
+    }
+
+    @Test
+    fun `rejects set_particle_scalar_field with a vector expression typed into a scalar field`() {
+        assertNull(
+            SceneControlMessage.parse(
+                """{"type": "set_particle_scalar_field", "particleId": 42, "field": "mass", "expression": "[1, 2, 3]"}""",
+            ),
+        )
+    }
+
+    @Test
+    fun `rejects set_particle_scalar_field missing any required key`() {
+        assertNull(SceneControlMessage.parse("""{"type": "set_particle_scalar_field", "field": "mass", "expression": "1.0"}"""))
+        assertNull(SceneControlMessage.parse("""{"type": "set_particle_scalar_field", "particleId": 42, "expression": "1.0"}"""))
+        assertNull(SceneControlMessage.parse("""{"type": "set_particle_scalar_field", "particleId": 42, "field": "mass"}"""))
     }
 
     @Test

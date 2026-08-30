@@ -701,7 +701,9 @@ function decodeFrame(buffer) {
     const vx = view.getFloat64(offset, true); offset += 8;
     const vy = view.getFloat64(offset, true); offset += 8;
     const vz = view.getFloat64(offset, true); offset += 8;
-    particles[i] = { id, x, y, z, vx, vy, vz };
+    const mass = view.getFloat64(offset, true); offset += 8;
+    const radius = view.getFloat64(offset, true); offset += 8; // NaN = unset, matching ParticleStore
+    particles[i] = { id, x, y, z, vx, vy, vz, mass, radius };
   }
   const connectionCount = view.getInt32(offset, true); offset += 4;
   const connections = new Array(connectionCount);
@@ -955,6 +957,21 @@ function updateEventLog(frame) {
   eventLogEl.textContent = eventLogEntries.slice().reverse().join("\n");
 }
 
+// §10.3/§10.4's particle panel has no registry entry to check membership against the way
+// updateOutliner already does for a removed collider (`registry.colliders.some(...)`), so a
+// destroyed selected particle needs its own clear here - otherwise latestById.get(id) would
+// return undefined forever and the panel would just sit frozen on stale data instead of closing.
+// Uses the wire's existing particleDestroyed event (double-click delete, and any future §14
+// lifecycle destruction, both go through this same event) rather than a new mechanism.
+function clearSelectionIfParticleDestroyed(frame) {
+  if (selectedKind !== "particles") return;
+  if (!frame.events.some((e) => e.kind === "destroyed" && String(e.particleId) === selectedName)) return;
+  selectedKind = null;
+  selectedName = null;
+  updateSelectionHighlight();
+  renderObjectPanel();
+}
+
 // --- Outliner & per-object panel (§10.3) --------------------------------------------------
 // A persistent, always-available list of every named group/force/constraint/surface, regardless
 // of what's currently rendered - the answer to "how do I reach an invisible object's settings."
@@ -976,11 +993,12 @@ let selectedKind = null; // "groups" | "forces" | "constraints" | "surfaces" | "
 let selectedName = null;
 let latestVisibleIds = null; // this frame's server-side dot filter, updated every frame in applyFrame
 let objectPanelInfoEl = null; // the groups panel's live "N drawable" text node, or null otherwise
-let latestById = new Map(); // this frame's particles by id (position + velocity), for §10.3 inspection
+let latestById = new Map(); // this frame's particles by id (position/velocity/mass/radius), for §10.3/§10.4
 let latestMeshes = []; // this frame's mesh declarations, for a selected surface's inspection readout
 let latestColliders = []; // this frame's colliders, for the outliner's remove action
 let latestArrowGroups = []; // this frame's named arrow-sample groups, for the forces panel's toggle
 let objectPanelInspectEl = null; // the groups/surfaces panel's live numeric-readout text node
+let particleFieldInputs = null; // the particle panel's { massInput, radiusInput }, or null otherwise
 
 // Names of groups/surfaces a person has explicitly unchecked in the per-object panel. Composed
 // with (never replacing) whatever the server itself already decided - e.g. FlagDebugDemo sends
@@ -1075,13 +1093,21 @@ function renderNameList(container, kind, names) {
 // its own container from scratch), so registering is purely additive to what's already on the
 // page - section order and header text stay exactly where the page put them.
 //
-// All five kinds are migrated here - "groups" (a toggle, live info text, *and* live inspection),
+// All six kinds are registered here - "groups" (a toggle, live info text, *and* live inspection),
 // "forces" (a per-force arrow-visibility toggle, real only when that force has arrow samples this
 // frame, plus editable fields), "constraints" (editable fields only - §10.2 defines no constraint
-// renderer), "surfaces" (a mesh-visibility toggle plus live triangle/vertex-speed inspection), and
-// "colliders" (an active toggle, a remove button, and the collider's shape when active).
-const entityKindModules = new Map(); // kind -> { getNames(registry), renderPanel(), updateLive()? }
+// renderer), "surfaces" (a mesh-visibility toggle plus live triangle/vertex-speed inspection),
+// "colliders" (an active toggle, a remove button, and the collider's shape when active), and
+// "particles" (§10.3's one kind with no outliner presence at all - see its own registration
+// below for why).
+const entityKindModules = new Map(); // kind -> { getNames(registry)?, renderPanel(), updateLive()? }
 
+// getNames is the one optional hook: a kind that omits it (particles - there are potentially
+// thousands, and they're never listed per §10.3's own outliner spec) has no outliner section and
+// is reachable only via something else (a 3D pick) setting selectedKind/selectedName directly.
+// document.getElementById returns null for a kind with no "outliner<Kind>" element in the page
+// (particles has none) - harmless, since updateOutliner's render loop only ever touches
+// module.sectionEl for a module that actually has getNames.
 function registerEntityKind(module) {
   const capitalized = module.kind[0].toUpperCase() + module.kind.slice(1);
   module.sectionEl = document.getElementById("outliner" + capitalized);
@@ -1326,6 +1352,102 @@ registerEntityKind({
   },
 });
 
+// §10.3/§10.4's particle panel - the one kind with no outliner presence (see registerEntityKind's
+// own comment). Reached only via a right-click pick in 3D (see the contextmenu handler below),
+// which sets selectedKind/selectedName to ("particles", String(particleId)) directly - §10.3's
+// literal "right-clicking a rendered object opens its per-object panel directly" read on a dot,
+// not the group-opening placeholder this replaced (see TODO.md's own walkthrough of that change).
+registerEntityKind({
+  kind: "particles",
+  renderPanel: () => {
+    const particleId = Number(selectedName);
+    const p = latestById.get(particleId);
+
+    const idLine = document.createElement("div");
+    idLine.className = "objectInfo";
+    idLine.textContent = `particle ${particleId}`;
+    objectPanelBodyEl.appendChild(idLine);
+
+    addPanelInspect(); // live position/velocity readout, filled in by updateLive below
+
+    // §10.4's expression-string editing (mass/radius design walkthrough): a plain text input,
+    // not type="number" - the value sent is parsed server-side via ExpressionParser.parseScalar,
+    // so "2.0 + 0.1*sin(t)" is exactly as valid an edit as "5.0". Always shows the live evaluated
+    // number, never the original expression source - ParticleStore retains no source text to
+    // show, and this matches how a force/constraint's editableFields already behave.
+    const massRow = document.createElement("div");
+    massRow.className = "objectField";
+    massRow.appendChild(document.createTextNode("mass: "));
+    const massInput = document.createElement("input");
+    massInput.type = "text";
+    massInput.value = p ? String(p.mass) : "";
+    massInput.addEventListener("change", () => {
+      sendEdit({ type: "set_particle_scalar_field", particleId, field: "mass", expression: massInput.value });
+    });
+    massRow.appendChild(massInput);
+    objectPanelBodyEl.appendChild(massRow);
+
+    // radius is NaN (never the unset state itself) when this particle has none - rendered as an
+    // empty input, never the literal string "NaN"; editing it in is how "a particle with no
+    // radius can have one added" (mass/radius design walkthrough) actually happens.
+    const radiusRow = document.createElement("div");
+    radiusRow.className = "objectField";
+    radiusRow.appendChild(document.createTextNode("radius: "));
+    const radiusInput = document.createElement("input");
+    radiusInput.type = "text";
+    radiusInput.value = p && !Number.isNaN(p.radius) ? String(p.radius) : "";
+    radiusInput.addEventListener("change", () => {
+      sendEdit({ type: "set_particle_scalar_field", particleId, field: "radius", expression: radiusInput.value });
+    });
+    radiusRow.appendChild(radiusInput);
+    objectPanelBodyEl.appendChild(radiusRow);
+    particleFieldInputs = { massInput, radiusInput };
+
+    // The multi-group selection design: every containing group is listed as a reselectable
+    // entry rather than this panel picking (or rendering) just one - clicking a link switches
+    // the whole selection over to that group's own panel, the same navigation selectObject
+    // already gives every other kind. Ordered smallest-membership-first - the same heuristic
+    // the old right-click-opens-the-group behavior used to pick a single winner - so the more
+    // specific, more-likely-intended group is listed first without forcing a single choice.
+    // A particle in zero groups (previously unreachable at all through that old behavior) just
+    // shows "(none)".
+    const groupsLine = document.createElement("div");
+    groupsLine.className = "objectInfo";
+    groupsLine.appendChild(document.createTextNode("groups: "));
+    const containingGroups = latestRegistry.groups
+      .filter((g) => g.memberIds.has(particleId))
+      .sort((a, b) => a.memberIds.size - b.memberIds.size);
+    if (containingGroups.length === 0) {
+      groupsLine.appendChild(document.createTextNode("(none)"));
+    } else {
+      containingGroups.forEach((g, i) => {
+        if (i > 0) groupsLine.appendChild(document.createTextNode(", "));
+        const link = document.createElement("a");
+        link.href = "#";
+        link.textContent = g.name;
+        link.addEventListener("click", (e) => { e.preventDefault(); selectObject("groups", g.name); });
+        groupsLine.appendChild(link);
+      });
+    }
+    objectPanelBodyEl.appendChild(groupsLine);
+  },
+  updateLive: () => {
+    const particleId = Number(selectedName);
+    const p = latestById.get(particleId);
+    if (objectPanelInspectEl) {
+      objectPanelInspectEl.textContent = p
+        ? `position: ${formatVec(p.x, p.y, p.z)}\nvelocity: ${formatVec(p.vx, p.vy, p.vz)}`
+        : "no live data";
+    }
+    if (particleFieldInputs && p) {
+      if (document.activeElement !== particleFieldInputs.massInput) particleFieldInputs.massInput.value = String(p.mass);
+      if (document.activeElement !== particleFieldInputs.radiusInput) {
+        particleFieldInputs.radiusInput.value = Number.isNaN(p.radius) ? "" : String(p.radius);
+      }
+    }
+  },
+});
+
 // Updates whichever per-object panel is currently open with this frame's live data - called
 // every frame from applyFrame. Every kind is a module now; one without an updateLive hook (e.g.
 // "colliders", whose panel only changes on a registry-signature-triggered rebuild) just does
@@ -1339,6 +1461,7 @@ function renderObjectPanel() {
   // The body is about to be cleared - drop stale references to nodes that won't exist anymore.
   objectPanelInfoEl = null;
   objectPanelInspectEl = null;
+  particleFieldInputs = null;
   if (selectedKind === null) {
     objectPanelEl.style.display = "none";
     return;
@@ -1356,8 +1479,11 @@ function updateOutliner(registry) {
   const signature = registrySignature(registry);
   if (signature === lastRegistrySignature) return;
   lastRegistrySignature = signature;
+  // A module with no getNames (particles - see registerEntityKind's own comment) has no
+  // outliner section at all, so there's nothing to render into here; it's reachable only via
+  // something (a 3D pick) setting selectedKind/selectedName directly.
   for (const module of entityKindModules.values()) {
-    renderNameList(module.sectionEl, module.kind, module.getNames(registry));
+    if (module.getNames) renderNameList(module.sectionEl, module.kind, module.getNames(registry));
   }
   // The colliders module's getNames is driven by the registry, not the (active-only) wireframe
   // collider list in updateColliders - a deactivated collider must stay listed here so its own
@@ -1388,6 +1514,7 @@ function connect() {
     applyFrame(frame);
     updateStats(frame);
     updateEventLog(frame);
+    clearSelectionIfParticleDestroyed(frame);
     updateOutliner(frame.registry);
   };
 }
@@ -1525,9 +1652,11 @@ renderer.domElement.addEventListener("dblclick", (event) => {
 // regardless, this is just a shortcut for whatever's already on screen. Reuses the same
 // raycast targets as drag/pick above, but resolves differently: a mesh hit opens *that* surface's
 // panel directly (unambiguous - a mesh belongs to exactly one Surface), while a dot hit opens
-// the most specific *group* containing that particle, since group membership can legitimately
-// overlap (a flag's pole-edge particles are members of both "cloth" and "pole") and the smaller,
-// more specific group is the more likely intended target of a click on it.
+// *that particle's own* panel - the literal reading of "right-clicking a rendered object opens
+// its per-object panel directly" (a dot is a rendered object), and what the multi-group
+// selection design settled on: the particle panel is what you land on, listing every containing
+// group as a link back out, not the reverse. A particle in zero groups - unreachable at all
+// under this handler's old group-opening behavior - now opens its own panel same as any other.
 renderer.domElement.addEventListener("contextmenu", (event) => {
   event.preventDefault(); // this canvas has its own right-click action; never show the browser's menu
   pointerToNdc(event);
@@ -1537,11 +1666,7 @@ renderer.domElement.addEventListener("contextmenu", (event) => {
   const hit = hits[0];
 
   if (hit.object.userData.particleId !== undefined) {
-    const particleId = hit.object.userData.particleId;
-    const candidates = latestRegistry.groups.filter((g) => g.memberIds.has(particleId));
-    if (candidates.length === 0) return; // not a member of any named group - nothing to open
-    candidates.sort((a, b) => a.memberIds.size - b.memberIds.size);
-    selectObject("groups", candidates[0].name);
+    selectObject("particles", String(hit.object.userData.particleId));
     return;
   }
 

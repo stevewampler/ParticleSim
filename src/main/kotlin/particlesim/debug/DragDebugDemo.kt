@@ -195,6 +195,16 @@ fun main() {
                 // messages - see ParticleCollisionDebugDemo for the wired equivalent.
                 is SceneControlMessage.SetScalarField -> {}
                 is SceneControlMessage.SetVectorField -> {}
+                // Particles are id-addressed, unlike the name-addressed fields above, so this
+                // works here even though this demo names no forces/constraints.
+                is SceneControlMessage.SetParticleScalarField -> {
+                    if (store.contains(message.particleId)) {
+                        when (message.field) {
+                            "mass" -> store.setMass(message.particleId, message.expr, t)
+                            "radius" -> store.setRadius(message.particleId, message.expr, t)
+                        }
+                    }
+                }
             }
         }
         repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) {

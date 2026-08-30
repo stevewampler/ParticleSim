@@ -137,7 +137,37 @@ class ParticleStore(private val onWarning: (String) -> Unit = { System.err.print
     fun mass(id: Int): Double = massArr[slotOf(id)]
     fun hasDynamicMass(id: Int): Boolean = massExprs.containsKey(id)
 
+    /** §10.4's live-editing write path for mass: replaces the particle's stored [ScalarExpr]
+     * outright (same [setOrClearExpr] promotion/demotion [create] itself uses), evaluated once
+     * at [t]. Rejects — returns `false`, leaves mass unchanged — on NaN/Infinite/non-positive,
+     * rather than [evaluateMassGuarded]'s throw-for-constant/clamp-for-dynamic split: those are
+     * right for authoring (§13.2) and per-step re-evaluation respectively, but a live edit is
+     * user input arriving over the wire and must never throw, and (unlike the per-step dynamic
+     * case) has no reason to accept a bad value now on the promise it might recover later. */
+    fun setMass(id: Int, expr: ScalarExpr, t: Double): Boolean {
+        val slot = slotOf(id)
+        val raw = expr.evaluate(t)
+        if (raw.isNaN() || raw.isInfinite() || raw <= 0.0) return false
+        massArr[slot] = raw
+        setOrClearExpr(massExprs, id, expr)
+        return true
+    }
+
     fun radius(id: Int): Double? = slotOf(id).let { radiusArr[it] }.let { if (it.isNaN()) null else it }
+
+    /** §10.4's live-editing write path for radius — the same outright-replace as [setMass], but
+     * with no positivity guard: [create] never validates radius sign either, so an edit doesn't
+     * invent a new range check the rest of this class doesn't already enforce. Also the write
+     * side of "a particle with no radius can have one added via edit" — there's no unset state
+     * to preserve here, just NaN like any other radius value. */
+    fun setRadius(id: Int, expr: ScalarExpr, t: Double): Boolean {
+        val slot = slotOf(id)
+        val raw = expr.evaluate(t)
+        if (raw.isNaN() || raw.isInfinite()) return false
+        radiusArr[slot] = raw
+        setOrClearExpr(radiusExprs, id, expr)
+        return true
+    }
     fun lifetime(id: Int): Double? = slotOf(id).let { lifetimeArr[it] }.let { if (it.isNaN()) null else it }
     fun spawnTime(id: Int): Double = spawnTimeArr[slotOf(id)]
 
