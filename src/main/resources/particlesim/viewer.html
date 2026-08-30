@@ -2052,23 +2052,33 @@ renderer.domElement.addEventListener("contextmenu", (event) => {
   event.preventDefault(); // this canvas has its own right-click action; never show the browser's menu
   pointerToNdc(event);
   raycaster.setFromCamera(pointerNdc, camera);
-  const hits = raycaster.intersectObjects([...dots.children, ...meshObjects, ...arrowObjects]);
-  if (hits.length === 0) return;
-  const hit = hits[0];
 
-  if (hit.object.userData.particleId !== undefined) {
-    selectObject("particles", String(hit.object.userData.particleId));
+  // Solid geometry (dots, mesh) is raycast separately from - and takes precedence over - arrows,
+  // rather than one combined intersectObjects sorted purely by distance. A field force's arrows
+  // are sampled *at* the surface they act on, so an arrow's shaft origin sits at essentially the
+  // same depth as the mesh face right there - which of the two a distance sort picks is numerical
+  // noise, not something the user can aim at, and it was silently stealing right-clicks aimed at
+  // the surface (reported as "selecting the flag selects the wind instead"). A solid hit is always
+  // the more specific target, so arrows are only considered when nothing solid was hit at all.
+  const solidHits = raycaster.intersectObjects([...dots.children, ...meshObjects]);
+  if (solidHits.length > 0) {
+    const hit = solidHits[0];
+    if (hit.object.userData.particleId !== undefined) {
+      selectObject("particles", String(hit.object.userData.particleId));
+      return;
+    }
+    const surfaceName = hit.object.userData.surfaceName;
+    if (surfaceName) selectObject("surfaces", surfaceName); // "" (unnamed) has no panel to open
     return;
   }
-
-  const surfaceName = hit.object.userData.surfaceName;
-  if (surfaceName) { selectObject("surfaces", surfaceName); return; } // "" (unnamed) has no panel to open
 
   // §10.3's arrow-picking: a field force (wind, etc.) has no single particle to click, so one
   // of its sampled arrows is the only clickable surface it has - right-clicking any one selects
   // the force that produced it, the same "the fast path for something already visible" as a
   // mesh triangle opening its surface's panel above.
-  const forceName = resolveForceName(hit.object);
+  const arrowHits = raycaster.intersectObjects(arrowObjects);
+  if (arrowHits.length === 0) return;
+  const forceName = resolveForceName(arrowHits[0].object);
   if (forceName) selectObject("forces", forceName); // "" (unnamed) has no panel to open
 });
 

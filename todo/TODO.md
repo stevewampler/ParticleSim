@@ -3012,6 +3012,24 @@ next session picks them up instead of losing them.
       caused the switch rather than it already being selected; particle
       and surface right-click-to-open still worked unaffected (their own
       raycast logic wasn't touched, only appended to). No console errors.
+
+      **Follow-up fix**: the initial version raycast dots, mesh, and
+      arrows together in one `intersectObjects` call and took the
+      distance-sorted closest hit - reported by the user as "selecting
+      the flag selects the wind instead." Arrow origins sit *exactly on*
+      the mesh vertices they sample, so a right-click on the flag and a
+      right-click on the wind arrow rooted there hit the ray at
+      essentially the same depth, and which one distance-sorting picked
+      was numerical noise, not something aimable. Fixed by raycasting
+      solid geometry (dots, mesh) and arrows as two separate passes, with
+      arrows only considered as a fallback when the solid pass hits
+      nothing - a solid surface is always the more specific target.
+      **Verified live in Chrome**: right-clicking the flag mesh in a
+      region where several wind arrows visibly crossed directly over it
+      (the flag heavily wind-blown and bunched up) correctly opened
+      `cloth-mesh`, not `wind`; right-clicking a bare arrow shaft away
+      from the mesh still opened `wind`, confirming arrow-picking itself
+      wasn't disabled, just deprioritized. No console errors.
 - [x] `Wind`'s velocity independently live-editable from the viewer, not
       just `density` (requirements.md §5.2/§10.4). The user resolved the
       open design question directly rather than decomposing "gust" into
