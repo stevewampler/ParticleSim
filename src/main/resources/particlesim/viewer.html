@@ -21,8 +21,19 @@
     font: 12px/1.4 monospace; color: #fff; background: rgba(0,0,0,0.5);
     padding: 4px 8px; border-radius: 4px; display: none; align-items: center; gap: 6px;
   }
+  #leftColumn {
+    /* Wraps #leftPanel (outliner + object panel) and #controlPanel so they share the left
+       edge's vertical space via flexbox instead of each being independently `position: fixed`
+       - the latter let a tall object panel (e.g. a group's spring/damper tab, §10.4, with
+       several named forces' fields) grow past controlPanel's own fixed position and visually
+       overlap it, since neither one knew about the other's height. align-items: flex-start
+       keeps each child's width sized to its own content (unlike flexbox's stretch default),
+       matching how they sized independently before this wrapper existed. */
+    position: fixed; top: 44px; left: 8px; bottom: 8px; z-index: 1;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  }
   #controlPanel {
-    position: fixed; bottom: 8px; left: 8px; z-index: 1;
+    flex: 0 0 auto;
     font: 12px/1.5 monospace; color: #ddd; background: rgba(0,0,0,0.55);
     padding: 8px 10px; border-radius: 4px; min-width: 170px;
   }
@@ -53,9 +64,8 @@
     color: #ddd; border: 1px solid rgba(255,255,255,0.25); border-radius: 3px;
   }
   #leftPanel {
-    position: fixed; top: 44px; left: 8px; z-index: 1;
     font: 12px/1.5 monospace; color: #ddd;
-    max-height: calc(100vh - 52px); overflow-y: auto;
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
     display: flex; flex-direction: column; gap: 8px;
   }
   #outliner, #objectPanel {
@@ -103,63 +113,65 @@
 <div id="status">connecting…</div>
 <button id="returnToScripted">return to scripted camera</button>
 <label id="meshEdgesToggle"><input type="checkbox" id="meshEdgesCheckbox"> show mesh edges</label>
-<div id="leftPanel">
-  <div id="outliner">
-    <h4>groups</h4>
-    <div id="outlinerGroups"></div>
-    <h4>forces</h4>
-    <div id="outlinerForces"></div>
-    <h4>constraints</h4>
-    <div id="outlinerConstraints"></div>
-    <h4>surfaces</h4>
-    <div id="outlinerSurfaces"></div>
-    <h4>colliders</h4>
-    <div id="outlinerColliders"></div>
+<div id="leftColumn">
+  <div id="leftPanel">
+    <div id="outliner">
+      <h4>groups</h4>
+      <div id="outlinerGroups"></div>
+      <h4>forces</h4>
+      <div id="outlinerForces"></div>
+      <h4>constraints</h4>
+      <div id="outlinerConstraints"></div>
+      <h4>surfaces</h4>
+      <div id="outlinerSurfaces"></div>
+      <h4>colliders</h4>
+      <div id="outlinerColliders"></div>
+    </div>
+    <div id="objectPanel">
+      <div id="objectPanelTitle"></div>
+      <div id="objectPanelBody"></div>
+    </div>
   </div>
-  <div id="objectPanel">
-    <div id="objectPanelTitle"></div>
-    <div id="objectPanelBody"></div>
+  <div id="controlPanel">
+    <section>
+      <h4>display</h4>
+      <label><input type="checkbox" id="gridToggle" checked> grid</label><br>
+      <label><input type="checkbox" id="axesToggle" checked> axes</label><br>
+      <label><input type="checkbox" id="collidersToggle" checked> colliders</label>
+    </section>
+    <section>
+      <h4>time</h4>
+      <div id="timeButtons">
+        <button id="playPauseBtn">⏸ pause</button>
+        <button id="stepOnceBtn">⏭ step</button>
+        <button id="restartBtn">↺ restart</button>
+      </div>
+      <div id="speedButtons">
+        <button data-speed="0.25">0.25x</button>
+        <button data-speed="0.5">0.5x</button>
+        <button data-speed="1" class="active">1x</button>
+        <button data-speed="2">2x</button>
+        <button data-speed="4">4x</button>
+      </div>
+      <label><input type="checkbox" id="pauseOnEditToggle"> pause on edit</label>
+    </section>
+    <section>
+      <h4>stats</h4>
+      <div id="statsPanel">–</div>
+    </section>
+    <section>
+      <h4>events</h4>
+      <div id="eventLog">–</div>
+    </section>
+    <section>
+      <h4>camera bookmarks</h4>
+      <div id="bookmarkList"></div>
+      <div id="bookmarkForm">
+        <input type="text" id="bookmarkNameInput" placeholder="name" maxlength="20">
+        <button id="saveBookmarkBtn">save</button>
+      </div>
+    </section>
   </div>
-</div>
-<div id="controlPanel">
-  <section>
-    <h4>display</h4>
-    <label><input type="checkbox" id="gridToggle" checked> grid</label><br>
-    <label><input type="checkbox" id="axesToggle" checked> axes</label><br>
-    <label><input type="checkbox" id="collidersToggle" checked> colliders</label>
-  </section>
-  <section>
-    <h4>time</h4>
-    <div id="timeButtons">
-      <button id="playPauseBtn">⏸ pause</button>
-      <button id="stepOnceBtn">⏭ step</button>
-      <button id="restartBtn">↺ restart</button>
-    </div>
-    <div id="speedButtons">
-      <button data-speed="0.25">0.25x</button>
-      <button data-speed="0.5">0.5x</button>
-      <button data-speed="1" class="active">1x</button>
-      <button data-speed="2">2x</button>
-      <button data-speed="4">4x</button>
-    </div>
-    <label><input type="checkbox" id="pauseOnEditToggle"> pause on edit</label>
-  </section>
-  <section>
-    <h4>stats</h4>
-    <div id="statsPanel">–</div>
-  </section>
-  <section>
-    <h4>events</h4>
-    <div id="eventLog">–</div>
-  </section>
-  <section>
-    <h4>camera bookmarks</h4>
-    <div id="bookmarkList"></div>
-    <div id="bookmarkForm">
-      <input type="text" id="bookmarkNameInput" placeholder="name" maxlength="20">
-      <button id="saveBookmarkBtn">save</button>
-    </div>
-  </section>
 </div>
 <div id="colorLegend">
   <h4>break proximity</h4>
@@ -482,6 +494,7 @@ function applyFrame(frame) {
   latestVisibleIds = frame.visibleIds;
   latestById = byId;
   latestMeshes = frame.meshes;
+  latestConnections = frame.connections;
   // null (the default, every pre-existing demo) = every particle gets a dot; otherwise only
   // the listed ids do — §10.2's "the individual cloth particles have no renderer of their own".
   const serverVisible = frame.visibleIds ? frame.particles.filter((p) => frame.visibleIds.has(p.id)) : frame.particles;
@@ -1020,6 +1033,7 @@ let latestVisibleIds = null; // this frame's server-side dot filter, updated eve
 let objectPanelInfoEl = null; // the groups panel's live "N drawable" text node, or null otherwise
 let latestById = new Map(); // this frame's particles by id (position/velocity/mass/radius), for §10.3/§10.4
 let latestMeshes = []; // this frame's mesh declarations, for a selected surface's inspection readout
+let latestConnections = []; // this frame's spring/damper connections (a, b, color, forceName), for a group's spring/damper tab
 let latestColliders = []; // this frame's colliders, for the outliner's remove action
 let latestArrowGroups = []; // this frame's named arrow-sample groups, for the forces panel's toggle
 let objectPanelInspectEl = null; // the groups/surfaces panel's live numeric-readout text node
@@ -1075,6 +1089,30 @@ function groupPanelInfoText(name) {
   const total = group.memberIds.size;
   const drawable = latestVisibleIds ? [...group.memberIds].filter((id) => latestVisibleIds.has(id)).length : total;
   return `${total} particle(s) — ${drawable} drawable as a dot right now`;
+}
+
+// Group's spring/damper tab: "every spring/damper where all endpoints belong to this group"
+// (§10.4), computed from this frame's wire-tagged connections (the connection-naming infra) -
+// there's no other way for the client to learn which particles a named force touches, since a
+// force object itself never reaches the wire, only its editable field values (via
+// latestRegistry.fields) and, for pairwise/mesh forces, its current connections. Grouping by
+// name first means a name with zero tagged connections this frame (untagged, or a MeshSprings
+// whose every edge has broken - activeConnections() then empty) never appears here at all,
+// rather than vacuously satisfying "every connection is inside the group" on an empty set.
+function containedForceNamesForGroup(groupName) {
+  const group = latestRegistry.groups.find((g) => g.name === groupName);
+  if (!group) return [];
+  const connectionsByName = new Map();
+  for (const c of latestConnections) {
+    if (!c.forceName) continue;
+    if (!connectionsByName.has(c.forceName)) connectionsByName.set(c.forceName, []);
+    connectionsByName.get(c.forceName).push(c);
+  }
+  const result = [];
+  for (const [name, conns] of connectionsByName) {
+    if (conns.every((c) => group.memberIds.has(c.a) && group.memberIds.has(c.b))) result.push(name);
+  }
+  return result;
 }
 
 // --- Selection & inspection (§10.3) -------------------------------------------------------
@@ -1165,16 +1203,19 @@ function addPanelInspect() {
   objectPanelInspectEl = inspect;
 }
 
-// §10.4's numeric field editing. currentFieldInputs maps fieldName -> the input element(s) so
+// §10.4's numeric field editing. inputsOut/inputsIn map fieldName -> the input element(s) so
 // updateEditableFieldsLive can refresh their *displayed* value without recreating them (which
 // would sever an in-progress edit) - the panel as a whole is still only rebuilt on selection
 // change or a registry signature change, and registrySignature deliberately excludes field
 // *values* (only names/booleans) for exactly this reason: a value changing on every edit must
 // never itself trigger the rebuild that would clobber the input the user is mid-edit in.
+// The inputs store is passed in rather than always written to one shared global so a panel that
+// renders more than one named force at once (a group's spring/damper tab) can track each one
+// independently instead of the last one clobbering the others - the caller owns resetting it
+// (e.g. `= {}`) before the render pass that (re)populates it.
 let currentFieldInputs = {};
 
-function renderEditableFields(kind, name) {
-  currentFieldInputs = {};
+function renderEditableFields(kind, name, inputsOut) {
   const fields = latestRegistry.fields.filter((f) => f.kind === kind && f.name === name);
   for (const f of fields) {
     const row = document.createElement("div");
@@ -1189,7 +1230,7 @@ function renderEditableFields(kind, name) {
         sendEdit({ type: "set_scalar_field", kind, name, field: f.field, value: parseFloat(input.value) });
       });
       row.appendChild(input);
-      currentFieldInputs[f.field] = { valueKind: "scalar", input };
+      inputsOut[f.field] = { valueKind: "scalar", input };
     } else {
       const inputs = ["x", "y", "z"].map(() => {
         const el = document.createElement("input");
@@ -1206,16 +1247,16 @@ function renderEditableFields(kind, name) {
         });
       };
       inputs.forEach((el) => { el.addEventListener("change", onChange); row.appendChild(el); });
-      currentFieldInputs[f.field] = { valueKind: "vector", inputs };
+      inputsOut[f.field] = { valueKind: "vector", inputs };
     }
     objectPanelBodyEl.appendChild(row);
   }
 }
 
-function updateEditableFieldsLive(kind, name) {
+function updateEditableFieldsLive(kind, name, inputsIn) {
   const fields = latestRegistry.fields.filter((f) => f.kind === kind && f.name === name);
   for (const f of fields) {
-    const entry = currentFieldInputs[f.field];
+    const entry = inputsIn[f.field];
     if (!entry) continue;
     if (entry.valueKind === "scalar") {
       if (document.activeElement !== entry.input) entry.input.value = f.value.value;
@@ -1226,6 +1267,12 @@ function updateEditableFieldsLive(kind, name) {
     }
   }
 }
+
+// The groups module's spring/damper tab tracks each qualifying named force's inputs
+// independently (see renderEditableFields's own comment on why the store is passed in) - keyed
+// by force name, rebuilt alongside the rest of the panel in renderPanel and refreshed in
+// updateLive.
+let groupForceFieldInputs = {};
 
 registerEntityKind({
   kind: "groups",
@@ -1254,27 +1301,47 @@ registerEntityKind({
     objectPanelBodyEl.appendChild(info);
     objectPanelInfoEl = info;
     addPanelInspect();
+
+    const forceNames = containedForceNamesForGroup(selectedName);
+    groupForceFieldInputs = {};
+    if (forceNames.length === 0) {
+      addPanelNote("no spring/damper is fully contained within this group (§10.4)");
+    } else {
+      for (const forceName of forceNames) {
+        const label = document.createElement("div");
+        label.className = "objectInfo";
+        label.textContent = forceName + ":";
+        objectPanelBodyEl.appendChild(label);
+        groupForceFieldInputs[forceName] = {};
+        renderEditableFields("force", forceName, groupForceFieldInputs[forceName]);
+      }
+    }
   },
-  // Refreshes the info/inspect text nodes only, never recreating the checkbox they sit next to -
-  // called every frame (from updateInspection, itself called from applyFrame) so both the
-  // "N drawable" count and the live centroid/speed track the current frame without risking a
-  // detached checkbox mid-click.
+  // Refreshes the info/inspect text nodes and every qualifying force's field inputs, never
+  // recreating the checkbox/labels they sit next to - called every frame (from updateInspection,
+  // itself called from applyFrame) so the "N drawable" count, the live centroid/speed, and each
+  // spring/damper's numeric readout all track the current frame without risking a detached
+  // checkbox mid-click or clobbering an in-progress edit.
   updateLive: () => {
     if (objectPanelInfoEl) objectPanelInfoEl.textContent = groupPanelInfoText(selectedName);
-    if (!objectPanelInspectEl) return;
-    const group = latestRegistry.groups.find((g) => g.name === selectedName);
-    const memberIds = group ? group.memberIds : new Set();
-    let sumX = 0, sumY = 0, sumZ = 0, sumSpeed = 0, count = 0;
-    for (const id of memberIds) {
-      const p = latestById.get(id);
-      if (!p) continue; // not present this frame (e.g. destroyed - Phase 6, unbuilt, but defensive)
-      sumX += p.x; sumY += p.y; sumZ += p.z;
-      sumSpeed += vectorLength(p.vx, p.vy, p.vz);
-      count++;
+    if (objectPanelInspectEl) {
+      const group = latestRegistry.groups.find((g) => g.name === selectedName);
+      const memberIds = group ? group.memberIds : new Set();
+      let sumX = 0, sumY = 0, sumZ = 0, sumSpeed = 0, count = 0;
+      for (const id of memberIds) {
+        const p = latestById.get(id);
+        if (!p) continue; // not present this frame (e.g. destroyed - Phase 6, unbuilt, but defensive)
+        sumX += p.x; sumY += p.y; sumZ += p.z;
+        sumSpeed += vectorLength(p.vx, p.vy, p.vz);
+        count++;
+      }
+      objectPanelInspectEl.textContent = count === 0
+        ? "no live data"
+        : `centroid: ${formatVec(sumX / count, sumY / count, sumZ / count)}\navg speed: ${(sumSpeed / count).toFixed(3)} m/s`;
     }
-    objectPanelInspectEl.textContent = count === 0
-      ? "no live data"
-      : `centroid: ${formatVec(sumX / count, sumY / count, sumZ / count)}\navg speed: ${(sumSpeed / count).toFixed(3)} m/s`;
+    for (const forceName of Object.keys(groupForceFieldInputs)) {
+      updateEditableFieldsLive("force", forceName, groupForceFieldInputs[forceName]);
+    }
   },
 });
 
@@ -1288,12 +1355,13 @@ registerEntityKind({
   renderPanel: () => {
     const hasArrows = latestArrowGroups.some((g) => g.name === selectedName);
     if (hasArrows) addPanelToggle("show arrows", hiddenForces);
-    renderEditableFields("force", selectedName);
+    currentFieldInputs = {};
+    renderEditableFields("force", selectedName, currentFieldInputs);
     if (!hasArrows && latestRegistry.fields.every((f) => !(f.kind === "force" && f.name === selectedName))) {
       addPanelNote("no arrow renderer or editable numeric fields for this force yet (§10.2/§10.4)");
     }
   },
-  updateLive: () => updateEditableFieldsLive("force", selectedName),
+  updateLive: () => updateEditableFieldsLive("force", selectedName, currentFieldInputs),
 });
 
 registerEntityKind({
@@ -1301,12 +1369,13 @@ registerEntityKind({
   getNames: (registry) => registry.constraints,
   // §10.2 defines no constraint renderer at all - editable fields are the only panel content.
   renderPanel: () => {
-    renderEditableFields("constraint", selectedName);
+    currentFieldInputs = {};
+    renderEditableFields("constraint", selectedName, currentFieldInputs);
     if (latestRegistry.fields.every((f) => !(f.kind === "constraint" && f.name === selectedName))) {
       addPanelNote("no renderer or editable numeric fields for this constraint yet (§10.2/§10.4)");
     }
   },
-  updateLive: () => updateEditableFieldsLive("constraint", selectedName),
+  updateLive: () => updateEditableFieldsLive("constraint", selectedName, currentFieldInputs),
 });
 
 registerEntityKind({
