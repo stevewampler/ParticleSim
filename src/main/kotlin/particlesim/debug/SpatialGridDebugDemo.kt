@@ -181,7 +181,9 @@ fun main() {
         }
         renderer.broadcast(
             t, step, store, ids, emptyList(),
-            sphereRadii = ids.associateWith { radius },
+            // No sphereRadii override - every ball's dot now renders at its own live
+            // ParticleStore.radius (the viewer's client-side default, §10.4), so an edited
+            // radius shows up immediately instead of being masked by a static render size.
             colliders = liveColliderRules.map { it.collider },
             registry = SceneRegistry.build(groups = groups, colliders = liveColliderRules.map { it.collider }),
             events = events,

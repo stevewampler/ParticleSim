@@ -51,7 +51,10 @@ fun main() {
     val allIds = scenario.grid.flatten() + scenario.ballId
     // Interior mat particles carry mesh-vertex data only (no dot of their own, same
     // `visibleIds` trick FlagDebugDemo uses) - only the pinned rim gets a small sphere so the
-    // frame is visible, plus the ball itself.
+    // frame is visible, plus the ball itself. The rim override is load-bearing (those particles
+    // carry no ParticleStore radius of their own, so without it they'd fall back to the
+    // viewer's plain default dot size, §10.4); the ball's happens to match its own physics
+    // radius already and is harmless either way, since this demo has no live radius editing.
     val rimIds = scenario.groups.membersOf("rim")
     val sphereRadii = rimIds.associateWith { 0.03 } + (scenario.ballId to 0.12)
     val visibleIds = rimIds + scenario.ballId

@@ -2477,6 +2477,53 @@ real prerequisite, not just unstarted — see the note below.
           name-tagged back to its owning Spring/Damper/MeshSprings on the
           wire - needed for "every spring/damper where all endpoints
           belong to this group" and not yet confirmed one way or the other.
+    - [x] Two follow-on fixes from using the particle panel above, raised
+          directly by the user rather than found independently:
+          - **Particle radius and render radius unified.** The viewer's
+            dot scale used to come only from an opt-in, author-declared
+            `sphereRadii` map (§10.2), entirely independent of
+            `ParticleStore.radius` - so editing a particle's radius
+            (§10.4, previous entry) changed nothing visible for any demo
+            using it. Root cause, found by checking rather than assumed:
+            `ParticleCollisionDebugDemo`/`SpatialGridDebugDemo` both
+            computed `sphereRadii` from a *static* `ids.associateWith {
+            radius }` (a hardcoded local constant, re-sent unchanged
+            every frame), never reading the live per-particle value back
+            out of the store. Fix: the client now falls back to the
+            particle's own live `radius` (already on the wire, unchanged
+            from the previous entry) whenever no explicit `sphereRadii`
+            entry exists for that id, and both demos' now-redundant
+            static maps were removed - an edited radius is immediately
+            visible with no further wire changes needed. `FlagDebugDemo`'s
+            pole spheres and `TrampolineDebugDemo`'s rim/ball spheres keep
+            their explicit overrides untouched (checked, not assumed:
+            those particles genuinely have no `ParticleStore` radius of
+            their own - pinned anchors, not collidable spheres - so the
+            override is still load-bearing, not redundant).
+          - **A selected surface reveals its own vertices as dots.** A
+            mesh-only particle (the flag's cloth, hidden via `visibleIds`
+            since the mesh already shows it) had no dot at all to
+            right-click, making it unreachable through the particle panel
+            despite `ParticleStore.radius` having nothing to do with it -
+            purely a §10.2 mesh-only-rendering visibility question, not a
+            radius one, contrary to how the request was first framed.
+            Fix is entirely client-side (every particle's position already
+            travels in the wire regardless of visibility): while a surface
+            is the current selection, its vertex ids are added to the
+            visible set, overriding both the server's own `visibleIds`
+            exclusion and any `hiddenGroups` checkbox - an explicit "let
+            me get at this surface's particles" action wins over an
+            unrelated visibility preference. The surface panel's live
+            inspection text notes this so it isn't a silent surprise.
+            Deselecting the surface hides them again automatically (recomputed
+            fresh from the current selection every frame).
+          **Verified live in Chrome** against `FlagDebugDemo` (selecting
+          the cloth surface revealed its particles as dots, one was
+          right-clicked and its own panel opened; a pole/flag particle's
+          empty radius field renders as empty, not a stray value; the
+          pole's small anchor spheres are unaffected) and
+          `SpatialGridDebugDemo` (editing a ball's radius now visibly
+          resizes its dot).
     - [ ] Constraints/surfaces/emitters editing still to do: FixedPosition's
           shared-position variant (deferred above alongside Spring/Damper),
           surfaces' mesh-style toggle, and emitters as a new outliner

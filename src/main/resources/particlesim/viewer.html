@@ -494,7 +494,25 @@ function applyFrame(frame) {
       for (const id of group.memberIds) hiddenParticleIds.add(id);
     }
   }
-  const visible = hiddenParticleIds.size === 0 ? serverVisible : serverVisible.filter((p) => !hiddenParticleIds.has(p.id));
+  // A selected surface reveals its own vertices as individually selectable dots - otherwise a
+  // mesh-only particle (e.g. the flag's cloth, hidden via visibleIds since the mesh already
+  // shows it) has no dot at all to right-click, making it unreachable through §10.4's particle
+  // panel. Overrides both the server's own visibleIds exclusion *and* hiddenGroups above - an
+  // explicit "let me get at this surface's particles" action wins over a group visibility
+  // preference set for an unrelated reason. Purely client-side: every particle's position
+  // already travels in frame.particles regardless of visibility, so revealing needs nothing
+  // from the wire.
+  const revealedIds = new Set();
+  if (selectedKind === "surfaces") {
+    const meshDecl = frame.meshes.find((m) => m.name === selectedName);
+    if (meshDecl) {
+      for (const tri of meshDecl.triangles) { revealedIds.add(tri.a); revealedIds.add(tri.b); revealedIds.add(tri.c); }
+    }
+  }
+  const visibleIdSet = new Set(serverVisible.map((p) => p.id));
+  for (const id of hiddenParticleIds) visibleIdSet.delete(id);
+  for (const id of revealedIds) visibleIdSet.add(id);
+  const visible = [...visibleIdSet].map((id) => byId.get(id)).filter(Boolean);
 
   while (dots.children.length < visible.length) {
     dots.add(new THREE.Mesh(dotGeometry, dotMaterial));
@@ -507,7 +525,13 @@ function applyFrame(frame) {
     dot.position.set(p.x, p.y, p.z);
     dot.userData.particleId = p.id;
     dot.material = p.id === draggedParticleId ? draggedDotMaterial : dotMaterial;
-    const radius = sphereRadii.get(p.id);
+    // A demo's own explicit sphereRadii entry (a cosmetic render-size declaration, §10.2) wins
+    // when present - e.g. TrampolineDebugDemo's rim anchors, which have no physics radius of
+    // their own at all and would otherwise render at the plain default size. Otherwise the dot
+    // now tracks the particle's own live physics radius (ParticleStore.radius, always fresh on
+    // the wire) - unifying what used to be two independent concepts, and the reason a live
+    // radius edit (§10.4) now visibly changes dot size for a particle with no such override.
+    const radius = sphereRadii.get(p.id) ?? (Number.isNaN(p.radius) ? null : p.radius);
     const scale = radius ? radius / BASE_DOT_RADIUS : 1;
     dot.scale.setScalar(scale);
   });
@@ -1306,7 +1330,8 @@ registerEntityKind({
     }
     objectPanelInspectEl.textContent = count === 0
       ? "no live data"
-      : `${meshDecl.triangles.length} triangle(s)\navg vertex speed: ${(sumSpeed / count).toFixed(3)} m/s`;
+      : `${meshDecl.triangles.length} triangle(s)\navg vertex speed: ${(sumSpeed / count).toFixed(3)} m/s\n` +
+        "(this surface's vertices are shown as dots while selected, even if normally mesh-only)";
   },
 });
 

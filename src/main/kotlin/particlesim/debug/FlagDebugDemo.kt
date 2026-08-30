@@ -74,6 +74,10 @@ fun main() {
     }
 
     val poleIds = scenario.groups.membersOf("pole")
+    // A cosmetic render size, not a physics one - pole particles carry no ParticleStore radius
+    // of their own (they're FixedPosition anchors, never collidable), so without this explicit
+    // override they'd fall back to the viewer's plain default dot size (§10.4's radius/render
+    // unification only applies when a particle actually has a physics radius to show).
     val poleSphereRadii = poleIds.associateWith { 0.03 }
     val clothMesh = SurfaceRenderer(scenario.surface, wireframe = false)
     // A modest region around the flag's own footprint (x: 0..~2.1, y: 0..~-1.2) at a resolution
