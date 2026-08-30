@@ -2982,21 +2982,36 @@ real prerequisite, not just unstarted — see the note below.
 Raised by the user in three `/btw`-style comments during the
 `viewer-live-editing` work, recorded in `requirements.md` (§5.2, §10.2,
 §10.3, §10.4) rather than implemented immediately - captured here so the
-next session picks them up instead of losing them. None of the three has
-been started.
-- [ ] Right-click a force's sampled arrow (wind, or any other directional
+next session picks them up instead of losing them.
+- [x] Right-click a force's sampled arrow (wind, or any other directional
       field force) to select and open *that force's* per-object panel,
       the arrow-picking counterpart to right-clicking a mesh triangle to
-      open its surface's panel (requirements.md §10.3). Today's
-      right-click raycast (`viewer.html`'s `contextmenu` handler) only
-      intersects `dots` and `meshObjects` - `arrowObjects` isn't in the
-      hit-test list at all, and an arrow has no `userData` tagging it
-      back to its owning force's name the way a mesh triangle's
-      `userData.surfaceName` does. Needs: tagging each `ArrowHelper`
-      instance with its source force's name at construction (the data's
-      already there - `frame.arrowGroups[i].name` - just not attached to
-      the three.js object), adding `arrowObjects` to the raycast target
-      list, and resolving a hit back to `selectObject("forces", name)`.
+      open its surface's panel (requirements.md §10.3). Purely a
+      `viewer.html` change - the arrow group's source-force name was
+      already on the wire (`frame.arrowGroups[i].name`), nothing
+      server-side needed touching. The per-frame arrow-update loop
+      (`applyFrame`) now tracks each flattened sample's owning group name
+      alongside it and tags the corresponding `ArrowHelper`'s
+      `userData.forceName` (`""` for unnamed, same convention as a mesh's
+      `userData.surfaceName`). `arrowObjects` added to the `contextmenu`
+      handler's raycast target list (not `pickParticle`'s - dragging a
+      force arrow makes no sense, only right-click-to-open needed it).
+      **A real subtlety, not just wiring**: a raycast against an
+      `ArrowHelper` never hits the `ArrowHelper` itself - it's a plain
+      `Object3D` wrapping a `Line` and a cone `Mesh`, neither of which
+      carries the tag, so a hit resolves to one of those children
+      instead. Added `resolveForceName(object)`, which walks up
+      `.parent` from the hit object until it finds an ancestor with
+      `userData.forceName` set - handles a hit on either the shaft or the
+      arrowhead without assuming three.js's internal `ArrowHelper`
+      structure. **Verified live in Chrome** against `FlagDebugDemo`'s
+      wind arrows (via `SceneLibraryDebugDemo`'s `flag` scene):
+      right-clicking an arrowhead (cone) opened the wind panel; so did
+      right-clicking a bare shaft (line) on a different arrow, after
+      first selecting a different force to confirm the click actually
+      caused the switch rather than it already being selected; particle
+      and surface right-click-to-open still worked unaffected (their own
+      raycast logic wasn't touched, only appended to). No console errors.
 - [ ] `Wind`'s direction and gusting independently live-editable from the
       viewer, not just `density` (requirements.md §5.2/§10.4). Blocked on
       a real design decision, not just wiring: `Wind.velocity` is

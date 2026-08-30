@@ -625,7 +625,7 @@ function applyFrame(frame) {
   const visibleArrowSamples = [];
   for (const group of frame.arrowGroups) {
     if (group.name !== "" && hiddenForces.has(group.name)) continue;
-    for (const sample of group.samples) visibleArrowSamples.push(sample);
+    for (const sample of group.samples) visibleArrowSamples.push({ sample, forceName: group.name });
   }
   while (arrowObjects.length < visibleArrowSamples.length) {
     const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(), 1, ARROW_COLOR);
@@ -635,8 +635,13 @@ function applyFrame(frame) {
   while (arrowObjects.length > visibleArrowSamples.length) {
     arrowGroup.remove(arrowObjects.pop());
   }
-  visibleArrowSamples.forEach((sample, i) => {
+  visibleArrowSamples.forEach(({ sample, forceName }, i) => {
     const arrow = arrowObjects[i];
+    // §10.3's arrow-picking: tagged on the ArrowHelper itself (not its line/cone children,
+    // which is what a raycast hit actually resolves to - see resolveForceName's own comment
+    // for why the contextmenu handler walks up to find this). "" for an unnamed force, same
+    // convention as a mesh's userData.surfaceName - never matches an outliner selection.
+    arrow.userData.forceName = forceName;
     const dir = new THREE.Vector3(sample.vector.x, sample.vector.y, sample.vector.z);
     const length = dir.length();
     arrow.position.set(sample.origin.x, sample.origin.y, sample.origin.z);
@@ -1952,11 +1957,23 @@ renderer.domElement.addEventListener("dblclick", (event) => {
 // selection design settled on: the particle panel is what you land on, listing every containing
 // group as a link back out, not the reverse. A particle in zero groups - unreachable at all
 // under this handler's old group-opening behavior - now opens its own panel same as any other.
+// A raycast against an ArrowHelper never hits the ArrowHelper itself - it's a plain Object3D
+// wrapping a Line and a cone Mesh, neither of which defines its own raycast-target userData, so
+// intersectObjects (recursive by default) resolves to one of those children instead. Walking up
+// to the nearest ancestor carrying forceName finds the tag applyFrame set on the ArrowHelper
+// itself, however many levels of children three.js's own ArrowHelper implementation nests.
+function resolveForceName(object) {
+  for (let o = object; o; o = o.parent) {
+    if (o.userData.forceName !== undefined) return o.userData.forceName;
+  }
+  return undefined;
+}
+
 renderer.domElement.addEventListener("contextmenu", (event) => {
   event.preventDefault(); // this canvas has its own right-click action; never show the browser's menu
   pointerToNdc(event);
   raycaster.setFromCamera(pointerNdc, camera);
-  const hits = raycaster.intersectObjects([...dots.children, ...meshObjects]);
+  const hits = raycaster.intersectObjects([...dots.children, ...meshObjects, ...arrowObjects]);
   if (hits.length === 0) return;
   const hit = hits[0];
 
@@ -1966,7 +1983,14 @@ renderer.domElement.addEventListener("contextmenu", (event) => {
   }
 
   const surfaceName = hit.object.userData.surfaceName;
-  if (surfaceName) selectObject("surfaces", surfaceName); // "" (unnamed) has no panel to open
+  if (surfaceName) { selectObject("surfaces", surfaceName); return; } // "" (unnamed) has no panel to open
+
+  // §10.3's arrow-picking: a field force (wind, etc.) has no single particle to click, so one
+  // of its sampled arrows is the only clickable surface it has - right-clicking any one selects
+  // the force that produced it, the same "the fast path for something already visible" as a
+  // mesh triangle opening its surface's panel above.
+  const forceName = resolveForceName(hit.object);
+  if (forceName) selectObject("forces", forceName); // "" (unnamed) has no panel to open
 });
 
 function animate() {

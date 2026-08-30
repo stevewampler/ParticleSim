@@ -954,9 +954,7 @@ readout to debug a scene without a separate tool.
   it (by the arrow group's source-force name), the same way right-
   clicking a mesh triangle already selects its owning surface — a field
   force has no single particle to click, so its arrows are the only
-  clickable surface it has. *(New requirement — not yet built; today's
-  right-click picking only resolves against particle dots and surface
-  meshes, not arrows.)*
+  clickable surface it has.
 - **Selection & inspection**: selecting an object (via the 3D view or the
   outliner) shows live numeric readout for it — a particle's position/
   velocity, a force's current magnitude, a breakable connection's current
@@ -1100,8 +1098,8 @@ built; needs `Wind.velocity` decomposed into named sub-parameters before
 they're independently editable rather than one opaque expression).
 `Wind` is associated with a specific surface via its triangle list, the
 same "belongs to" lookup as a group's springs, not a named-group target
-like the other two. Also new: right-clicking one of `Wind`'s sampled
-arrows (§10.2/§10.3) opens this same tab directly, the arrow-picking
+like the other two. Right-clicking one of `Wind`'s sampled arrows
+(§10.2/§10.3, built) opens this same tab directly, the arrow-picking
 counterpart to right-clicking a mesh triangle to open its surface's tab.
 
 **Constraints**:
