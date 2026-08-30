@@ -2193,7 +2193,7 @@ real prerequisite, not just unstarted — see the note below.
       forces, constraints, surface mesh) and `SpatialGridDebugDemo`
       (collider active toggle + remove). Checkbox was left stale until now;
       the code has been merged since 2026-08-26.
-- [~] Live parameter tweaking (viewer writes back into a running
+- [x] Live parameter tweaking (viewer writes back into a running
       entity's numeric parameters) — fully specified via a direct
       entity-by-entity walkthrough with the user (requirements.md §10.4).
       Implemented on the `viewer-live-editing` branch, in this order:
@@ -2665,12 +2665,88 @@ real prerequisite, not just unstarted — see the note below.
           mesh from solid blue shading to wireframe-only rendering with the
           selected surface's vertex dots still on top; unchecking reverted
           it. No console errors.
-    - [ ] Emitters as a new outliner category with rate/maxAlive/capPolicy -
-          not built yet. No demo in this codebase currently has an emitter
-          (Phase 6 lifecycle feature) to verify emitter UI against -
-          confirm one exists (or build a minimal one) before wiring the
-          outliner category, rather than shipping UI with nothing real to
-          point it at.
+    - [x] Emitters as a new outliner category with rate/maxAlive/capPolicy
+          (requirements.md §10.4). **This note's own premise was stale** -
+          the second stale claim caught this session (see the constraints/
+          surfaces/colliders migration entry above for the first): `buildSparks`
+          (`particlesim/examples/Sparks.kt`) has had a real, *named*
+          (`"fountain"`) `Emitter` since Phase 6, exercised in both
+          `SparksDebugDemo` and the scene library's `SparksScene` - no new
+          demo needed, confirmed by reading the code rather than trusting
+          this note.
+          `Emitter.rate`/`maxAlive`/`capPolicy` promoted from `val` to
+          mutable, with `currentRate(t)`/`currentCapPolicy()` reads and
+          `setRate`/`setMaxAlive`/`setCapPolicy` writes - `maxAlive` stays a
+          public property (`private set`) since `SparksStabilityTest`
+          already read it directly; `rate`/`capPolicy` stay private,
+          reached only through the new accessors. `setMaxAlive` rejects
+          non-positive values, same "reject rather than accept a value
+          that breaks the class's own invariants" stance as
+          `ParticleStore.setMass`.
+          **`capPolicy` went over the wire as a `Boolean` (`evictOldest`),
+          not a new enum `FieldValue` variant** - the open design question
+          the user pre-approved deciding. `rate` is expression-capable (a
+          `ScalarExpr`, evaluated fresh each frame at the current `t`) and
+          `capPolicy` is a two-valued enum, so neither fits
+          `FieldValue`'s Scalar/Vector split the way `EditableFields`
+          assumes; bending that mechanism to fit felt worse than three
+          purpose-built messages (`SetEmitterRate`/`SetEmitterMaxAlive`/
+          `SetEmitterCapPolicy`, parsed in `SceneControlMessage.parse`) and
+          a new `applyEmitterMessage` dispatcher in `DemoScene.kt`,
+          parallel to `applyEditableFieldMessage` but kept separate since
+          emitters aren't `EditableFields`. `evictOldest: true` means
+          `EmitterCapPolicy.EVICT_OLDEST`, the same boolean-toggle
+          convention as `SetColliderActive`/`SetGroupEnabled` rather than
+          inventing an enum wire type for one two-valued field.
+          `SceneRegistry` gained `emitters: Map<String, Emitter>` -
+          collected unconditionally (unlike forces/constraints/surfaces),
+          since `Emitter.name` is non-nullable: every emitter is named from
+          construction, so there's no "unnamed, not outliner-reachable"
+          case to filter out here. `BinaryFrame` gained a new per-frame
+          registry section (name, live-evaluated rate, maxAlive,
+          evictOldest), decoded into `DecodedEmitterEntry` - `collectEmitterEntries`
+          takes `t` (already threaded through `encode`) to evaluate `rate`
+          fresh each frame, mirroring how a particle's mass/radius are
+          shown as their live evaluated number, never the source
+          expression. `SparksScene` gained its first real `SceneRegistry`
+          (forces, **groups** - initially missed in review, since
+          `scenario.groups` wasn't passed and the "sparks" group was
+          invisible in the outliner despite every spawned particle
+          belonging to it - and the emitter), built fresh inside `frame(t)`
+          rather than cached at construction, since group membership and
+          the live particle set change every step here; `SceneRegistry`'s
+          own doc comment on stale member-id snapshots updated to point at
+          this as the resolved case, not a hypothetical future gap.
+          Client: new EMITTERS outliner section; a per-object panel with a
+          plain-text `rate` field (expression-string editing, same
+          convention as a particle's mass/radius - parsed server-side via
+          `ExpressionParser.parseScalar`, always showing the live evaluated
+          number), a `number`-type `maxAlive` field, and an "evict oldest
+          at cap" checkbox; values refresh via `updateLive` (skipping a
+          focused input), the emitter *name list* (not the live values)
+          is part of `registrySignature` so an emitter appearing/
+          disappearing still triggers a rebuild.
+          Every standalone (non-scene-library) demo's exhaustive
+          `SceneControlMessage` `when` needed a new no-op branch for the
+          three message types (`RemoveCollider`-style "this demo has no
+          emitters" comments) - mechanical, no behavior change.
+          Component-tested: `EmitterTest`-adjacent coverage in
+          `DemoSceneTest` (rate/maxAlive/capPolicy edits apply, a
+          non-positive `maxAlive` is rejected, an unmatched name is a
+          silent no-op, an unrecognized message type falls through),
+          `SceneControlMessageTest` (all three new message types parse and
+          reject malformed/missing-key input), and `BinaryFrameTest`
+          (round-trips name/rate/maxAlive/evictOldest; an empty emitter
+          list round-trips to an empty list). **Verified live in Chrome**
+          against the `sparks` scene: "fountain" appears under EMITTERS
+          with its live-ticking rate (`20 + 15·sin(0.5t)`); editing rate to
+          a constant `200` and maxAlive to `15` capped the live particle
+          count at 15 with STOP behavior (particles cycling via natural
+          lifetime expiry, not eviction); checking "evict oldest at cap"
+          immediately switched to same-`t` spawn/destroy pairs (the
+          eviction signature), still pinned at 15. Switching to `flag`
+          confirmed the section correctly falls back to "(none)" for a
+          scene with no emitters. No console errors.
 
 ## Scene library (§9.6, new requirement) — not yet phased
 - [x] Engine-side switching mechanism, scoped to the four demos that

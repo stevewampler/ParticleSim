@@ -2,6 +2,7 @@ package particlesim.render
 
 import particlesim.collision.Collider
 import particlesim.core.Groups
+import particlesim.lifecycle.Emitter
 import particlesim.physics.Constraint
 import particlesim.physics.Force
 import particlesim.surface.Surface
@@ -29,10 +30,14 @@ import particlesim.surface.Surface
  * named groups every current demo has, but worth remembering if a future large-N scenario names
  * a group with thousands of members and rebroadcasts this every frame (§9.1's per-frame
  * protocol resends the whole registry each time, same as `sphereRadii`/`meshes`/`arrowSamples`).
- * A [SceneRegistry] built once and reused across many `broadcast` calls (as every current demo
- * does) also means member-id snapshots go stale if group membership changes mid-run — not a
- * concern for any demo today (none has emitters, Phase 6, still unbuilt), but a real gap once
- * one does.
+ * A [SceneRegistry] built once and reused across many `broadcast` calls means member-id snapshots
+ * go stale if group membership changes mid-run — a real concern for an emitter-driven scene
+ * (`SparksScene`'s "sparks" group gains/loses members every step), which is exactly why that
+ * scene (and every other scene whose membership or force/constraint list can change over its
+ * lifetime, e.g. `DragScene`/`ParticleCollisionScene`) rebuilds a fresh [SceneRegistry] inside its
+ * own `frame(t)` call rather than caching one at construction - see those classes' own `frame`
+ * for the pattern. A scene whose registry inputs never change after construction (e.g.
+ * `FlagScene`, `TrampolineScene`) can still build it once and reuse it safely.
  *
  * **Granularity is "one [Force]/[Constraint] object," not one physical connection.**
  * [particlesim.physics.MeshSprings] is a single `Force` representing an entire mesh's worth of
@@ -59,6 +64,7 @@ class SceneRegistry private constructor(
     val groups: Map<String, Set<Int>>,
     val colliders: Map<String, Collider>,
     val groupEnabled: Map<String, Boolean>,
+    val emitters: Map<String, Emitter>,
 ) {
     companion object {
         fun build(
@@ -67,6 +73,7 @@ class SceneRegistry private constructor(
             surfaces: List<Surface> = emptyList(),
             groups: Groups = Groups(),
             colliders: List<Collider> = emptyList(),
+            emitters: List<Emitter> = emptyList(),
         ): SceneRegistry =
             SceneRegistry(
                 forces = uniqueByName(forces.filter { it.name != null }) { it.name!! },
@@ -82,6 +89,10 @@ class SceneRegistry private constructor(
                 // Groups.isEnabled is itself a live read, not something this class retains a
                 // reference to.
                 groupEnabled = groups.names().associateWith { name -> groups.isEnabled(name) },
+                // Unlike forces/constraints/surfaces, Emitter.name is never null - every emitter
+                // is scene-authored identity from construction, so this is unique-by-name over
+                // the whole list, no null-filtering needed.
+                emitters = uniqueByName(emitters) { it.name },
             )
 
         private fun <T> uniqueByName(items: List<T>, nameOf: (T) -> String): Map<String, T> {

@@ -206,6 +206,9 @@ fun main() {
                         }
                     }
                 }
+                is SceneControlMessage.SetEmitterRate -> {} // this demo has no emitters
+                is SceneControlMessage.SetEmitterMaxAlive -> {} // this demo has no emitters
+                is SceneControlMessage.SetEmitterCapPolicy -> {} // this demo has no emitters
             }
         }
         repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) {

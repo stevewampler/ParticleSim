@@ -98,6 +98,63 @@ class SceneControlMessageTest {
     }
 
     @Test
+    fun `parses set_emitter_rate with a plain-number expression as a Constant`() {
+        assertEquals(
+            SceneControlMessage.SetEmitterRate("fountain", ScalarExpr.Constant(30.0)),
+            SceneControlMessage.parse("""{"type": "set_emitter_rate", "name": "fountain", "expression": "30.0"}"""),
+        )
+    }
+
+    @Test
+    fun `parses set_emitter_rate with a time-varying expression as OfTime`() {
+        val parsed = SceneControlMessage.parse(
+            """{"type": "set_emitter_rate", "name": "fountain", "expression": "20.0 + 15.0 * sin(t)"}""",
+        )
+        val message = assertIs<SceneControlMessage.SetEmitterRate>(parsed)
+        assertEquals("fountain", message.name)
+        assertIs<ScalarExpr.OfTime>(message.expr)
+    }
+
+    @Test
+    fun `rejects set_emitter_rate with malformed expression syntax or a missing key`() {
+        assertNull(SceneControlMessage.parse("""{"type": "set_emitter_rate", "name": "fountain", "expression": "not an expression((("}"""))
+        assertNull(SceneControlMessage.parse("""{"type": "set_emitter_rate", "expression": "30.0"}"""))
+        assertNull(SceneControlMessage.parse("""{"type": "set_emitter_rate", "name": "fountain"}"""))
+    }
+
+    @Test
+    fun `parses set_emitter_max_alive with its name and cap`() {
+        assertEquals(
+            SceneControlMessage.SetEmitterMaxAlive("fountain", 500),
+            SceneControlMessage.parse("""{"type": "set_emitter_max_alive", "name": "fountain", "maxAlive": 500}"""),
+        )
+    }
+
+    @Test
+    fun `rejects set_emitter_max_alive missing any required key`() {
+        assertNull(SceneControlMessage.parse("""{"type": "set_emitter_max_alive", "maxAlive": 500}"""))
+        assertNull(SceneControlMessage.parse("""{"type": "set_emitter_max_alive", "name": "fountain"}"""))
+    }
+
+    @Test
+    fun `parses set_emitter_cap_policy with its name and evictOldest flag`() {
+        assertEquals(
+            SceneControlMessage.SetEmitterCapPolicy("fountain", true),
+            SceneControlMessage.parse("""{"type": "set_emitter_cap_policy", "name": "fountain", "evictOldest": true}"""),
+        )
+        assertEquals(
+            SceneControlMessage.SetEmitterCapPolicy("fountain", false),
+            SceneControlMessage.parse("""{"type": "set_emitter_cap_policy", "name": "fountain", "evictOldest": false}"""),
+        )
+    }
+
+    @Test
+    fun `rejects set_emitter_cap_policy missing any required key`() {
+        assertNull(SceneControlMessage.parse("""{"type": "set_emitter_cap_policy", "evictOldest": true}"""))
+        assertNull(SceneControlMessage.parse("""{"type": "set_emitter_cap_policy", "name": "fountain"}"""))
+    }
+
+    @Test
     fun `returns null for malformed or unrecognized input, same stance as the other message types`() {
         assertNull(SceneControlMessage.parse("not json at all {{{"))
         assertNull(SceneControlMessage.parse("""{"type": "pause"}"""))

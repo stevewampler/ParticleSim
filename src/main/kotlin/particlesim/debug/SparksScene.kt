@@ -4,6 +4,7 @@ import particlesim.core.ParticleStore
 import particlesim.examples.SPARKS_DT
 import particlesim.examples.buildSparks
 import particlesim.physics.Integrator
+import particlesim.render.SceneRegistry
 
 /**
  * §9.6 scene-library wrapping of [SparksDebugDemo]'s worked example - integrate, then destroy
@@ -23,7 +24,8 @@ class SparksScene : DemoScene {
     override fun ids(): List<Int> = scenario.store.liveIds()
 
     override fun handleControl(message: SceneControlMessage, t: Double) {
-        applyEditableFieldMessage(message, scenario.forces, emptyList(), scenario.store, t)
+        if (applyEditableFieldMessage(message, scenario.forces, emptyList(), scenario.store, t)) return
+        applyEmitterMessage(message, listOf(scenario.emitter))
     }
 
     override fun step(t: Double) {
@@ -36,7 +38,10 @@ class SparksScene : DemoScene {
     }
 
     override fun frame(t: Double): SceneFrame {
-        val frame = SceneFrame(events = events.toList())
+        val frame = SceneFrame(
+            registry = SceneRegistry.build(forces = scenario.forces, groups = scenario.groups, emitters = listOf(scenario.emitter)),
+            events = events.toList(),
+        )
         events.clear()
         return frame
     }

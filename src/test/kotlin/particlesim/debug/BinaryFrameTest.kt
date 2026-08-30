@@ -389,6 +389,41 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `a named emitter's current rate, maxAlive, and capPolicy round-trip in the registry`() {
+        val store = ParticleStore()
+        val emitter = particlesim.lifecycle.Emitter(
+            name = "fountain",
+            group = "sparks",
+            rate = ScalarExpr.of { t -> 20.0 + 15.0 * kotlin.math.sin(t) },
+            position = particlesim.lifecycle.VectorDistribution.UniformBox(Vector3.ZERO, Vector3.ZERO),
+            velocity = particlesim.lifecycle.VectorDistribution.UniformBox(Vector3.ZERO, Vector3.ZERO),
+            maxAlive = 300,
+            capPolicy = particlesim.lifecycle.EmitterCapPolicy.EVICT_OLDEST,
+            masterSeed = 1L,
+        )
+        val registry = SceneRegistry.build(emitters = listOf(emitter))
+
+        val buffer = BinaryFrame.encode(
+            t = 1.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), registry = registry,
+        )
+        val decoded = BinaryFrame.decode(buffer).registry.emitters
+
+        assertEquals(1, decoded.size)
+        val entry = decoded.single()
+        assertEquals("fountain", entry.name)
+        assertEquals(20.0 + 15.0 * kotlin.math.sin(1.0), entry.rate, 1e-9)
+        assertEquals(300, entry.maxAlive)
+        assertEquals(true, entry.evictOldest)
+    }
+
+    @Test
+    fun `no emitters passed round-trips to an empty emitters list, not an error`() {
+        val store = ParticleStore()
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList())
+        assertEquals(emptyList(), BinaryFrame.decode(buffer).registry.emitters)
+    }
+
+    @Test
     fun `round-trips a plane collider with its render half-size`() {
         val store = ParticleStore()
         val floor = PlaneCollider(VectorExpr.of(Vector3(0.0, 1.0, 0.0)), normal = Vector3(0.0, 1.0, 0.0), name = "floor")

@@ -2,6 +2,8 @@ package particlesim.debug
 
 import particlesim.collision.Collider
 import particlesim.core.ParticleStore
+import particlesim.lifecycle.Emitter
+import particlesim.lifecycle.EmitterCapPolicy
 import particlesim.physics.Constraint
 import particlesim.physics.EditableFields
 import particlesim.physics.FieldValue
@@ -114,6 +116,31 @@ fun applyEditableFieldMessage(
                     "radius" -> store.setRadius(message.particleId, message.expr, t)
                 }
             }
+            true
+        }
+        else -> false
+    }
+}
+
+/** §10.4's emitter live-editing dispatch - the same one-function-per-scene shape as
+ * [applyEditableFieldMessage], kept separate rather than folded into it because emitters aren't
+ * [EditableFields]: `rate` is expression-capable (parsed server-side, like a particle's mass/
+ * radius) and `capPolicy` is a two-valued enum, neither of which fits the Scalar/Vector
+ * [FieldValue] shape that mechanism assumes. A scene with any named [Emitter] calls this once
+ * from its own [DemoScene.handleControl], same "call once, fall through on `false`" convention. */
+fun applyEmitterMessage(message: SceneControlMessage, emitters: List<Emitter>): Boolean {
+    fun target(name: String): Emitter? = emitters.find { it.name == name }
+    return when (message) {
+        is SceneControlMessage.SetEmitterRate -> {
+            target(message.name)?.setRate(message.expr)
+            true
+        }
+        is SceneControlMessage.SetEmitterMaxAlive -> {
+            target(message.name)?.setMaxAlive(message.maxAlive)
+            true
+        }
+        is SceneControlMessage.SetEmitterCapPolicy -> {
+            target(message.name)?.setCapPolicy(if (message.evictOldest) EmitterCapPolicy.EVICT_OLDEST else EmitterCapPolicy.STOP)
             true
         }
         else -> false

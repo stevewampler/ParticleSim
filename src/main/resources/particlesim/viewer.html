@@ -130,6 +130,8 @@
       <div id="outlinerSurfaces"></div>
       <h4>colliders</h4>
       <div id="outlinerColliders"></div>
+      <h4>emitters</h4>
+      <div id="outlinerEmitters"></div>
     </div>
     <div id="objectPanel">
       <div id="objectPanelTitle"></div>
@@ -734,6 +736,23 @@ function decodeFrame(buffer) {
     }
     return entries;
   };
+  // §10.4's emitter read path: one entry per named Emitter, unconditionally (every Emitter is
+  // named from construction - see SceneRegistry's own doc comment) - rate is the live evaluated
+  // number at this frame's t, not the expression source, same convention as a particle's mass/
+  // radius. evictOldest true means EmitterCapPolicy.EVICT_OLDEST, matching
+  // SetEmitterCapPolicy's own convention.
+  const readEmitterEntryList = () => {
+    const count = view.getInt32(offset, true); offset += 4;
+    const entries = new Array(count);
+    for (let i = 0; i < count; i++) {
+      const name = readString();
+      const rate = view.getFloat64(offset, true); offset += 8;
+      const maxAlive = view.getInt32(offset, true); offset += 4;
+      const evictOldest = view.getUint8(offset) !== 0; offset += 1;
+      entries[i] = { name, rate, maxAlive, evictOldest };
+    }
+    return entries;
+  };
 
   const t = view.getFloat64(offset, true); offset += 8;
   const step = Number(view.getBigInt64(offset, true)); offset += 8;
@@ -824,6 +843,7 @@ function decodeFrame(buffer) {
     colliders: readColliderRegistryList(),
     groupEnabled: readBoolNameMap(),
     fields: readFieldEntryList(),
+    emitters: readEmitterEntryList(),
   };
 
   // §10.2's "debug/--render-all mode... draws every collider as wireframe" - unconditional,
@@ -1111,7 +1131,7 @@ const objectPanelTitleEl = document.getElementById("objectPanelTitle");
 const objectPanelBodyEl = document.getElementById("objectPanelBody");
 
 let lastRegistrySignature = null;
-let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [], colliders: [], groupEnabled: {}, fields: [] };
+let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [], colliders: [], groupEnabled: {}, fields: [], emitters: [] };
 let selectedKind = null; // "groups" | "forces" | "constraints" | "surfaces" | "colliders"
 let selectedName = null;
 let latestVisibleIds = null; // this frame's server-side dot filter, updated every frame in applyFrame
@@ -1154,6 +1174,10 @@ function registrySignature(registry) {
     // changing, so it has to be part of the signature or a toggle would never repaint.
     colliders: registry.colliders.map((c) => [c.name, c.active]),
     groupEnabled: registry.groupEnabled,
+    // Names only, like forces/constraints/surfaces above - rate/maxAlive/evictOldest are live
+    // values that refresh via the emitters module's updateLive hook (skipping a focused input),
+    // not signature-driven rebuilds; only the *set* of emitters belongs here.
+    emitters: registry.emitters.map((e) => e.name),
   });
 }
 
@@ -1557,6 +1581,70 @@ registerEntityKind({
   },
 });
 
+// §10.4's emitter panel. `rate`/`maxAlive`/`evictOldest` all read from latestRegistry.emitters
+// directly (recomputed fresh every frame server-side, same as latestRegistry.fields) rather than
+// a separate cached list - there's no wireframe-style "geometry vs. registry" split here, an
+// emitter has nothing else to fetch.
+let emitterFieldInputs = null; // { rateInput, maxAliveInput, evictOldestCheckbox } for the open panel, or null
+registerEntityKind({
+  kind: "emitters",
+  getNames: (registry) => registry.emitters.map((e) => e.name),
+  renderPanel: () => {
+    const entry = latestRegistry.emitters.find((e) => e.name === selectedName);
+
+    // §10.4's expression-string editing, same convention as a particle's mass/radius: a plain
+    // text input, parsed server-side via ExpressionParser.parseScalar, always showing the live
+    // evaluated number rather than the original expression source (this class retains no source
+    // text to show). Edits only ever affect particles spawned after the edit - requirements.md
+    // §10.4's own "never retroactive" framing for this field.
+    const rateRow = document.createElement("div");
+    rateRow.className = "objectField";
+    rateRow.appendChild(document.createTextNode("rate: "));
+    const rateInput = document.createElement("input");
+    rateInput.type = "text";
+    rateInput.value = entry ? String(entry.rate) : "";
+    rateInput.addEventListener("change", () => {
+      sendEdit({ type: "set_emitter_rate", name: selectedName, expression: rateInput.value });
+    });
+    rateRow.appendChild(rateInput);
+    objectPanelBodyEl.appendChild(rateRow);
+
+    const maxAliveRow = document.createElement("div");
+    maxAliveRow.className = "objectField";
+    maxAliveRow.appendChild(document.createTextNode("max alive: "));
+    const maxAliveInput = document.createElement("input");
+    maxAliveInput.type = "number";
+    maxAliveInput.step = "1";
+    maxAliveInput.value = entry ? entry.maxAlive : "";
+    maxAliveInput.addEventListener("change", () => {
+      sendEdit({ type: "set_emitter_max_alive", name: selectedName, maxAlive: parseInt(maxAliveInput.value, 10) });
+    });
+    maxAliveRow.appendChild(maxAliveInput);
+    objectPanelBodyEl.appendChild(maxAliveRow);
+
+    // Two-valued policy (STOP/EVICT_OLDEST), same boolean-toggle convention as collider
+    // activation/group enable rather than a select for just two options.
+    const evictLabel = document.createElement("label");
+    const evictOldestCheckbox = document.createElement("input");
+    evictOldestCheckbox.type = "checkbox";
+    evictOldestCheckbox.checked = entry ? entry.evictOldest : false;
+    evictOldestCheckbox.addEventListener("change", (e) => {
+      sendEdit({ type: "set_emitter_cap_policy", name: selectedName, evictOldest: e.target.checked });
+    });
+    evictLabel.append(evictOldestCheckbox, document.createTextNode(" evict oldest at cap (unchecked: stop spawning)"));
+    objectPanelBodyEl.appendChild(evictLabel);
+
+    emitterFieldInputs = { rateInput, maxAliveInput, evictOldestCheckbox };
+  },
+  updateLive: () => {
+    const entry = latestRegistry.emitters.find((e) => e.name === selectedName);
+    if (!entry || !emitterFieldInputs) return;
+    if (document.activeElement !== emitterFieldInputs.rateInput) emitterFieldInputs.rateInput.value = String(entry.rate);
+    if (document.activeElement !== emitterFieldInputs.maxAliveInput) emitterFieldInputs.maxAliveInput.value = entry.maxAlive;
+    if (document.activeElement !== emitterFieldInputs.evictOldestCheckbox) emitterFieldInputs.evictOldestCheckbox.checked = entry.evictOldest;
+  },
+});
+
 // §10.3/§10.4's particle panel - the one kind with no outliner presence (see registerEntityKind's
 // own comment). Reached only via a right-click pick in 3D (see the contextmenu handler below),
 // which sets selectedKind/selectedName to ("particles", String(particleId)) directly - §10.3's
@@ -1667,6 +1755,7 @@ function renderObjectPanel() {
   objectPanelInfoEl = null;
   objectPanelInspectEl = null;
   particleFieldInputs = null;
+  emitterFieldInputs = null;
   if (selectedKind === null) {
     objectPanelEl.style.display = "none";
     return;

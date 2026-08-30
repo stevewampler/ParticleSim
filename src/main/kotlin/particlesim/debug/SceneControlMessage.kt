@@ -64,6 +64,19 @@ sealed interface SceneControlMessage {
      * `"mass"` or `"radius"`. */
     data class SetParticleScalarField(val particleId: Int, val field: String, val expr: ScalarExpr) : SceneControlMessage
 
+    /** §10.4's emitter live editing - three separate messages, not one, since the three fields
+     * have three different shapes (an expression string, a plain int, a two-valued policy) and
+     * none of them fit [particlesim.physics.FieldValue]'s Scalar/Vector split (`rate` is
+     * expression-capable like a particle's mass/radius, not a plain number; `capPolicy` is an
+     * enum, not a number at all) - reusing [SetScalarField]/[SetVectorField] for these would mean
+     * bending that mechanism's contract rather than fitting it. [SetEmitterCapPolicy] carries a
+     * `Boolean`, not the [particlesim.lifecycle.EmitterCapPolicy] enum itself, matching every
+     * other two-valued toggle already on this wire ([SetColliderActive], [SetGroupEnabled]) -
+     * `true` means [particlesim.lifecycle.EmitterCapPolicy.EVICT_OLDEST]. */
+    data class SetEmitterRate(val name: String, val expr: ScalarExpr) : SceneControlMessage
+    data class SetEmitterMaxAlive(val name: String, val maxAlive: Int) : SceneControlMessage
+    data class SetEmitterCapPolicy(val name: String, val evictOldest: Boolean) : SceneControlMessage
+
     companion object {
         /** Returns `null` for anything malformed or unrecognized, same "ignore, don't tear down
          * the connection" stance as [DragMessage.parse]/[TimeControlMessage.parse]. */
@@ -114,6 +127,26 @@ sealed interface SceneControlMessage {
                         return null
                     }
                     SetParticleScalarField(particleId, field, expr)
+                }
+                "set_emitter_rate" -> {
+                    val name = data["name"] as? String ?: return null
+                    val expression = data["expression"] as? String ?: return null
+                    val expr = try {
+                        ExpressionParser.parseScalar(expression)
+                    } catch (e: ExpressionException) {
+                        return null
+                    }
+                    SetEmitterRate(name, expr)
+                }
+                "set_emitter_max_alive" -> {
+                    val name = data["name"] as? String ?: return null
+                    val maxAlive = (data["maxAlive"] as? Number)?.toInt() ?: return null
+                    SetEmitterMaxAlive(name, maxAlive)
+                }
+                "set_emitter_cap_policy" -> {
+                    val name = data["name"] as? String ?: return null
+                    val evictOldest = data["evictOldest"] as? Boolean ?: return null
+                    SetEmitterCapPolicy(name, evictOldest)
                 }
                 else -> null
             }

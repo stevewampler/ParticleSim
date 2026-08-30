@@ -47,17 +47,24 @@ data class EmitterCheckpointState(
 class Emitter(
     val name: String,
     val group: String,
-    private val rate: ScalarExpr,
+    private var rate: ScalarExpr,
     private val position: VectorDistribution,
     private val velocity: VectorDistribution,
     private val mass: ScalarDistribution = ScalarDistribution.Constant(1.0),
     private val radius: ScalarDistribution? = null,
     private val lifetime: ScalarDistribution? = null,
-    val maxAlive: Int,
-    private val capPolicy: EmitterCapPolicy = EmitterCapPolicy.STOP,
+    maxAlive: Int,
+    private var capPolicy: EmitterCapPolicy = EmitterCapPolicy.STOP,
     masterSeed: Long,
     private val onWarning: (String) -> Unit = { System.err.println(it) },
 ) {
+    /** §10.4's live-editing read path for the cap - a plain mutable property (unlike [rate]/
+     * [capPolicy], which stay `private` and go through [currentRate]/[currentCapPolicy] instead)
+     * since existing callers already read this directly (e.g. `SparksStabilityTest`) and there's
+     * no derived/time-varying value to compute here the way [currentRate] has to. */
+    var maxAlive: Int = maxAlive
+        private set
+
     // Each emitter gets its own independent RNG sub-stream (§11, §14.4), seeded from the run's
     // master seed plus this emitter's stable name — not a shared stream, since which emitter
     // consumes the next value first would depend on iteration/scheduling order, not the seed.
@@ -122,6 +129,40 @@ class Emitter(
             accumulator -= 1.0
         }
         return EmitResult(spawned, evicted)
+    }
+
+    /** requirements.md §10.4's emitter read path: the live evaluated rate at [t], never the
+     * original expression source - same "show the current number, not the formula" convention
+     * as `ParticleStore.mass`/`radius`. Deliberately *not* clamped to zero like [update]'s own
+     * internal accumulation does - a pulsing/negative-going expression should be visible as
+     * negative, not silently floored just because it's being displayed. */
+    fun currentRate(t: Double): Double = rate.evaluate(t)
+
+    fun currentCapPolicy(): EmitterCapPolicy = capPolicy
+
+    /** §10.4's rate live-editing write path - an outright replace, same convention as
+     * `ParticleStore.setMass`/`setRadius`: a full replace is already the time-variance-preserving
+     * option once the replacement can itself be a dynamic expression, so there's no separate
+     * override layer to add. Only ever future-spawn-affecting, never retroactive - already-alive
+     * particles this emitter spawned under the old rate are untouched, matching this section's
+     * own "no retroactive edits" framing in requirements.md §10.4. */
+    fun setRate(expr: ScalarExpr) {
+        rate = expr
+    }
+
+    /** Rejects a non-positive cap: zero or fewer would mean this emitter can never spawn another
+     * particle, and [EmitterCapPolicy.STOP] would then silently and permanently block emission
+     * with no way back except another edit - the same "reject rather than accept a value that
+     * breaks the class's own invariants" stance `ParticleStore.setMass` takes on non-positive
+     * mass. */
+    fun setMaxAlive(value: Int): Boolean {
+        if (value <= 0) return false
+        maxAlive = value
+        return true
+    }
+
+    fun setCapPolicy(policy: EmitterCapPolicy) {
+        capPolicy = policy
     }
 
     /** Snapshots everything about this emitter that isn't recoverable from the static

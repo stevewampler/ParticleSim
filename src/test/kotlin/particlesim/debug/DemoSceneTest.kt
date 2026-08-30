@@ -3,6 +3,9 @@ package particlesim.debug
 import particlesim.core.ParticleStore
 import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
+import particlesim.lifecycle.Emitter
+import particlesim.lifecycle.EmitterCapPolicy
+import particlesim.lifecycle.VectorDistribution
 import particlesim.physics.NBodyGravity
 import particlesim.physics.UniformGravity
 import kotlin.test.Test
@@ -93,5 +96,60 @@ class DemoSceneTest {
             t = 0.0,
         )
         assertFalse(handled)
+    }
+
+    private fun emitter(name: String = "fountain") = Emitter(
+        name = name,
+        group = "sparks",
+        rate = ScalarExpr.of(10.0),
+        position = VectorDistribution.UniformBox(Vector3.ZERO, Vector3.ZERO),
+        velocity = VectorDistribution.UniformBox(Vector3.ZERO, Vector3.ZERO),
+        maxAlive = 100,
+        masterSeed = 1L,
+    )
+
+    @Test
+    fun `applies a rate edit to the matching named emitter and reports handled`() {
+        val e = emitter()
+        val handled = applyEmitterMessage(SceneControlMessage.SetEmitterRate("fountain", ScalarExpr.of(42.0)), listOf(e))
+        assertTrue(handled)
+        assertEquals(42.0, e.currentRate(t = 0.0))
+    }
+
+    @Test
+    fun `applies a maxAlive edit to the matching named emitter`() {
+        val e = emitter()
+        applyEmitterMessage(SceneControlMessage.SetEmitterMaxAlive("fountain", 250), listOf(e))
+        assertEquals(250, e.maxAlive)
+    }
+
+    @Test
+    fun `a non-positive maxAlive edit is rejected, leaving the previous cap in place`() {
+        val e = emitter()
+        applyEmitterMessage(SceneControlMessage.SetEmitterMaxAlive("fountain", 0), listOf(e))
+        assertEquals(100, e.maxAlive)
+    }
+
+    @Test
+    fun `applies a cap-policy edit to the matching named emitter`() {
+        val e = emitter()
+        assertEquals(EmitterCapPolicy.STOP, e.currentCapPolicy())
+        applyEmitterMessage(SceneControlMessage.SetEmitterCapPolicy("fountain", evictOldest = true), listOf(e))
+        assertEquals(EmitterCapPolicy.EVICT_OLDEST, e.currentCapPolicy())
+        applyEmitterMessage(SceneControlMessage.SetEmitterCapPolicy("fountain", evictOldest = false), listOf(e))
+        assertEquals(EmitterCapPolicy.STOP, e.currentCapPolicy())
+    }
+
+    @Test
+    fun `an emitter edit for a name that doesn't match anything is silently ignored, not an error`() {
+        val e = emitter()
+        val handled = applyEmitterMessage(SceneControlMessage.SetEmitterRate("nonexistent", ScalarExpr.of(42.0)), listOf(e))
+        assertTrue(handled) // the message *type* was recognized, even though nothing matched
+        assertEquals(10.0, e.currentRate(t = 0.0))
+    }
+
+    @Test
+    fun `applyEmitterMessage returns false for a message type it doesn't recognize`() {
+        assertFalse(applyEmitterMessage(SceneControlMessage.SetGroupEnabled("g", false), listOf(emitter())))
     }
 }

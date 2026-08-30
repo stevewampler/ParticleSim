@@ -6,6 +6,7 @@ import particlesim.collision.PlaneCollider
 import particlesim.collision.SphereCollider
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
+import particlesim.lifecycle.EmitterCapPolicy
 import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
@@ -232,6 +233,7 @@ object BinaryFrame {
         activeScene: String = "",
     ): ByteBuffer {
         val fieldEntries = collectEditableFields(registry)
+        val emitterEntries = collectEmitterEntries(registry, t)
         val size = HEADER_SIZE + ids.size * PARTICLE_SIZE +
             CONNECTION_HEADER_SIZE + connections.sumOf { CONNECTION_FIXED_SIZE + stringSize(connectionNames[it] ?: "") } +
             CAMERA_FLAG_SIZE + (if (camera != null) CAMERA_SIZE else 0) +
@@ -247,6 +249,7 @@ object BinaryFrame {
             nameListSize(registry.surfaces.keys) + groupListSize(registry.groups) +
             boolNameListSize(registry.colliders.keys) + boolNameListSize(registry.groupEnabled.keys) +
             fieldEntryListSize(fieldEntries) +
+            emitterEntryListSize(emitterEntries) +
             COLLIDER_HEADER_SIZE + colliders.sumOf { colliderEntrySize(it) } +
             EVENT_HEADER_SIZE + events.sumOf { eventEntrySize(it) } +
             nameListSize(availableScenes) + stringSize(activeScene)
@@ -337,6 +340,13 @@ object BinaryFrame {
                 is FieldValue.Scalar -> { buffer.put(SCALAR_KIND); buffer.putDouble(value.value) }
                 is FieldValue.Vector -> { buffer.put(VECTOR_KIND); putVector(buffer, value.value) }
             }
+        }
+        buffer.putInt(emitterEntries.size)
+        for (entry in emitterEntries) {
+            putString(buffer, entry.name)
+            buffer.putDouble(entry.rate)
+            buffer.putInt(entry.maxAlive)
+            buffer.put(if (entry.evictOldest) 1 else 0)
         }
         buffer.putInt(colliders.size)
         for (collider in colliders) {
@@ -438,6 +448,7 @@ object BinaryFrame {
             colliders = getColliderRegistryList(buf),
             groupEnabled = getBoolNameList(buf),
             fields = getFieldEntryList(buf),
+            emitters = getEmitterEntryList(buf),
         )
         val colliderCount = buf.int
         val colliders = (0 until colliderCount).map {
@@ -512,6 +523,19 @@ object BinaryFrame {
             }
         }
 
+    /** §10.4's emitter read path: one entry per named [particlesim.lifecycle.Emitter] in the
+     * registry (every emitter is named - see [SceneRegistry]'s own doc comment - so unlike
+     * [collectEditableFields] there's no per-entity opt-in check here). `rate` is the live
+     * evaluated number at this frame's [t], not the expression source - same convention as a
+     * particle's mass/radius. */
+    private fun collectEmitterEntries(registry: SceneRegistry, t: Double): List<RegistryEmitterEntry> =
+        registry.emitters.map { (name, emitter) ->
+            RegistryEmitterEntry(name, emitter.currentRate(t), emitter.maxAlive, emitter.currentCapPolicy() == EmitterCapPolicy.EVICT_OLDEST)
+        }
+
+    private fun emitterEntryListSize(entries: List<RegistryEmitterEntry>): Int =
+        REGISTRY_LIST_HEADER_SIZE + entries.sumOf { stringSize(it.name) + 8 + 4 + 1 }
+
     private fun colliderEntrySize(collider: Collider): Int {
         val shapeSize = when (collider) {
             is PlaneCollider -> 24 + 8
@@ -583,6 +607,17 @@ object BinaryFrame {
         }
     }
 
+    private fun getEmitterEntryList(buffer: ByteBuffer): List<DecodedEmitterEntry> {
+        val count = buffer.int
+        return (0 until count).map {
+            val name = getString(buffer)
+            val rate = buffer.double
+            val maxAlive = buffer.int
+            val evictOldest = buffer.get().toInt() != 0
+            DecodedEmitterEntry(name, rate, maxAlive, evictOldest)
+        }
+    }
+
     private fun getBoolNameList(buffer: ByteBuffer): Map<String, Boolean> {
         val count = buffer.int
         val result = LinkedHashMap<String, Boolean>(count)
@@ -636,6 +671,15 @@ private data class RegistryFieldEntry(val kind: String, val name: String, val fi
 /** [RegistryFieldEntry], decoded. [kind] is `"force"` or `"constraint"`. */
 data class DecodedFieldEntry(val kind: String, val name: String, val field: String, val value: FieldValue)
 
+/** One named [particlesim.lifecycle.Emitter]'s §10.4 read path - used internally by [encode]
+ * only, mirroring [RegistryFieldEntry]'s split from its decoded counterpart. */
+private data class RegistryEmitterEntry(val name: String, val rate: Double, val maxAlive: Int, val evictOldest: Boolean)
+
+/** [RegistryEmitterEntry], decoded. `evictOldest == true` means
+ * [particlesim.lifecycle.EmitterCapPolicy.EVICT_OLDEST], matching
+ * [particlesim.debug.SceneControlMessage.SetEmitterCapPolicy]'s own convention. */
+data class DecodedEmitterEntry(val name: String, val rate: Double, val maxAlive: Int, val evictOldest: Boolean)
+
 /** One named collider's §10.4 activation state — kept in the registry (unlike the unconditional
  * wireframe [DecodedCollider] section) so an inactive collider's name is still reachable to
  * reactivate it, even though it's no longer drawn. */
@@ -651,6 +695,7 @@ data class DecodedRegistry(
     val colliders: List<DecodedColliderEntry> = emptyList(),
     val groupEnabled: Map<String, Boolean> = emptyMap(),
     val fields: List<DecodedFieldEntry> = emptyList(),
+    val emitters: List<DecodedEmitterEntry> = emptyList(),
 )
 
 data class DecodedFrame(
