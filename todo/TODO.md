@@ -2699,10 +2699,65 @@ real prerequisite, not just unstarted — see the note below.
         against the live trampoline scene over a raw WebSocket connection
         (edit a mat particle's mass, confirm it holds across several
         subsequent frames instead of reverting).
-- [ ] The other four demos (`Drag`, `ParticleCollision`, `SpatialGrid`,
-      `MultiShape`) still standalone - would need their own `buildX():
-      XScenario` extraction (they currently build inline in `main()`)
-      before they could join the library's factory map.
+- [x] The other four demos (`Drag`, `ParticleCollision`, `SpatialGrid`,
+      `MultiShape`) now in the library too, as `DragScene`/
+      `ParticleCollisionScene`/`SpatialGridScene`/`MultiShapeScene` -
+      rather than extracting a `buildX(): XScenario` first (none of these
+      four had one; each built its scenario ad hoc inline in `main()`),
+      each demo's `main()` body was ported onto `DemoScene` directly, one
+      field per local `var`/`val` it used. Every original standalone
+      `run*Demo` gradle task is untouched and still works - this is a
+      second, additional way to reach the same scenarios, not a
+      replacement.
+      - **Restart got simpler, not harder**: all four standalone demos
+        had a hand-rolled `SceneControlMessage.Restart` branch that
+        rebuilt every mutable var from scratch (`ParticleCollisionDebugDemo`/
+        `SpatialGridDebugDemo`'s re-seeded `Random`, `DragDebugDemo`'s
+        whole chain). `SceneLibrary.restart()` already discards the
+        active scene and constructs a fresh instance from its factory
+        (see the entry above) - that branch is simply gone in each
+        `*Scene`, and what were `var store`/`var groups`/etc go back to
+        being plain `val` properties. Only state that legitimately
+        mutates *within* one instance's lifetime (spawned-ball count,
+        live collider list, the chain's current springs/dampers after a
+        break or delete) stays a `var`.
+      - **`applyEditableFieldMessage` gained the `SetParticleScalarField`
+        case** it was still missing (folded into the same function
+        rather than the fix from the entry above only covering scalar/
+        vector fields) - `SpatialGridScene`/`DragScene` wire it in the
+        same one call every other scene now uses.
+      - **`MultiShapeScene` got real outliner/edit presence it never had
+        standalone** - the original `MultiShapeDebugDemo` never built a
+        `SceneRegistry` or drained `sceneControlQueue` at all (the very
+        gap this session's first round found and worked around by
+        testing against `FlagDebugDemo` instead). Wrapping it now wires
+        both in: the four composed shapes' own named forces/constraints/
+        surface (`buildFlag`'s "wind"/"structural"/etc., now namespaced
+        `flag.wind` etc. by `ShapePlacement`'s instance-naming) are
+        outliner-reachable and editable like every other library scene.
+        Colliders aren't wired - `buildTire`/`buildBallBounce` don't
+        expose their own `Collider` objects (only wrapped inside a
+        `CollisionSystem`), and changing those shapes' return shape to
+        expose them is out of scope here.
+      - **Two file-local `private data class`es needed renaming**
+        (`NamedColliderRule`→`ScenePlaneColliderRule` in
+        `ParticleCollisionScene`, `BoxColliderRule`→`SpatialGridColliderRule`
+        in `SpatialGridScene`) - a Kotlin gotcha caught by the compiler,
+        not live testing: a top-level `private` class is file-scoped for
+        *access*, but its name still has to be unique across the whole
+        package, so reusing the standalone demo's exact class name in
+        the new scene file was a real redeclaration error.
+      - **Verified**: full test suite green, plus an end-to-end WebSocket
+        smoke test against all eight library scenes together - every
+        one's wire frame decodes with zero byte drift (forces/
+        constraints/colliders/groups sections all correctly populated
+        per scene), and each of the four new scenes' own interactive
+        mechanic specifically exercised: `dragScene` start/move/end on a
+        non-anchor link, `particleCollision`'s `delete_particle` (victim
+        removed, `ParticleDestroyed` event seen), `spatialGrid`'s
+        `remove_collider('floor')`. Not yet re-verified live in Chrome by
+        the user (the automated WebSocket check doesn't touch the
+        picker UI or 3D rendering).
 
 ## Shape library (§4.5, new requirement) — not yet phased
 - [x] Kotlin DSL: `ShapePlacement` (`particlesim.examples`) — an

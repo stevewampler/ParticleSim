@@ -2,14 +2,15 @@ package particlesim.debug
 
 /**
  * §9.6's scene library, live: `./gradlew runSceneLibraryDemo`, then open the URL it prints.
- * One always-on WebSocket/HTTP server hosting every scene that already has a reusable
- * `buildX(): XScenario` function - `flag`, `ballBounce`, `trampoline`, `sparks` - switchable at
+ * One always-on WebSocket/HTTP server hosting every debug demo this project has, switchable at
  * any time via `SceneControlMessage.LoadScene` without dropping the viewer connection (§9.6).
- * The other four demos (`Drag`, `ParticleCollision`, `SpatialGrid`, `MultiShape`) build their
- * scenario ad hoc inline in `main()` today and have real demo-specific interactive logic
- * (spawn timers, collider rules, drag-exclusion) that doesn't yet reduce to [DemoScene] - they
- * stay standalone `run*Demo` gradle tasks until a later pass wraps them too, rather than forcing
- * an invasive rewrite now for the sake of a "complete" library on day one.
+ * `flag`/`ballBounce`/`trampoline`/`sparks` (backed by a reusable `buildX(): XScenario`
+ * function) landed first; `drag`/`particleCollision`/`spatialGrid`/`multiShape` (which build
+ * their scenario ad hoc inline in the original standalone `main()`, with real demo-specific
+ * interactive logic - spawn timers, collider rules, drag-exclusion) followed once each one's
+ * logic had been ported onto [DemoScene] rather than left standalone indefinitely. Every
+ * original `run*Demo` gradle task still exists and still works unmodified - this is a second,
+ * additional way to reach the same scenarios, not a replacement.
  *
  * The viewer's `#controlPanel` shows a scene picker (§10.3) whenever `availableScenes` is
  * non-empty - every other demo leaves it `emptyList()`/`""` (this method's own defaults), so the
@@ -23,6 +24,10 @@ fun main() {
             "ballBounce" to { BallBounceScene() },
             "trampoline" to { TrampolineScene() },
             "sparks" to { SparksScene() },
+            "drag" to { DragScene(viewerInput.dragQueue) },
+            "particleCollision" to { ParticleCollisionScene() },
+            "spatialGrid" to { SpatialGridScene() },
+            "multiShape" to { MultiShapeScene() },
         ),
         defaultSceneName = "flag",
     )
