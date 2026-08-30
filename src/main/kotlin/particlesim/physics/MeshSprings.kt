@@ -32,17 +32,40 @@ class MeshSprings(
     edges: List<Grid.Edge>,
     store: ParticleStore,
     private val stiffness: Double,
-    private val extensionStiffness: Double = stiffness,
-    private val compressionStiffness: Double = stiffness,
+    private var extensionStiffness: Double = stiffness,
+    private var compressionStiffness: Double = stiffness,
     private val damping: Double = 0.0,
-    private val extensionDamping: Double = damping,
-    private val compressionDamping: Double = damping,
+    private var extensionDamping: Double = damping,
+    private var compressionDamping: Double = damping,
     private val minLength: Double = Spring.DEFAULT_MIN_LENGTH,
     private val breakThreshold: Double = Double.POSITIVE_INFINITY,
     private val extensionBreakThreshold: Double = breakThreshold,
     private val compressionBreakThreshold: Double = breakThreshold,
     override val name: String? = null,
-) : Force {
+) : Force, EditableFields {
+    /** Same rationale as [Spring.editableFields]: exposes the four fields [accumulate] actually
+     * reads, not the base [stiffness]/[damping] constructor defaults. Per-edge [restLength] is
+     * deliberately not exposed here — unlike stiffness/damping it isn't one shared value but an
+     * array computed per-edge at construction, and editing it live is a different feature. */
+    override fun editableFields(): Map<String, FieldValue> = mapOf(
+        "extensionStiffness" to FieldValue.Scalar(extensionStiffness),
+        "compressionStiffness" to FieldValue.Scalar(compressionStiffness),
+        "extensionDamping" to FieldValue.Scalar(extensionDamping),
+        "compressionDamping" to FieldValue.Scalar(compressionDamping),
+    )
+
+    override fun setField(field: String, value: FieldValue): Boolean {
+        if (value !is FieldValue.Scalar) return false
+        when (field) {
+            "extensionStiffness" -> extensionStiffness = value.value
+            "compressionStiffness" -> compressionStiffness = value.value
+            "extensionDamping" -> extensionDamping = value.value
+            "compressionDamping" -> compressionDamping = value.value
+            else -> return false
+        }
+        return true
+    }
+
     private val idA = IntArray(edges.size) { edges[it].a }
     private val idB = IntArray(edges.size) { edges[it].b }
     private val restLength = DoubleArray(edges.size) {

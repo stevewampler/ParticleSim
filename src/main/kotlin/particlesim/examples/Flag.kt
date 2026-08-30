@@ -96,14 +96,17 @@ fun buildFlag(
         Grid.structuralEdges(grid), store,
         stiffness = 200.0, damping = 1.0,
         breakThreshold = structuralBreakThreshold,
+        name = placement.name("structural"),
     )
     val shear = MeshSprings(
         Grid.shearEdges(grid), store,
         stiffness = 100.0, damping = 0.5,
+        name = placement.name("shear"),
     )
     val bend = MeshSprings(
         Grid.bendEdges(grid), store,
         stiffness = 20.0, damping = 0.2,
+        name = placement.name("bend"),
     )
 
     val triangles = Grid.triangles(grid)

@@ -5,6 +5,8 @@ import particlesim.examples.FLAG_DT
 import particlesim.examples.buildFlag
 import particlesim.physics.Constraint
 import particlesim.physics.DragConstraint
+import particlesim.physics.EditableFields
+import particlesim.physics.FieldValue
 import particlesim.physics.Integrator
 import particlesim.physics.Wind
 import particlesim.render.ArrowRenderer
@@ -111,6 +113,46 @@ fun main() {
     val allIds = scenario.grid.flatten()
     while (true) {
         val frameStart = System.nanoTime()
+        // §10.4's live-editing write path - this demo never drained sceneControlQueue before
+        // (confirmed via git history when the connection-naming work landed), which is exactly
+        // why the panel's number inputs used to silently revert: the server kept re-broadcasting
+        // the unedited value every frame because nothing ever applied the edit. Dispatches by
+        // (kind, name) against whichever force/constraint actually implements EditableFields,
+        // rather than one hardcoded name check per force the way the single-force debug demos
+        // do it - this scenario has several named, editable forces (structural/shear/bend/wind).
+        for (message in viewerInput.sceneControlQueue.drainAll()) {
+            when (message) {
+                is SceneControlMessage.SetScalarField -> {
+                    val target: EditableFields? = when (message.kind) {
+                        "force" -> scenario.forces.find { it.name == message.name } as? EditableFields
+                        "constraint" -> scenario.constraints.find { it.name == message.name } as? EditableFields
+                        else -> null
+                    }
+                    target?.setField(message.field, FieldValue.Scalar(message.value))
+                }
+                is SceneControlMessage.SetVectorField -> {
+                    val target: EditableFields? = when (message.kind) {
+                        "force" -> scenario.forces.find { it.name == message.name } as? EditableFields
+                        "constraint" -> scenario.constraints.find { it.name == message.name } as? EditableFields
+                        else -> null
+                    }
+                    target?.setField(message.field, FieldValue.Vector(message.value))
+                }
+                is SceneControlMessage.SetGroupEnabled -> scenario.groups.setEnabled(message.name, message.enabled)
+                is SceneControlMessage.SetParticleScalarField -> {
+                    if (scenario.store.contains(message.particleId)) {
+                        when (message.field) {
+                            "mass" -> scenario.store.setMass(message.particleId, message.expr, t)
+                            "radius" -> scenario.store.setRadius(message.particleId, message.expr, t)
+                        }
+                    }
+                }
+                is SceneControlMessage.RemoveCollider -> {} // this demo has no colliders
+                is SceneControlMessage.SetColliderActive -> {} // this demo has no colliders
+                is SceneControlMessage.DeleteParticle -> {} // not a feature of this demo (no destruction system wired)
+                SceneControlMessage.Restart -> {} // not built for this demo - see DragDebugDemo for the pattern if needed
+            }
+        }
         // §9.1's pacing policy, honored literally: dt (FLAG_DT) never changes here - only how
         // many whole dt-steps run this tick. A paused/step-once frame can run zero steps, in
         // which case t/step don't advance and the broadcast below just resends the frozen state
@@ -139,9 +181,14 @@ fun main() {
             step++
         }
         val arrowSamples = ArrowSampling.sample(windArrows, t).map { it.copy(vector = it.vector * arrowVisualScale) }
+        val structuralConnections = structural.activeConnections()
         renderer.broadcast(
             t, step, scenario.store, allIds,
-            connections = structural.activeConnections(),
+            connections = structuralConnections,
+            // Ties each drawn line back to "structural" (buildFlag names all three MeshSprings,
+            // but shear/bend never contribute connections above - see the connections= line -
+            // so they'd tag nothing anyway) for the cloth group's own spring/damper tab (§10.4).
+            connectionNames = structural.name?.let { name -> structuralConnections.associateWith { name } } ?: emptyMap(),
             camera = camera.evaluate(t, scene),
             sphereRadii = poleSphereRadii,
             meshes = listOf(clothMesh),

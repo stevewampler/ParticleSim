@@ -145,16 +145,34 @@ class Spring(
     private val idB: Int,
     private val restLength: Double,
     private val stiffness: Double,
-    private val extensionStiffness: Double = stiffness,
-    private val compressionStiffness: Double = stiffness,
+    private var extensionStiffness: Double = stiffness,
+    private var compressionStiffness: Double = stiffness,
     private val minLength: Double = DEFAULT_MIN_LENGTH,
     private val breakThreshold: Double = Double.POSITIVE_INFINITY,
     private val extensionBreakThreshold: Double = breakThreshold,
     private val compressionBreakThreshold: Double = breakThreshold,
     override val name: String? = null,
-) : Force, Breakable, PairwiseForce {
+) : Force, Breakable, PairwiseForce, EditableFields {
     override val particleA: Int get() = idA
     override val particleB: Int get() = idB
+
+    /** Exposes only the extension/compression pair actually read by [accumulate] — the base
+     * [stiffness] constructor default is never read again once those two are set, so editing
+     * it live would be a silent no-op. */
+    override fun editableFields(): Map<String, FieldValue> = mapOf(
+        "extensionStiffness" to FieldValue.Scalar(extensionStiffness),
+        "compressionStiffness" to FieldValue.Scalar(compressionStiffness),
+    )
+
+    override fun setField(field: String, value: FieldValue): Boolean {
+        if (value !is FieldValue.Scalar) return false
+        when (field) {
+            "extensionStiffness" -> extensionStiffness = value.value
+            "compressionStiffness" -> compressionStiffness = value.value
+            else -> return false
+        }
+        return true
+    }
 
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,
@@ -213,16 +231,33 @@ class Damper(
     private val idA: Int,
     private val idB: Int,
     private val damping: Double,
-    private val extensionDamping: Double = damping,
-    private val compressionDamping: Double = damping,
+    private var extensionDamping: Double = damping,
+    private var compressionDamping: Double = damping,
     private val minLength: Double = Spring.DEFAULT_MIN_LENGTH,
     private val breakThreshold: Double = Double.POSITIVE_INFINITY,
     private val extensionBreakThreshold: Double = breakThreshold,
     private val compressionBreakThreshold: Double = breakThreshold,
     override val name: String? = null,
-) : Force, Breakable, PairwiseForce {
+) : Force, Breakable, PairwiseForce, EditableFields {
     override val particleA: Int get() = idA
     override val particleB: Int get() = idB
+
+    /** Same rationale as [Spring.editableFields] — the base [damping] default is never read
+     * again once the extension/compression pair is set. */
+    override fun editableFields(): Map<String, FieldValue> = mapOf(
+        "extensionDamping" to FieldValue.Scalar(extensionDamping),
+        "compressionDamping" to FieldValue.Scalar(compressionDamping),
+    )
+
+    override fun setField(field: String, value: FieldValue): Boolean {
+        if (value !is FieldValue.Scalar) return false
+        when (field) {
+            "extensionDamping" -> extensionDamping = value.value
+            "compressionDamping" -> compressionDamping = value.value
+            else -> return false
+        }
+        return true
+    }
 
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,

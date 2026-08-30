@@ -152,6 +152,72 @@ class ForceComponentTest {
     }
 
     @Test
+    fun `EditableFields (§10_4) - Spring exposes extensionStiffness and compressionStiffness, not the base stiffness`() {
+        val spring = Spring(0, 1, restLength = 1.0, stiffness = 10.0, compressionStiffness = 2.0)
+        assertEquals(
+            mapOf("extensionStiffness" to FieldValue.Scalar(10.0), "compressionStiffness" to FieldValue.Scalar(2.0)),
+            spring.editableFields(),
+        )
+
+        assertTrue(spring.setField("extensionStiffness", FieldValue.Scalar(5.0)))
+        assertTrue(spring.setField("compressionStiffness", FieldValue.Scalar(6.0)))
+        assertEquals(
+            mapOf("extensionStiffness" to FieldValue.Scalar(5.0), "compressionStiffness" to FieldValue.Scalar(6.0)),
+            spring.editableFields(),
+        )
+
+        assertFalse(spring.setField("stiffness", FieldValue.Scalar(1.0))) // base param not exposed
+        assertFalse(spring.setField("extensionStiffness", FieldValue.Vector(Vector3.ZERO))) // wrong value kind
+    }
+
+    @Test
+    fun `EditableFields (§10_4) - Damper exposes extensionDamping and compressionDamping, not the base damping`() {
+        val damper = Damper(0, 1, damping = 3.0, extensionDamping = 5.0)
+        assertEquals(
+            mapOf("extensionDamping" to FieldValue.Scalar(5.0), "compressionDamping" to FieldValue.Scalar(3.0)),
+            damper.editableFields(),
+        )
+
+        assertTrue(damper.setField("extensionDamping", FieldValue.Scalar(1.0)))
+        assertTrue(damper.setField("compressionDamping", FieldValue.Scalar(2.0)))
+        assertEquals(
+            mapOf("extensionDamping" to FieldValue.Scalar(1.0), "compressionDamping" to FieldValue.Scalar(2.0)),
+            damper.editableFields(),
+        )
+
+        assertFalse(damper.setField("damping", FieldValue.Scalar(1.0))) // base param not exposed
+    }
+
+    @Test
+    fun `EditableFields (§10_4) - MeshSprings exposes all four stiffness+damping fields, not restLength`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3(0.0, 0.0, 0.0))
+        val b = store.create(position = Vector3(1.0, 0.0, 0.0))
+        val mesh = MeshSprings(
+            edges = listOf(particlesim.surface.Grid.Edge(a, b)),
+            store = store,
+            stiffness = 10.0,
+            damping = 1.0,
+        )
+        assertEquals(
+            mapOf(
+                "extensionStiffness" to FieldValue.Scalar(10.0),
+                "compressionStiffness" to FieldValue.Scalar(10.0),
+                "extensionDamping" to FieldValue.Scalar(1.0),
+                "compressionDamping" to FieldValue.Scalar(1.0),
+            ),
+            mesh.editableFields(),
+        )
+
+        assertTrue(mesh.setField("extensionStiffness", FieldValue.Scalar(20.0)))
+        assertTrue(mesh.setField("extensionDamping", FieldValue.Scalar(2.0)))
+        assertEquals(FieldValue.Scalar(20.0), mesh.editableFields()["extensionStiffness"])
+        assertEquals(FieldValue.Scalar(2.0), mesh.editableFields()["extensionDamping"])
+
+        assertFalse(mesh.setField("restLength", FieldValue.Scalar(1.0))) // per-edge array, not exposed
+    }
+
+    @Test
     fun `group disable (§10_4) - a disabled group's field force contributes nothing`() {
         val store = ParticleStore()
         val groups = Groups()

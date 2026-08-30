@@ -681,6 +681,57 @@ a recorded point (§9.4, `[stretch]`).
   input. This is what makes the fork idea buildable on a bounded number of
   checkpoints instead of needing one every single frame.
 
+### 9.6 Scene library & switching
+
+A **scene library** is a named catalog of complete, runnable simulations —
+every worked example and demo this project builds belongs in it, present
+and future — distinct from §4.5's shape library: a shape is a composable
+*fragment* (particles/forces/constraints/surface/colliders) meant to be
+instantiated one or more times *into* a larger scene; a scene-library
+entry is a whole simulation in its own right, including things a shape
+doesn't carry — spawn/emitter logic (§14.1), interactive drag rules
+(§9.4), scripted camera (§10.1), and its own registry (§10.3). The
+simplest possible scene-library entry (a single shape run standalone,
+nothing else) is a special case of the general one, not the general case
+itself.
+
+- **Selectable and switchable at any time**: the running viewer offers a
+  picker (§10.3) listing every scene in the library by name; choosing one
+  tears down whatever's currently running and starts the chosen scene from
+  its initial state, without dropping the viewer's connection or requiring
+  a page reload — the same connection just starts receiving frames from a
+  different simulation. Deliberately not "restart the process and
+  reconnect": an interactive session is meant to survive a scene change
+  the same way it already survives §9.1's pause/step/speed controls.
+- **What a switch resets**: sim time `t`/step back to zero; the particle
+  store/groups/forces/constraints rebuilt from the new scene's own
+  definition (never merged with the old one); the registry (§10.3)
+  rebuilt to match; the camera reset to the new scene's own scripted pose
+  (§10.1), if it has one. Viewer-side ephemeral state the new scene has no
+  way to know about — selection, hidden-group/-surface toggles, the event
+  log — is cleared too, the same "nothing carries over" rule applied
+  consistently on both sides of the connection.
+- **One dispatch/reset path, not one per scene**: every scene's viewer
+  input (drag targets, §9.4; scene-control edits, §10.4) is drained and
+  applied through one generic mechanism shared by every scene, not — as
+  today's individual demos each do it — a hand-rolled copy of that
+  dispatch loop per demo, each handling its own subset of message types.
+  That duplication is exactly what let one demo silently ignore a whole
+  class of edits before anyone noticed (a real bug hit during §10.4's own
+  build-out); a scene library would only multiply the number of copies
+  that duplication risks, so unifying the dispatch path is part of this
+  requirement, not a separate cleanup.
+- **Determinism** (§9.3, §11) holds per scene exactly as it already does
+  for a single long-lived run: loading the same named scene twice must
+  produce identical frames from `t=0`, the same guarantee already
+  required of a fresh process start.
+- **Both authoring front-ends** (§4.4): a scene-library entry is addressed
+  by name regardless of whether it's defined via the Kotlin DSL (a
+  function returning a scenario — today's only mechanism, e.g. the
+  existing `buildFlag`-style builders) or, once YAML scenes exist, a YAML
+  file — matching §4.4's "DSL first, YAML once the shape has stabilized"
+  precedent rather than building two separate catalogs.
+
 ## 10. Visualization & Rendering
 
 - Supports both **2D** (e.g. top-down or side projection) and **3D** views
@@ -844,6 +895,9 @@ actually controls and inspects that in the running viewer — global
 display toggles, per-object visibility, selection, and enough live
 readout to debug a scene without a separate tool.
 
+- **Scene picker**: a persistent control listing every scene in the
+  library (§9.6) by name; switching is available at any time the viewer
+  is connected, not just at startup.
 - **Global toggles**: scene aids not tied to any particular object —
   the ground grid and axes (§10) — can be switched on/off independent of
   everything else.
