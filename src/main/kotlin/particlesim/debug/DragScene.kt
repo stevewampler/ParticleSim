@@ -17,6 +17,7 @@ import particlesim.physics.UniformGravity
 import particlesim.render.ColorBy
 import particlesim.render.LineRenderer
 import particlesim.render.LineRendering
+import particlesim.render.SceneRegistry
 
 /**
  * §9.6 scene-library wrapping of [DragDebugDemo]'s worked example - see that file's own doc
@@ -72,7 +73,11 @@ class DragScene(private val dragQueue: DragMessageQueue) : DemoScene {
 
     private val drag = Drag("chain", coefficient = 1.5)
     private var forces: List<Force> = listOf(UniformGravity("chain", Vector3(0.0, -9.8, 0.0)), drag) + springs + dampers
-    private val fixedConstraints = listOf(FixedPosition("anchor", store.position(anchorId)))
+    // Named (unlike the standalone DragDebugDemo's identical constraint) specifically so §10.4's
+    // shared-position editing has a real, reachable target to verify against - a single-particle
+    // pin is the one case in this codebase where the shared-position and per-particle variants
+    // coincide, but the constructor used here is still the editable shared-position one.
+    private val fixedConstraints = listOf(FixedPosition("anchor", store.position(anchorId), name = "anchor"))
     private val destruction = DestructionSystem()
     private val integrator = Integrator()
     private var activeDrag: DragConstraint? = null
@@ -83,7 +88,7 @@ class DragScene(private val dragQueue: DragMessageQueue) : DemoScene {
     override fun ids(): List<Int> = ids
 
     override fun handleControl(message: SceneControlMessage, t: Double) {
-        if (applyEditableFieldMessage(message, forces, emptyList(), store, t)) return
+        if (applyEditableFieldMessage(message, forces, fixedConstraints, store, t)) return
         when (message) {
             is SceneControlMessage.DeleteParticle -> {
                 // The pinned anchor can be deleted too - FixedPosition just becomes a no-op for
@@ -149,6 +154,7 @@ class DragScene(private val dragQueue: DragMessageQueue) : DemoScene {
             connections = springs.map { it.particleA to it.particleB },
             lineColors = lineColors,
             connectionNames = connectionNames,
+            registry = SceneRegistry.build(forces = forces, constraints = fixedConstraints, groups = groups),
             events = events.toList(),
         )
         events.clear()

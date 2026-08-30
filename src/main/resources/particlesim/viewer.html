@@ -599,7 +599,8 @@ function applyFrame(frame) {
     obj.geometry = built.geometry;
     obj.userData.triangleVertexIds = built.triangleVertexIds;
     obj.userData.surfaceName = meshDecl.name; // "" when unnamed - right-click resolves this to a panel
-    obj.material = meshDecl.wireframe ? wireframeMeshMaterial() : solidMeshMaterial();
+    const wireframe = surfaceWireframeOverride.has(meshDecl.name) ? surfaceWireframeOverride.get(meshDecl.name) : meshDecl.wireframe;
+    obj.material = wireframe ? wireframeMeshMaterial() : solidMeshMaterial();
 
     const overlay = meshEdgeOverlays[i];
     overlay.geometry.dispose();
@@ -1132,6 +1133,13 @@ const hiddenGroups = new Set();
 const hiddenSurfaces = new Set();
 const hiddenForces = new Set(); // names of forces whose arrow samples (see NamedArrowSamples) are unchecked
 
+// §10.4's per-surface mesh-style toggle (shaded vs. wireframe): viewer-local, like the
+// visibility sets above, not a round trip to the engine - render style can't affect physics (the
+// same principle that keeps manual camera control viewer-side only), so there's no reason for it
+// to cross the wire as a SceneControlMessage. Keyed by surface name, present only once someone
+// overrides it; absent means "use the server's own meshDecl.wireframe default" (see applyFrame).
+const surfaceWireframeOverride = new Map();
+
 // A plain JSON.stringify(registry) can't detect a group's membership changing, since Set doesn't
 // serialize meaningfully (every group would stringify to the same shape regardless of contents) -
 // so member ids are flattened into a sorted array first, specifically so this check stays
@@ -1467,6 +1475,24 @@ registerEntityKind({
   getNames: (registry) => registry.surfaces,
   renderPanel: () => {
     addPanelToggle("show mesh", hiddenSurfaces);
+
+    // §10.4's mesh render-style toggle (shaded vs. wireframe) - viewer-local (see
+    // surfaceWireframeOverride's own doc comment on why this never crosses the wire). Checked
+    // reflects the *effective* style for this surface right now: an explicit override if one
+    // exists, else the server-authored meshDecl.wireframe default for this frame.
+    const meshDecl = latestMeshes.find((m) => m.name === selectedName);
+    const wireframeLabel = document.createElement("label");
+    const wireframeCheckbox = document.createElement("input");
+    wireframeCheckbox.type = "checkbox";
+    wireframeCheckbox.checked = surfaceWireframeOverride.has(selectedName)
+      ? surfaceWireframeOverride.get(selectedName)
+      : (meshDecl ? meshDecl.wireframe : false);
+    wireframeCheckbox.addEventListener("change", (e) => {
+      surfaceWireframeOverride.set(selectedName, e.target.checked);
+    });
+    wireframeLabel.append(wireframeCheckbox, document.createTextNode(" wireframe"));
+    objectPanelBodyEl.appendChild(wireframeLabel);
+
     addPanelInspect();
   },
   updateLive: () => {

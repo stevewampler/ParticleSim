@@ -2180,13 +2180,19 @@ real prerequisite, not just unstarted — see the note below.
       unmigrated surfaces/constraints panels still render exactly as
       before (no regression from the module-lookup fallback path). No
       console errors on a fresh page load or after interaction.
-- [ ] Migrate constraints/surfaces/colliders to the self-registering
+- [x] Migrate constraints/surfaces/colliders to the self-registering
       entity-kind module system above — no longer `[stretch]`/low-reward:
       §10.4's live-editing spec (below) needs a real per-object panel for
       colliders and constraints (activation toggle, numeric parameter
       controls), which the old hardcoded dispatch path isn't built to
       carry. This is now a real prerequisite for that work, not deferred
       mechanical cleanup with no consumer.
+      Done in `b445b778` ("Migrate constraints/surfaces/colliders to
+      self-registering entity-kind modules") — pure code-move, no behavior
+      change, verified live in Chrome across `FlagDebugDemo` (groups,
+      forces, constraints, surface mesh) and `SpatialGridDebugDemo`
+      (collider active toggle + remove). Checkbox was left stale until now;
+      the code has been merged since 2026-08-26.
 - [~] Live parameter tweaking (viewer writes back into a running
       entity's numeric parameters) — fully specified via a direct
       entity-by-entity walkthrough with the user (requirements.md §10.4).
@@ -2595,14 +2601,76 @@ real prerequisite, not just unstarted — see the note below.
           both in a flex column (`#leftColumn`) so they share the
           available vertical space and the object panel scrolls
           internally instead of overlapping.
-    - [ ] Constraints/surfaces/emitters editing still to do: FixedPosition's
-          shared-position variant (deferred above alongside Spring/Damper),
-          surfaces' mesh-style toggle, and emitters as a new outliner
-          category with rate/maxAlive/capPolicy - not built yet. No demo
-          in this codebase currently has an emitter (Phase 6 lifecycle
-          feature) to verify emitter UI against - confirm one exists (or
-          build a minimal one) before wiring the outliner category, rather
-          than shipping UI with nothing real to point it at.
+    - [x] `FixedPosition`'s shared-position variant made editable
+          (requirements.md §10.4: "only the shared-position variant... is
+          editable. The per-particle-pinned variant... is view-only").
+          `FixedPosition` now implements `EditableFields`, exposing a
+          `position` vector field only when `perParticlePosition == null`;
+          `setField` rejects (`false`) on the per-particle variant, an
+          unknown field, or the wrong value kind, same discipline as every
+          other `EditableFields` implementer. Wiring through
+          `collectEditableFields`/`DemoScene.target`/`applyEditableFieldMessage`
+          needed no changes - both are already generic over any
+          `Constraint` that happens to implement `EditableFields`.
+          Component-tested (`ConstraintTest`): the shared variant's field
+          round-trips and rejects a wrong-kind/unknown field; the
+          per-particle variant (`atCurrentPositions`) reports an empty map
+          and rejects any `setField` call. `BinaryFrameTest` re-run clean
+          after the change (its existing `FixedPosition("pole", ...,
+          name = "pole-anchor")` fixture is the shared-position variant, so
+          it now emits one more registry field entry) - not assumed safe.
+          No demo had a *named* shared-position `FixedPosition` to verify
+          against (every existing one is either unnamed or
+          `atCurrentPositions`) - named `DragScene`'s single-particle
+          "anchor" constraint (`name = "anchor"`) for this, and gave
+          `DragScene` its first real `SceneRegistry` (it previously sent
+          none at all, so nothing in it was outliner-reachable) plus wired
+          `fixedConstraints` into `applyEditableFieldMessage` (previously
+          `emptyList()`). **Verified live in Chrome** against the `drag`
+          scene: "anchor" appears under CONSTRAINTS, its panel shows
+          `position: 0, 4, 0`; editing the y field to `6` immediately
+          snapped the anchor there, which was forceful enough to break
+          `link-0`'s spring (logged in EVENTS) - real proof the edit
+          reached the running simulation, not just the display. No console
+          errors.
+    - [x] Surfaces' mesh-style toggle (shaded vs. wireframe, requirements.md
+          §10.4). Resolved as **viewer-local, not a new wire message** -
+          unlike collider/group activation, render style can't affect
+          physics and doesn't need syncing across clients, the same
+          principle that already keeps manual camera control off this
+          interface (see this file's CLAUDE.md-level framing). `FieldValue`
+          being `Scalar`/`Vector` only (no `Boolean`) was a signal to keep
+          this off the `EditableFields` mechanism entirely, not an
+          obstacle to add a third variant for. Implementation: a
+          `surfaceWireframeOverride: Map<name, boolean>` alongside the
+          existing `hiddenGroups`/`hiddenSurfaces`/`hiddenForces` viewer-
+          local sets; the per-frame mesh material pick
+          (`obj.material = ... ? wireframeMeshMaterial() :
+          solidMeshMaterial()`) now checks the override first, falling back
+          to the server-authored `meshDecl.wireframe` default. The
+          surfaces panel gained a "wireframe" checkbox next to "show mesh",
+          checked state reflecting the *effective* style (override if
+          present, else the server default) at render time - no
+          `updateLive` refresh, matching the existing precedent of the
+          collider panel's "active" checkbox (also set once per selection,
+          not live-refreshed). Falls back to `false` if `latestMeshes` has
+          no entry for the selected surface this frame (can't happen for
+          any demo today - every scene sends its one named surface's mesh
+          unconditionally every frame, and no `SurfaceRenderer(...,
+          wireframe = true)` exists anywhere in this codebase to make the
+          fallback's value even visible - but worth revisiting if a future
+          demo ever constructs one wireframe-by-default). **Verified live
+          in Chrome** against the
+          `flag` scene's "cloth-mesh": checking "wireframe" switched the
+          mesh from solid blue shading to wireframe-only rendering with the
+          selected surface's vertex dots still on top; unchecking reverted
+          it. No console errors.
+    - [ ] Emitters as a new outliner category with rate/maxAlive/capPolicy -
+          not built yet. No demo in this codebase currently has an emitter
+          (Phase 6 lifecycle feature) to verify emitter UI against -
+          confirm one exists (or build a minimal one) before wiring the
+          outliner category, rather than shipping UI with nothing real to
+          point it at.
 
 ## Scene library (§9.6, new requirement) — not yet phased
 - [x] Engine-side switching mechanism, scoped to the four demos that

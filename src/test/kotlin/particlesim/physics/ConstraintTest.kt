@@ -114,6 +114,29 @@ class ConstraintTest {
     }
 
     @Test
+    fun `FixedPosition's shared-position variant exposes an editable position field`() {
+        val shared = FixedPosition("g", Vector3(1.0, 2.0, 3.0))
+        assertEquals(mapOf("position" to FieldValue.Vector(Vector3(1.0, 2.0, 3.0))), shared.editableFields())
+
+        assertEquals(true, shared.setField("position", FieldValue.Vector(Vector3(4.0, 5.0, 6.0))))
+        assertEquals(mapOf("position" to FieldValue.Vector(Vector3(4.0, 5.0, 6.0))), shared.editableFields())
+
+        assertEquals(false, shared.setField("position", FieldValue.Scalar(1.0)), "wrong value kind")
+        assertEquals(false, shared.setField("bogus", FieldValue.Vector(Vector3.ZERO)), "unknown field name")
+    }
+
+    @Test
+    fun `FixedPosition's per-particle-pinned variant is view-only, per requirements md §10_4`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        groups.add("g", store.create())
+        val perParticle = FixedPosition.atCurrentPositions("g", store, groups)
+
+        assertEquals(emptyMap(), perParticle.editableFields())
+        assertEquals(false, perParticle.setField("position", FieldValue.Vector(Vector3.ZERO)))
+    }
+
+    @Test
     fun `FixedVelocity name defaults to null`() {
         assertEquals(null, FixedVelocity("g", Vector3.ZERO).name)
         assertEquals("driven", FixedVelocity("g", Vector3.ZERO, name = "driven").name)

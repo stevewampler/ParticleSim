@@ -43,10 +43,10 @@ interface Constraint {
  * step — a disabled group's members are ordinary, unpinned particles for as long as it's off. */
 class FixedPosition private constructor(
     private val group: String,
-    private val position: Vector3?,
+    private var position: Vector3?,
     private val perParticlePosition: Map<Int, Vector3>?,
     override val name: String? = null,
-) : Constraint {
+) : Constraint, EditableFields {
     constructor(group: String, position: Vector3, name: String? = null) : this(group, position, null, name)
 
     override fun applyPosition(store: ParticleStore, groups: Groups, t: Double) {
@@ -58,6 +58,19 @@ class FixedPosition private constructor(
     }
 
     override fun pinnedIds(groups: Groups): Set<Int> = if (groups.isEnabled(group)) groups.membersOf(group) else emptySet()
+
+    /** requirements.md §10.4: only the shared-position variant (one [Vector3] for the whole
+     * group) is editable. The per-particle-pinned variant ([atCurrentPositions]) stays view-only
+     * — editing it would mean editing individual map entries, out of scope here — so it reports
+     * no fields at all rather than a field [setField] would then have to reject. */
+    override fun editableFields(): Map<String, FieldValue> =
+        if (perParticlePosition == null) mapOf("position" to FieldValue.Vector(position!!)) else emptyMap()
+
+    override fun setField(field: String, value: FieldValue): Boolean {
+        if (perParticlePosition != null || field != "position" || value !is FieldValue.Vector) return false
+        position = value.value
+        return true
+    }
 
     companion object {
         /** Pins every current member of [group] to wherever it is right now, individually. */
