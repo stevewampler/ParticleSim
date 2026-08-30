@@ -2346,9 +2346,10 @@ real prerequisite, not just unstarted — see the note below.
           implemented and verified live in Chrome, across four rounds of
           direct design walkthrough with the user (multi-group selection,
           the `entityKindModules`/outliner-shape gap, mass/radius storage,
-          and wire addressing) followed by one implementation pass. Still
-          not built: a group's tab surfacing spring/damper params for
-          every fully-contained Spring/Damper/MeshSprings, per-particle
+          and wire addressing) followed by one implementation pass. A
+          group's tab surfacing spring/damper params for every
+          fully-contained Spring/Damper/MeshSprings is now built too (see
+          the dedicated bullet below); still not built: per-particle
           render override, per-group color override + visibility toggle.
           - **Wire**: `BinaryFrame`'s per-particle payload grew from 52 to
             68 bytes - `mass`/`radius` (`f64`, radius `NaN` when unset,
@@ -2549,8 +2550,51 @@ real prerequisite, not just unstarted — see the note below.
           correctly with no corruption to sections that decode after the
           connection list in the same frame, the same specific risk the
           original scalar-field wire-path bug taught this project to
-          check for rather than assume away. No consuming UI yet - the
-          decoded `forceName` isn't read anywhere in `viewer.html` today.
+          check for rather than assume away.
+    - [x] Group's spring/damper tab - the connection-naming infra's actual
+          consumer, built and verified live in Chrome. `Spring` exposes
+          `extensionStiffness`/`compressionStiffness`, `Damper` exposes
+          `extensionDamping`/`compressionDamping`, `MeshSprings` exposes
+          all four, via `EditableFields` - deliberately not the base
+          `stiffness`/`damping` constructor defaults, which are never read
+          again once the extension/compression pair is set and would be a
+          silent no-op to edit. `buildFlag`'s three `MeshSprings` are now
+          named (`structural`/`shear`/`bend`); `FlagGoldenTest`/
+          `FlagYamlParityTest` re-run clean after that change, not assumed
+          safe. Client computes "fully contained" per force name by
+          grouping this frame's tagged `connections` by `forceName` and
+          checking every one's both endpoints are in the selected group's
+          `memberIds` - a name with zero tagged connections this frame
+          never appears at all (a broken `MeshSprings` or an untagged
+          force), avoiding the vacuous-truth trap of "every connection in
+          an empty set is inside the group." `renderEditableFields`/
+          `updateEditableFieldsLive` (previously always reading/writing
+          one shared `currentFieldInputs` global) now take an explicit
+          inputs-store parameter, so the group panel can track several
+          named forces' fields independently in one panel without the
+          last one clobbering the others; existing forces/constraints
+          call sites pass `currentFieldInputs` explicitly to keep their
+          old behavior. Only `structural` ever appears in the cloth
+          group's tab, not `shear`/`bend` - `FlagDebugDemo` only ever
+          draws `structural`'s connections as lines (a pre-existing,
+          deliberate choice against visual clutter), so the other two
+          never get wire-tagged connections to check containment against;
+          they're still named now and appear individually in the outliner
+          forces list with their own editable fields, just not in a
+          group's tab. Two real bugs surfaced during Chrome verification,
+          both fixed: (1) `FlagDebugDemo` had never drained
+          `sceneControlQueue` at all (confirmed via git history) - every
+          §10.4 edit sent to it, not just this feature's, silently
+          reverted every frame because nothing ever applied it; added the
+          dispatch loop, resolving force/constraint targets generically by
+          name rather than one hardcoded check per force. (2) the
+          outliner/object-panel column and the bottom-left control panel
+          were two independently `position: fixed` elements with no
+          awareness of each other's height, so this feature's extra
+          content ran the object panel into the control panel; wrapped
+          both in a flex column (`#leftColumn`) so they share the
+          available vertical space and the object panel scrolls
+          internally instead of overlapping.
     - [ ] Constraints/surfaces/emitters editing still to do: FixedPosition's
           shared-position variant (deferred above alongside Spring/Damper),
           surfaces' mesh-style toggle, and emitters as a new outliner
