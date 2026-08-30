@@ -63,6 +63,10 @@
     width: 90px; font: 11px monospace; background: rgba(255,255,255,0.1);
     color: #ddd; border: 1px solid rgba(255,255,255,0.25); border-radius: 3px;
   }
+  #sceneSelect {
+    width: 100%; font: 11px monospace; background: rgba(255,255,255,0.1);
+    color: #ddd; border: 1px solid rgba(255,255,255,0.25); border-radius: 3px; padding: 2px 4px;
+  }
   #leftPanel {
     font: 12px/1.5 monospace; color: #ddd;
     flex: 1 1 auto; min-height: 0; overflow-y: auto;
@@ -133,6 +137,10 @@
     </div>
   </div>
   <div id="controlPanel">
+    <section id="scenePicker" style="display:none;">
+      <h4>scene</h4>
+      <select id="sceneSelect"></select>
+    </section>
     <section>
       <h4>display</h4>
       <label><input type="checkbox" id="gridToggle" checked> grid</label><br>
@@ -854,7 +862,15 @@ function decodeFrame(buffer) {
     }
   }
 
-  return { t, step, particles, connections, camera: cam, spheres, meshes, arrowGroups, visibleIds, registry, colliders, events };
+  // §9.6's scene library - empty list/name for every demo that isn't a SceneLibrary-backed
+  // runner, the same "absent means empty" convention the rest of this frame already uses.
+  const availableScenes = readNameList();
+  const activeScene = readString();
+
+  return {
+    t, step, particles, connections, camera: cam, spheres, meshes, arrowGroups, visibleIds, registry, colliders, events,
+    availableScenes, activeScene,
+  };
 }
 
 // --- Time controls (§9.1/§10.3) -----------------------------------------------------------
@@ -883,14 +899,82 @@ document.getElementById("stepOnceBtn").addEventListener("click", () => {
   playPauseBtn.textContent = "▶ play";
 });
 
+// §9.6's scene switch (restart is now "reload the active scene by name," the same
+// discard-and-rebuild the picker below triggers for a different name): every bit of
+// viewer-side state a new scene has no way to know about gets cleared, not just stats/events -
+// selection and the per-object panel it drives, plus the hidden-group/-surface/-force toggles,
+// which would otherwise silently persist onto a scene whose names may not even mean the same
+// thing (or exist at all).
+function resetViewerStateForSceneChange() {
+  resetStats();
+  resetEventLog();
+  selectedKind = null;
+  selectedName = null;
+  hiddenGroups.clear();
+  hiddenSurfaces.clear();
+  hiddenForces.clear();
+  updateSelectionHighlight();
+  renderObjectPanel();
+  // applyFrame only ever writes the camera when frame.camera is non-null (§10.1's scripted
+  // camera is opt-in per scene) - a scene with no scripted camera would otherwise inherit
+  // whatever pose the *previous* scene's orbit last computed, leaving the new scene badly
+  // framed or off-screen. Unconditionally forcing scripted mode here (not just resetting the
+  // pose while already in it) matters just as much: if the user had ever manually orbited the
+  // view - on this scene or an earlier one - cameraMode stays "manual" indefinitely until they
+  // click "return to scripted," so a reset gated on cameraMode === "scripted" would silently
+  // no-op and leave the camera exactly where they last dragged it. A scene switch is a big
+  // enough context change that carrying over a manual framing from the *previous* scene doesn't
+  // make sense either way, so this always drops back to scripted and the default pose - a scene
+  // with its own scripted camera overwrites it on the very next frame (costs nothing there).
+  cameraMode = "scripted";
+  returnToScriptedEl.style.display = "none";
+  lastScriptedLookAt.set(0, 0, 0);
+  camera.position.set(6, 4, 8);
+  camera.up.set(0, 1, 0);
+  camera.lookAt(0, 0, 0);
+}
+
 // §10.3's restart: a SceneControlMessage (not TimeControlMessage - this replaces the scene
 // itself, not just pacing), handled per-demo (currently just ParticleCollisionDebugDemo; a demo
 // that doesn't understand "restart" just ignores it, same "unrecognized types are silently
 // dropped" stance every message type here already takes).
 document.getElementById("restartBtn").addEventListener("click", () => {
   send({ type: "restart" });
-  resetStats();
-  resetEventLog();
+  resetViewerStateForSceneChange();
+});
+
+// §9.6's scene picker - hidden (see its own CSS) until a frame reports a non-empty
+// availableScenes, which only a SceneLibrary-backed runner (SceneLibraryDebugDemo) ever does.
+const scenePickerEl = document.getElementById("scenePicker");
+const sceneSelectEl = document.getElementById("sceneSelect");
+let lastAvailableScenes = null; // avoid rebuilding <option>s (and losing the user's open dropdown) every frame
+
+function updateScenePicker(frame) {
+  if (frame.availableScenes.length === 0) {
+    scenePickerEl.style.display = "none";
+    lastAvailableScenes = null;
+    return;
+  }
+  scenePickerEl.style.display = "block";
+  const namesChanged = !lastAvailableScenes ||
+    lastAvailableScenes.length !== frame.availableScenes.length ||
+    frame.availableScenes.some((name, i) => name !== lastAvailableScenes[i]);
+  if (namesChanged) {
+    sceneSelectEl.innerHTML = "";
+    for (const name of frame.availableScenes) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      sceneSelectEl.appendChild(option);
+    }
+    lastAvailableScenes = frame.availableScenes;
+  }
+  if (document.activeElement !== sceneSelectEl) sceneSelectEl.value = frame.activeScene;
+}
+
+sceneSelectEl.addEventListener("change", () => {
+  send({ type: "load_scene", name: sceneSelectEl.value });
+  resetViewerStateForSceneChange();
 });
 
 document.querySelectorAll("#speedButtons button").forEach((btn) => {
@@ -1611,6 +1695,7 @@ function connect() {
     updateEventLog(frame);
     clearSelectionIfParticleDestroyed(frame);
     updateOutliner(frame.registry);
+    updateScenePicker(frame);
   };
 }
 connect();
