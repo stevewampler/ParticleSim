@@ -139,6 +139,7 @@ fun main() {
                 is SceneControlMessage.SetColliderActive -> {
                     liveColliderRules.find { it.collider.name == message.name }?.collider?.active = message.active
                 }
+                is SceneControlMessage.LoadScene -> {} // §9.6 scene switching - this standalone demo isn't in the library, see SceneLibraryDebugDemo
                 is SceneControlMessage.SetGroupEnabled -> groups.setEnabled(message.name, message.enabled)
                 // This demo has zero gravity and no named forces/constraints (see its own doc
                 // comment) - see ParticleCollisionDebugDemo for the wired field-edit equivalent.

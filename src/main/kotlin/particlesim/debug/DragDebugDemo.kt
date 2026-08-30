@@ -190,6 +190,7 @@ fun main() {
                 }
                 is SceneControlMessage.RemoveCollider -> {} // this demo has no colliders
                 is SceneControlMessage.SetColliderActive -> {} // this demo has no colliders
+                is SceneControlMessage.LoadScene -> {} // §9.6 scene switching - this standalone demo isn't in the library, see SceneLibraryDebugDemo
                 is SceneControlMessage.SetGroupEnabled -> groups.setEnabled(message.name, message.enabled)
                 // Nothing here is named yet, so nothing is reachable via §10.4's field-edit
                 // messages - see ParticleCollisionDebugDemo for the wired equivalent.

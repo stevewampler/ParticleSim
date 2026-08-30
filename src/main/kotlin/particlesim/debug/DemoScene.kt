@@ -1,0 +1,67 @@
+package particlesim.debug
+
+import particlesim.collision.Collider
+import particlesim.core.ParticleStore
+import particlesim.render.CameraPose
+import particlesim.render.Color
+import particlesim.render.NamedArrowSamples
+import particlesim.render.SceneRegistry
+import particlesim.render.SurfaceRenderer
+
+/**
+ * Everything one [DemoScene.frame] call needs to hand [DebugRenderer.broadcast] besides `t`,
+ * `step`, `store`, and `ids` (which the runner already has) - one data class per frame, not one
+ * `broadcast` call per scene, so every scene's argument marshalling goes through the same single
+ * call site in the generic runner instead of each scene independently coupling to
+ * [DebugRenderer.broadcast]'s signature (exactly the per-scene-duplication requirements.md §9.6
+ * calls out). Every field defaults the same way [DebugRenderer.broadcast]'s own optional
+ * parameters do, so a scene with nothing to say about (e.g.) meshes just doesn't set it.
+ */
+data class SceneFrame(
+    val connections: List<Pair<Int, Int>> = emptyList(),
+    val camera: CameraPose? = null,
+    val lineColors: Map<Pair<Int, Int>, Color> = emptyMap(),
+    val connectionNames: Map<Pair<Int, Int>, String> = emptyMap(),
+    val sphereRadii: Map<Int, Double> = emptyMap(),
+    val meshes: List<SurfaceRenderer> = emptyList(),
+    val arrowGroups: List<NamedArrowSamples> = emptyList(),
+    val visibleIds: Set<Int>? = null,
+    val registry: SceneRegistry = SceneRegistry.build(),
+    val colliders: List<Collider> = emptyList(),
+    val events: List<SimEvent> = emptyList(),
+)
+
+/**
+ * §9.6's scene library entry point: one runnable simulation, built fresh by the library's
+ * factory function each time it's loaded (see the generic runner) so [LoadScene]/[Restart] are
+ * both just "discard this instance, construct a new one" - no scene implements its own reset
+ * logic. [dt] and [store] are read once per scene instance (a scene's own fixed timestep and
+ * particle store never change identity across its lifetime, unlike `ids()`, which some scenes -
+ * e.g. an emitter-driven one - need to recompute every frame as particles spawn/die).
+ *
+ * Deliberately has no drag hook: [DragMessage.Move]'s target-velocity estimate is dt-sensitive
+ * (`DragConstraint.updateTarget`) and needs draining at physics-step cadence, the same cadence
+ * [step] already runs at - not once per rendered frame, which could be several steps behind. A
+ * scene that supports dragging (see `FlagScene`) is handed the shared `DragMessageQueue`
+ * directly by the runner and drains it itself from inside [step], rather than the runner
+ * draining it once per frame and losing that per-step granularity.
+ *
+ * [handleControl] defaults to doing nothing: a scene ignoring a message type it has no use for
+ * (most scenes have no colliders to remove) is the correct outcome, the same as the `{}` no-op
+ * branches every hand-rolled demo `when` already had - returning a "was this handled" flag would
+ * invite a caller-side branch with nothing useful to do in either case, so there isn't one.
+ */
+interface DemoScene {
+    val dt: Double
+    val store: ParticleStore
+
+    fun ids(): List<Int>
+
+    /** Advance physics by exactly [dt] - the runner calls this in a loop and increments `t`
+     * by [dt] itself, so a scene never advances time on its own. */
+    fun step(t: Double)
+
+    fun handleControl(message: SceneControlMessage, t: Double) {}
+
+    fun frame(t: Double): SceneFrame
+}

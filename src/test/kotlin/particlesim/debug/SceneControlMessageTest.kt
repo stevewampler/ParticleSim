@@ -40,6 +40,19 @@ class SceneControlMessageTest {
     }
 
     @Test
+    fun `parses load_scene with its name`() {
+        assertEquals(
+            SceneControlMessage.LoadScene("trampoline"),
+            SceneControlMessage.parse("""{"type": "load_scene", "name": "trampoline"}"""),
+        )
+    }
+
+    @Test
+    fun `rejects load_scene with no name at all`() {
+        assertNull(SceneControlMessage.parse("""{"type": "load_scene"}"""))
+    }
+
+    @Test
     fun `parses set_particle_scalar_field with a plain-number expression as a Constant`() {
         assertEquals(
             SceneControlMessage.SetParticleScalarField(42, "mass", ScalarExpr.Constant(9.0)),

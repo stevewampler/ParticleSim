@@ -2560,6 +2560,76 @@ real prerequisite, not just unstarted — see the note below.
           build a minimal one) before wiring the outliner category, rather
           than shipping UI with nothing real to point it at.
 
+## Scene library (§9.6, new requirement) — not yet phased
+- [x] Engine-side switching mechanism, scoped to the four demos that
+      already have a `buildX(): XScenario` builder (`flag`, `ballBounce`,
+      `trampoline`, `sparks`) - user's explicit scope choice over doing all
+      eight demos in one pass, since the other four (`Drag`,
+      `ParticleCollision`, `SpatialGrid`, `MultiShape`) build their
+      scenario ad hoc inline in `main()` and carry real demo-specific
+      interactive logic (spawn timers, collider rules, drag-exclusion)
+      that doesn't yet reduce to the shape below.
+      - **`DemoScene`** (`particlesim.debug`): one runnable scene -
+        `dt`, `store`, `ids()`, `step(t)`, `handleControl(message, t)`
+        (defaults to a no-op), `frame(t): SceneFrame`. Deliberately has
+        no drag hook: `DragMessage.Move`'s target-velocity estimate is
+        dt-sensitive and needs draining at physics-step cadence, so a
+        scene that supports dragging (`FlagScene`) is handed the shared
+        `DragMessageQueue` directly and drains it itself inside `step`,
+        rather than the runner draining it once per frame and losing
+        that per-step granularity.
+      - **`SceneFrame`**: everything a scene hands back to `frame()` -
+        connections, camera, sphereRadii, meshes, arrowGroups,
+        connectionNames, visibleIds, registry, colliders, events - all
+        defaulted the same way `DebugRenderer.broadcast`'s own optional
+        params are, so the runner makes exactly one `broadcast` call for
+        every scene instead of each scene independently coupling to that
+        signature (the per-scene duplication §9.6 exists to eliminate,
+        moved one level down - caught in review before implementing).
+      - **`SceneLibrary`**: holds the named factory map and the one live
+        `scene`; `load`/`restart` both discard the current instance and
+        construct a fresh one from its factory (no scene implements its
+        own reset logic) and zero `t`/`step`; `handle` intercepts
+        `LoadScene`/`Restart` itself and forwards every other
+        `SceneControlMessage` to `scene.handleControl` - the one
+        dispatch path every scene's edits go through. Component-tested
+        (`SceneLibraryTest`) against a stub scene, independent of any
+        real physics.
+      - **`SceneControlMessage.LoadScene(name)`** (wire type
+        `load_scene`) added to the sealed interface - required adding a
+        `LoadScene` branch to the four still-standalone demos' own
+        `sceneControlQueue when` blocks too (a no-op there), since Kotlin
+        enforces exhaustiveness on a sealed interface.
+      - **`FlagScene`/`BallBounceScene`/`TrampolineScene`/`SparksScene`**:
+        faithful ports of the four existing demos' `main()` bodies onto
+        `DemoScene`, including `FlagDebugDemo`'s just-fixed generic
+        `EditableFields` dispatch (§10.4, previous entry).
+      - **`SceneLibraryDebugDemo`** (`./gradlew runSceneLibraryDemo`):
+        the generic runner - one `ViewerInput`/`DebugRenderer`, an
+        `if (message ...)`-free per-frame loop (`library.handle`,
+        `library.advanceOneStep`, `library.scene.frame`), `stepsPerFrame`
+        recomputed every frame from whichever scene is active (`dt`
+        differs by >10x between `FLAG_DT` and `TRAMPOLINE_DT`).
+      - **Verified**: full test suite green, plus a manual WebSocket
+        smoke test (Python `websockets`, scratch venv) against the live
+        `runSceneLibraryDemo` process - confirmed `load_scene` switches
+        particle count/dt/`t`-reset correctly across all four scenes,
+        `restart` reloads a fresh instance of the active scene, and an
+        unknown scene name is ignored (stays on whatever was active)
+        rather than crashing the connection. The original four standalone
+        `run*Demo` gradle tasks are untouched and still work.
+- [ ] Not yet built: any viewer UI. No wire format change either
+      (`availableScenes`/`activeScene` per frame, so the client can
+      populate a picker without hardcoding scene names) - deliberately
+      deferred to land in the same round as the JS decoder update it
+      requires, per this project's hard rule against a wire-format change
+      landing on only one side. Until then, switch scenes by sending
+      `{"type": "load_scene", "name": "..."}` over the WebSocket by hand.
+- [ ] The other four demos (`Drag`, `ParticleCollision`, `SpatialGrid`,
+      `MultiShape`) still standalone - would need their own `buildX():
+      XScenario` extraction (they currently build inline in `main()`)
+      before they could join the library's factory map.
+
 ## Shape library (§4.5, new requirement) — not yet phased
 - [x] Kotlin DSL: `ShapePlacement` (`particlesim.examples`) — an
       `offset: Vector3` and an optional `instanceName: String?`, resolving

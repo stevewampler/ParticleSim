@@ -140,6 +140,7 @@ fun main() {
                 is SceneControlMessage.SetColliderActive -> {
                     liveColliderRules.find { it.collider.name == message.name }?.collider?.active = message.active
                 }
+                is SceneControlMessage.LoadScene -> {} // §9.6 scene switching - this standalone demo isn't in the library, see SceneLibraryDebugDemo
                 is SceneControlMessage.SetGroupEnabled -> groups.setEnabled(message.name, message.enabled)
                 is SceneControlMessage.SetScalarField -> {
                     if (message.kind == "force" && message.name == gravity.name) gravity.setField(message.field, FieldValue.Scalar(message.value))

@@ -151,6 +151,7 @@ fun main() {
                 is SceneControlMessage.SetColliderActive -> {} // this demo has no colliders
                 is SceneControlMessage.DeleteParticle -> {} // not a feature of this demo (no destruction system wired)
                 SceneControlMessage.Restart -> {} // not built for this demo - see DragDebugDemo for the pattern if needed
+                is SceneControlMessage.LoadScene -> {} // §9.6 scene switching - this standalone demo isn't in the library, see SceneLibraryDebugDemo
             }
         }
         // §9.1's pacing policy, honored literally: dt (FLAG_DT) never changes here - only how

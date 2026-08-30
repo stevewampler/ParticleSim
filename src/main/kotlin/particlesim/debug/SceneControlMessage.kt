@@ -25,6 +25,14 @@ sealed interface SceneControlMessage {
     data class DeleteParticle(val particleId: Int) : SceneControlMessage
     data object Restart : SceneControlMessage
 
+    /** §9.6's scene library: switch the running process to a different named scene entirely -
+     * distinct from [Restart], which reloads the *current* scene from scratch. A generic runner
+     * (see `DemoScene`) handles both the same way underneath (discard the active scene, build a
+     * fresh instance from the library), [Restart] just resolves to the already-active name
+     * rather than a client-supplied one. Unrecognized names are the runner's problem to reject,
+     * not this parse step's - this class has no way to know what's in the library. */
+    data class LoadScene(val name: String) : SceneControlMessage
+
     /** §10.4's collider activation toggle — distinct from [RemoveCollider]: a deactivated
      * collider stays in the scene (and the outliner) fully able to be turned back on, where
      * removal is permanent for the rest of the run. */
@@ -71,6 +79,7 @@ sealed interface SceneControlMessage {
                 "remove_collider" -> (data["name"] as? String)?.let { RemoveCollider(it) }
                 "delete_particle" -> (data["particleId"] as? Number)?.toInt()?.let { DeleteParticle(it) }
                 "restart" -> Restart
+                "load_scene" -> (data["name"] as? String)?.let { LoadScene(it) }
                 "set_collider_active" -> {
                     val name = data["name"] as? String ?: return null
                     val active = data["active"] as? Boolean ?: return null
