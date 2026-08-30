@@ -73,6 +73,12 @@ import java.nio.charset.StandardCharsets
  * eventCount * { u8 kind (0=forceBreak, 1=particleDestroyed, 2=particleSpawned),
  *                kind==0: i32 nameLen, nameLen UTF-8 bytes
  *                kind==1 or 2: i32 particleId }
+ * i32  availableSceneCount; availableSceneCount * { i32 nameLen, nameLen UTF-8 bytes }
+ * i32  activeSceneNameLen; activeSceneNameLen UTF-8 bytes
+ *                           (§9.6's scene library — an empty list and an empty name for every
+ *                           demo that isn't a `SceneLibrary`-backed runner, the same "absent
+ *                           means empty" convention the rest of this format already uses rather
+ *                           than a new sentinel)
  * ```
  *
  * The event section is §9.1's discrete-event channel ([SimEvent]) — everything above it in this
@@ -222,6 +228,8 @@ object BinaryFrame {
         registry: SceneRegistry = SceneRegistry.build(),
         colliders: List<Collider> = emptyList(),
         events: List<SimEvent> = emptyList(),
+        availableScenes: List<String> = emptyList(),
+        activeScene: String = "",
     ): ByteBuffer {
         val fieldEntries = collectEditableFields(registry)
         val size = HEADER_SIZE + ids.size * PARTICLE_SIZE +
@@ -240,7 +248,8 @@ object BinaryFrame {
             boolNameListSize(registry.colliders.keys) + boolNameListSize(registry.groupEnabled.keys) +
             fieldEntryListSize(fieldEntries) +
             COLLIDER_HEADER_SIZE + colliders.sumOf { colliderEntrySize(it) } +
-            EVENT_HEADER_SIZE + events.sumOf { eventEntrySize(it) }
+            EVENT_HEADER_SIZE + events.sumOf { eventEntrySize(it) } +
+            nameListSize(availableScenes) + stringSize(activeScene)
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
         buffer.putDouble(t)
@@ -352,6 +361,8 @@ object BinaryFrame {
                 is SimEvent.ParticleSpawned -> { buffer.put(PARTICLE_SPAWNED_KIND); buffer.putInt(event.particleId) }
             }
         }
+        putNameList(buffer, availableScenes)
+        putString(buffer, activeScene)
 
         buffer.flip()
         return buffer
@@ -449,7 +460,12 @@ object BinaryFrame {
                 else -> error("unknown event kind byte: $kind")
             }
         }
-        return DecodedFrame(t, step, particles, connections, camera, spheres, meshes, arrowGroups, visibleIds, registry, colliders, events)
+        val availableScenes = getNameList(buf)
+        val activeScene = getString(buf)
+        return DecodedFrame(
+            t, step, particles, connections, camera, spheres, meshes, arrowGroups, visibleIds, registry, colliders, events,
+            availableScenes, activeScene,
+        )
     }
 
     private fun putVector(buffer: ByteBuffer, v: Vector3) {
@@ -650,4 +666,6 @@ data class DecodedFrame(
     val registry: DecodedRegistry = DecodedRegistry(),
     val colliders: List<DecodedCollider> = emptyList(),
     val events: List<SimEvent> = emptyList(),
+    val availableScenes: List<String> = emptyList(),
+    val activeScene: String = "",
 )

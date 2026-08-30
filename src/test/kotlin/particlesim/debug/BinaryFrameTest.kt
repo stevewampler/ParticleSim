@@ -462,6 +462,32 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `no scene library passed round-trips to an empty scene list and an empty active name`() {
+        val store = ParticleStore()
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList())
+        val decoded = BinaryFrame.decode(buffer)
+        assertEquals(emptyList(), decoded.availableScenes)
+        assertEquals("", decoded.activeScene)
+    }
+
+    @Test
+    fun `availableScenes and activeScene round-trip alongside the rest of the frame`() {
+        val store = ParticleStore()
+        val buffer = BinaryFrame.encode(
+            t = 1.5, step = 42L, store = store, ids = emptyList(), connections = emptyList(),
+            availableScenes = listOf("flag", "ballBounce", "trampoline", "sparks"),
+            activeScene = "trampoline",
+        )
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(listOf("flag", "ballBounce", "trampoline", "sparks"), decoded.availableScenes)
+        assertEquals("trampoline", decoded.activeScene)
+        // The scene-library section doesn't clobber or get clobbered by the rest of the frame.
+        assertEquals(1.5, decoded.t)
+        assertEquals(42L, decoded.step)
+    }
+
+    @Test
     fun `decode does not consume the original buffer's position`() {
         val store = ParticleStore()
         val id = store.create(position = Vector3.ZERO)

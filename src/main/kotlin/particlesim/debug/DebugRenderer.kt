@@ -52,11 +52,13 @@ class DebugRenderer(
         registry: SceneRegistry = SceneRegistry.build(),
         colliders: List<Collider> = emptyList(),
         events: List<SimEvent> = emptyList(),
+        availableScenes: List<String> = emptyList(),
+        activeScene: String = "",
     ) {
         wsServer.broadcastFrame(
             BinaryFrame.encode(
                 t, step, store, ids, connections, camera, lineColors, connectionNames, sphereRadii, meshes, arrowGroups,
-                visibleIds, registry, colliders.filter { it.active }, events,
+                visibleIds, registry, colliders.filter { it.active }, events, availableScenes, activeScene,
             ),
         )
     }

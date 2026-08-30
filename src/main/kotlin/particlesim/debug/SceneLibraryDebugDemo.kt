@@ -11,12 +11,9 @@ package particlesim.debug
  * stay standalone `run*Demo` gradle tasks until a later pass wraps them too, rather than forcing
  * an invasive rewrite now for the sake of a "complete" library on day one.
  *
- * No scene-picker UI yet - the viewer's `#controlPanel` doesn't know about `load_scene` (a
- * dedicated round, once the wire additions that would carry the scene list/active name to the
- * client have been built and the JS decoder updated to match, per this project's own hard rule
- * about never letting the two sides of a wire-format change land independently). Send
- * `{"type": "load_scene", "name": "trampoline"}` over the WebSocket directly to switch scenes
- * until that lands.
+ * The viewer's `#controlPanel` shows a scene picker (§10.3) whenever `availableScenes` is
+ * non-empty - every other demo leaves it `emptyList()`/`""` (this method's own defaults), so the
+ * picker just stays hidden for them, no per-demo opt-out needed.
  */
 fun main() {
     val viewerInput = ViewerInput()
@@ -56,6 +53,8 @@ fun main() {
             registry = frame.registry,
             colliders = frame.colliders,
             events = frame.events,
+            availableScenes = library.sceneNames,
+            activeScene = library.activeName,
         )
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)
