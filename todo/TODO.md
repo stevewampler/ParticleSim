@@ -3105,6 +3105,45 @@ next session picks them up instead of losing them.
       wasn't stomping it); correcting it to `[0, 20, 0]` cleared the
       outline, sent the edit, and visibly reoriented the wind arrows and
       flag mesh. No console errors.
+
+      **Second follow-up fix** (this note's "malformed syntax... still
+      fails silently" turned out to have a reachable, reported instance):
+      the user set `density` to `0` and `velocity` to `[0,0,0]` while
+      paused, unpaused, and watched `velocity` keep changing with
+      x > 1.0 instead of staying `[0,0,0]`. Root cause: a single click
+      into the field (not a triple-click, not Tab) places the caret
+      wherever the click landed rather than selecting the existing text -
+      every one of these fields displays the live *evaluated* value, so
+      the old text is still there to type into/onto. Clicking near the
+      end of e.g. `[7.4, 0, 2.1]` and typing `[0,0,0]` produced
+      `[7.4, 0, 2.1][0,0,0]` - a string that still starts with `[` (so it
+      passed the check above) but is malformed server-side, fails
+      `ExpressionParser.parseVector`, and is silently dropped - leaving
+      the *original* time-varying expression running untouched, which is
+      exactly "kept changing, x > 1.0." Confirmed by deliberately
+      reproducing this exact interaction before fixing it. Strengthening
+      the client-side syntax check further isn't viable - `[1,0,0] +
+      [0,1,0]` is legal grammar, so "must be exactly one bracket pair"
+      would reject valid input; only real parsing distinguishes the two,
+      which is exactly what re-implementing the grammar client-side
+      would mean. Fixed instead with `selectAllOnFocus(input)`, a shared
+      helper now called from every §10.4 raw-evaluated-value input
+      (wind velocity, particle mass/radius, emitter rate, and the
+      generic `EditableFields` scalar/vector inputs density goes
+      through): selects the whole value on focus, and - because the
+      same click's `mouseup` normally fires right after `focus` and
+      collapses that selection back to a caret - suppresses that one
+      `mouseup`'s default caret placement via a "just focused" flag, so
+      a plain single click, not just Tab or a triple-click, now replaces
+      the whole value instead of appending to it. **Verified live in
+      Chrome** with the exact discriminating test (a single `left_click`
+      then `type`, deliberately avoiding triple-click/Tab, which would
+      have passed even without the fix): clicking into the velocity
+      field and typing `[0,0,0]` now replaces the text cleanly instead of
+      concatenating; density `0` and velocity `[0,0,0]` both held stable
+      through several seconds of running simulation after unpausing;
+      re-verified that normal editing (a fresh time-varying expression)
+      still works afterward. No console errors.
 - [ ] Texture-mapped surfaces - an image (e.g. a flag graphic) rendered
       onto a surface's mesh instead of/alongside its flat shaded color
       (requirements.md §10.2). Two real gaps to close, neither trivial:

@@ -1264,6 +1264,37 @@ function formatVec(x, y, z) { return `(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toF
 // convention as a particle's mass/radius text inputs (String(p.mass), not p.mass.toFixed(2)).
 function formatVectorExprLiteral(x, y, z) { return `[${x}, ${y}, ${z}]`; }
 
+// Every §10.4 editable-value input displays the current *evaluated* value, not the original
+// formula (see formatVectorExprLiteral's own comment) - so partially editing that text never
+// makes sense, only replacing it wholesale does. Without this, a single click into the field
+// (not a triple-click or Tab-focus) places the caret wherever the click landed and leaves the
+// rest of the old value in place; typing then inserts into/appends to it. For a vector-expression
+// field that produces a malformed-but-still-bracket-prefixed string (e.g. clicking at the end of
+// "[7.4, 0, 2.1]" and typing "[0,0,0]" yields "[7.4, 0, 2.1][0,0,0]"), which passes the minimal
+// client-side check below (it does start with "[") but fails to parse server-side and is
+// silently dropped - leaving the *old* expression running, which is exactly what was reported
+// as "I set velocity to [0,0,0] and it kept changing anyway." A plain `focus -> input.select()`
+// doesn't survive this: the same click's `mouseup` (which fires right after `focus`) places the
+// caret and collapses the selection back to a point. Tracking "this mouseup belongs to the click
+// that just focused the field" and suppressing its default caret placement is what makes select-
+// on-focus actually survive a single click, not just Tab or a triple-click (both of which would
+// have passed even without this fix, and are exactly what earlier verification in this project
+// used - see TODO.md's follow-up note on this).
+function selectAllOnFocus(input) {
+  let justFocused = false;
+  input.addEventListener("focus", () => {
+    justFocused = true;
+    input.select();
+  });
+  input.addEventListener("mouseup", (e) => {
+    if (justFocused) {
+      e.preventDefault();
+      justFocused = false;
+    }
+  });
+  input.addEventListener("blur", () => { justFocused = false; });
+}
+
 function renderNameList(container, kind, names) {
   container.innerHTML = "";
   if (names.length === 0) {
@@ -1364,6 +1395,7 @@ function renderEditableFields(kind, name, inputsOut) {
       input.type = "number";
       input.step = "any";
       input.value = f.value.value;
+      selectAllOnFocus(input);
       input.addEventListener("change", () => {
         sendEdit({ type: "set_scalar_field", kind, name, field: f.field, value: parseFloat(input.value) });
       });
@@ -1375,6 +1407,7 @@ function renderEditableFields(kind, name, inputsOut) {
         el.type = "number";
         el.step = "any";
         el.style.width = "4.5em";
+        selectAllOnFocus(el);
         return el;
       });
       inputs[0].value = f.value.x; inputs[1].value = f.value.y; inputs[2].value = f.value.z;
@@ -1516,6 +1549,7 @@ registerEntityKind({
       windVelocityInput = document.createElement("input");
       windVelocityInput.type = "text";
       windVelocityInput.value = formatVectorExprLiteral(windEntry.velocity.x, windEntry.velocity.y, windEntry.velocity.z);
+      selectAllOnFocus(windVelocityInput);
       windVelocityInvalid = false;
       // Minimal client-side check for the one structural rule the grammar guarantees: a vector
       // expression can only be produced by a "[x, y, z]" literal (see Parser.parsePrimary -
@@ -1685,6 +1719,7 @@ registerEntityKind({
     const rateInput = document.createElement("input");
     rateInput.type = "text";
     rateInput.value = entry ? String(entry.rate) : "";
+    selectAllOnFocus(rateInput);
     rateInput.addEventListener("change", () => {
       sendEdit({ type: "set_emitter_rate", name: selectedName, expression: rateInput.value });
     });
@@ -1756,6 +1791,7 @@ registerEntityKind({
     const massInput = document.createElement("input");
     massInput.type = "text";
     massInput.value = p ? String(p.mass) : "";
+    selectAllOnFocus(massInput);
     massInput.addEventListener("change", () => {
       sendEdit({ type: "set_particle_scalar_field", particleId, field: "mass", expression: massInput.value });
     });
@@ -1771,6 +1807,7 @@ registerEntityKind({
     const radiusInput = document.createElement("input");
     radiusInput.type = "text";
     radiusInput.value = p && !Number.isNaN(p.radius) ? String(p.radius) : "";
+    selectAllOnFocus(radiusInput);
     radiusInput.addEventListener("change", () => {
       sendEdit({ type: "set_particle_scalar_field", particleId, field: "radius", expression: radiusInput.value });
     });
