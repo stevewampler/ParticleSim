@@ -37,13 +37,17 @@ class Wind(
     }
 
     /** requirements.md §10.4's `velocity` live-editing read path — the live evaluated vector at
-     * [t], never the original expression source, same "show the current number, not the
-     * formula" convention as a particle's mass/radius or an `Emitter`'s `rate`. Kept off
-     * [editableFields]/[FieldValue] deliberately: that mechanism has no `t` to evaluate an
-     * expression against (every other `EditableFields` field today is a plain mutable number,
+     * [t] (see [currentVelocitySource] below for the companion expression-source read path).
+     * Kept off [editableFields]/[FieldValue] deliberately: that mechanism has no `t` to evaluate
+     * an expression against (every other `EditableFields` field today is a plain mutable number,
      * not an expression), and the edit UI this needs is a single expression-string input, not
      * the three-number x/y/z boxes a plain `FieldValue.Vector` renders as. */
     fun currentVelocity(t: Double): Vector3 = velocity.evaluate(t)
+
+    /** §10.4's new "show the current expression source" requirement - `null` when [velocity]
+     * wasn't set from a parsed expression string (its constructor default, or a native DSL
+     * lambda passed directly to [VectorExpr.of]). */
+    fun currentVelocitySource(): String? = velocity.source
 
     /** §10.4's `velocity` live-editing write path - an outright replace, same convention as
      * `ParticleStore.setMass`/`setRadius`/`Emitter.setRate`: a full replace is already the

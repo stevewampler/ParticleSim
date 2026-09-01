@@ -122,4 +122,13 @@ class WindTest {
         wind.setVelocity(VectorExpr.of(Vector3(1.0, 0.0, 0.0)))
         assertEquals(FieldValue.Scalar(2.5), wind.editableFields()["density"])
     }
+
+    @Test
+    fun `§10_4 new requirement - currentVelocitySource is null for a native lambda, non-null after a parsed expression edit`() {
+        val wind = Wind(emptyList(), VectorExpr.of { t -> Vector3(t, 0.0, 0.0) })
+        assertEquals(null, wind.currentVelocitySource())
+
+        wind.setVelocity(particlesim.expr.ExpressionParser.parseVector("[6.0 + 2.0*sin(t), 0, 0]"))
+        assertEquals("[6.0 + 2.0*sin(t), 0, 0]", wind.currentVelocitySource())
+    }
 }

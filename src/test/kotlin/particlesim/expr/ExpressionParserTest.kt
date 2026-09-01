@@ -176,6 +176,42 @@ class ExpressionParserTest {
         assertTrue(ExpressionParser.parseVector("[t, 0, 0]") is VectorExpr.OfTime)
     }
 
+    @Test
+    fun `§10_4 new requirement - parseScalar retains the original source text, for both constant and time-varying results`() {
+        val constant = ExpressionParser.parseScalar("2.0 + 3.0")
+        val timeVarying = ExpressionParser.parseScalar("2.0 + 0.1 * sin(t)")
+        assertEquals("2.0 + 3.0", constant.source)
+        assertEquals("2.0 + 0.1 * sin(t)", timeVarying.source)
+    }
+
+    @Test
+    fun `§10_4 new requirement - parseVector retains the original source text, for both constant and time-varying results`() {
+        val constant = ExpressionParser.parseVector("[1, 2, 3] * 2")
+        val timeVarying = ExpressionParser.parseVector("[t, 0, 0]")
+        assertEquals("[1, 2, 3] * 2", constant.source)
+        assertEquals("[t, 0, 0]", timeVarying.source)
+    }
+
+    @Test
+    fun `a directly-constructed ScalarExpr or VectorExpr has no source - only ExpressionParser sets one`() {
+        assertEquals(null, ScalarExpr.of(5.0).source)
+        assertEquals(null, ScalarExpr.of { t -> t }.source)
+        assertEquals(null, VectorExpr.of(particlesim.core.Vector3.ZERO).source)
+    }
+
+    @Test
+    fun `§10_4 new requirement - a parsed constant's source doesn't affect ScalarExpr Constant equality`() {
+        // A regression guard for exactly the trap this feature could introduce: source is
+        // deliberately kept out of Constant's primary constructor (see ScalarExpr's own doc
+        // comment) so two constants with the same value stay equal regardless of what source
+        // text (if any) either one remembers - SceneControlMessageTest's own
+        // SetParticleScalarField/SetEmitterRate round-trip assertions depend on exactly this.
+        val parsed = ExpressionParser.parseScalar("9.0") as ScalarExpr.Constant
+        val literal = ScalarExpr.Constant(9.0)
+        assertEquals(literal, parsed)
+        assertEquals(literal.hashCode(), parsed.hashCode())
+    }
+
     // --- noise() ------------------------------------------------------------------------------
 
     @Test

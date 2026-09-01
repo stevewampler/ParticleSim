@@ -3210,14 +3210,95 @@ implemented immediately - captured here so the next session picks them
 up instead of losing them. The user listed "the flag's particles should
 not be able to penetrate the flag surface" twice in slightly different
 wording; recorded once below, not as two separate items.
-- [ ] Show a field's **current expression source**, not just its live
+- [x] Show a field's **current expression source**, not just its live
       evaluated value, in every §10.4 expression-editable control
-      (requirements.md §10.4's new cross-cutting bullet). Needs
-      `ScalarExpr`/`VectorExpr`/`ParticleStore` to actually retain the
-      original source string somewhere - today only the parsed/evaluated
-      form survives past `ExpressionParser.parse*`, so there's nothing to
-      show back even before any UI work. Presentation not decided (a
-      second read-only line? a toggle?).
+      (requirements.md §10.4's new cross-cutting bullet). Covers all
+      three fields that were actually expression-string-editable already:
+      particle mass/radius, `Emitter.rate`, `Wind.velocity` (collider
+      position live-editing isn't built at all yet, so it's out of scope
+      here - nothing to show a source *for*).
+      **Presentation, decided**: a second read-only line (`expr: <source>`,
+      dimmed) placed right below the existing live-value input, never
+      replacing it - the live number/vector is still "the right thing to
+      show at rest" (requirements.md's own reasoning: freezing the
+      display at a stale formula while a time-varying value keeps moving
+      underneath it would be misleading in its own way), so this is
+      purely additive. The row is always created (never conditionally
+      appended) and toggled via the DOM `hidden` attribute in a shared
+      `updateExpressionSourceRow` helper instead, so a source that only
+      becomes known *after* the panel is already open (the user's own
+      edit just landed) can still appear without needing a full panel
+      rebuild - `renderPanel` only re-runs on selection change or a
+      registry *signature* change, which deliberately excludes per-field
+      values.
+      **`ScalarExpr`/`VectorExpr` now retain the source**: both gain a
+      `source: String?` (null for a Kotlin-literal/native-lambda value,
+      set only by `ExpressionParser.parseScalar`/`parseVector`).
+      **The `Constant` equality trap, caught before it shipped**: `source`
+      is deliberately kept *out* of `Constant`'s primary constructor even
+      though `Constant` is a `data class` - putting it there would fold
+      `source` into the generated `equals`/`hashCode`, silently breaking
+      `SceneControlMessageTest`'s existing `SetParticleScalarField`/
+      `SetEmitterRate` round-trip assertions (which compare a
+      parser-produced constant against a directly-constructed one with no
+      source). Instead `source` is a body `var` with an `internal set`,
+      populated via a new `ScalarExpr.of(value, source)`/
+      `VectorExpr.of(value, source)` factory - excluded from a data
+      class's generated equality entirely since it isn't a primary
+      constructor property. A new regression test
+      (`ExpressionParserTest`) asserts a parsed constant still equals a
+      literal one with the same value.
+      **Wind/Emitter were nearly free**: both already retain their live
+      `VectorExpr`/`ScalarExpr` in a field (`Wind.velocity`,
+      `Emitter.rate`), so `currentVelocitySource()`/`currentRateSource()`
+      are one-line accessors reading `.source` off what's already there.
+      **Particle mass/radius needed real storage**: `ParticleStore`
+      evaluates a constant expression once at creation and never retains
+      the `ScalarExpr` itself (only a *time-varying* one survives, in the
+      existing `massExprs`/`radiusExprs` maps) - so a constant's source
+      text would otherwise vanish immediately. Fixed with two new sparse
+      `HashMap<Int, String>` maps (`massSourceById`/`radiusSourceById`,
+      updated in `create`/`setMass`/`setRadius`/`destroy`) that retain the
+      source string for *either* kind, separately from the (unretained)
+      constant value itself.
+      **Wire protocol**: `RegistryEmitterEntry`/`DecodedEmitterEntry` gain
+      `rateSource`, `RegistryWindEntry`/`DecodedWindEntry` gain
+      `velocitySource` (both `""` on the wire = absent, the format's
+      existing convention) - free to add since both lists already exist
+      per-frame. A genuinely new section,
+      `RegistryParticleExpressionEntry`/`DecodedParticleExpressionEntry`
+      (id-addressed `{particleId, field, source}`), was added for
+      particle mass/radius - naturally sparse (only ever contains entries
+      for particles actually live-edited via an expression string), so it
+      costs nothing in the common case of a scene where this never
+      happened. `BinaryFrame`'s own layout doc comment was extended to
+      cover this new section *and* retroactively document the
+      pre-existing emitter/wind sections, which had never been added to
+      the ASCII layout diagram when they first landed.
+      New tests: `ExpressionParserTest` (source round-trips for both
+      constant/time-varying scalar and vector expressions, a
+      directly-constructed value has no source, the `Constant` equality
+      regression guard above), `ParticleStoreTest` (source recorded for
+      both constant/time-varying `setMass`/`setRadius`, cleared by a
+      literal replacement or by `destroy`, not recorded for a rejected
+      edit), `WindTest`/`EmitterTest` (`currentVelocitySource`/
+      `currentRateSource` null-then-set), and five new `BinaryFrameTest`
+      cases covering the full wire round-trip for all three fields
+      (including the "no known source" empty-list/null case for each).
+      **Verified live in Chrome**: opened the `flag` scene's `wind` force
+      panel, edited `velocity` to `"[6.0 + 2.0*sin(t), 0.3*sin(t*1.3),
+      0.8*cos(t*0.9)]"` - a new `expr: ...` line appeared showing exactly
+      that string beside the still-live-updating `velocity:` readout, and
+      the wind arrows visibly changed direction confirming the edit took.
+      Right-clicked a flag particle, edited `mass` to `"0.005 +
+      0.001*sin(t)"` - the `expr:` line appeared under `mass:` with
+      `radius:` (never touched) showing none. Opened the `sparks` scene's
+      `fountain` emitter panel, edited `rate` to `"20 + 10*sin(t)"` - the
+      `expr:` line appeared and the live `rate:` number changed to track
+      the new formula (confirmed against the emitter's actual live values
+      before/after, not just visually). No console errors from the app
+      in any case (only an unrelated Chrome-extension "disconnected port"
+      error, unaffiliated with this page).
 - [ ] `[stretch]` Flag surface self-collision: the flag's own particles
       shouldn't be able to pass through its own surface as it
       billows/folds (requirements.md §12.4's "Surface self-collision"

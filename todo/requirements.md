@@ -1048,23 +1048,30 @@ entity type before the per-type detail:
   mid-step, read by chunk 0 before the edit and chunk 3 after, would
   silently break both determinism and chunk-order-independence. Applying
   every edit only between steps avoids the question entirely.
-- *(New requirement)* Every expression-capable field's edit control should
-  show the **expression that's currently in effect**, not just its
+- *(New requirement, built)* Every expression-capable field's edit control
+  shows the **expression that's currently in effect**, not just its
   momentarily-evaluated numeric value, so a user can see what they're
-  about to change before overwriting it wholesale. Today (particle mass/
-  radius, `Emitter.rate`, `Wind.velocity`) every one of these fields
-  displays the live evaluated number/vector each frame — the right thing
-  to *show at rest*, since the alternative (freezing the display at the
-  original formula while a time-varying value keeps moving underneath it)
-  would be misleading in its own way — but it means the field a user
-  clicks into never contains the formula they'd actually want to tweak
-  (e.g. re-opening `"2.0 + 0.1*sin(t)"` to change the `0.1`), only its
-  current output (e.g. `2.087...`), and editing wholesale is the only
-  option. None of `ScalarExpr`/`VectorExpr`/`ParticleStore` retain the
-  original source string today — only the parsed, evaluated form — so
-  showing it back requires actually keeping it somewhere, not just a UI
-  change. Exact presentation (a second read-only "formula" line beside
-  the live value? a toggle between the two?) isn't decided here.
+  about to change before overwriting it wholesale. Covers particle mass/
+  radius, `Emitter.rate`, and `Wind.velocity` — every field that was
+  already expression-string-editable (collider position live-editing
+  isn't built at all yet, so it's out of scope). Each of these fields
+  still displays the live evaluated number/vector each frame — the right
+  thing to *show at rest*, since the alternative (freezing the display at
+  the original formula while a time-varying value keeps moving underneath
+  it) would be misleading in its own way — with a second, read-only
+  `expr: ...` line beside it, shown only when a source is actually known
+  (most particles' mass/radius never had one — see below). `ScalarExpr`/
+  `VectorExpr` now carry an optional `source: String?`, set only by
+  `ExpressionParser.parseScalar`/`parseVector`; `ParticleStore` gained a
+  small separate `HashMap<Int, String>` per field (mass/radius) to retain
+  it even for a *constant* expression, which otherwise gets evaluated
+  once and discarded at creation with nothing else surviving. `source` is
+  deliberately excluded from `ScalarExpr.Constant`/`VectorExpr.Constant`'s
+  equality (kept out of the `data class`'s primary constructor) so two
+  constants with the same value stay equal regardless of what source text
+  either one remembers — existing round-trip tests comparing a
+  parser-produced value against a directly-constructed one depend on
+  this.
 
 Most of what follows also surfaces a real implementation gap, not just a
 UI one: `Spring`/`Damper`/`MeshSprings`' stiffness/damping and most

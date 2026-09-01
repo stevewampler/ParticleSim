@@ -743,8 +743,10 @@ function decodeFrame(buffer) {
   };
   // §10.4's emitter read path: one entry per named Emitter, unconditionally (every Emitter is
   // named from construction - see SceneRegistry's own doc comment) - rate is the live evaluated
-  // number at this frame's t, not the expression source, same convention as a particle's mass/
-  // radius. evictOldest true means EmitterCapPolicy.EVICT_OLDEST, matching
+  // number at this frame's t; rateSource (§10.4, new requirement - "" means none, same "empty
+  // means absent" convention every other optional string in this format uses) is the expression
+  // string it was last set from, so a re-opened edit box can show the formula, not just its
+  // current output. evictOldest true means EmitterCapPolicy.EVICT_OLDEST, matching
   // SetEmitterCapPolicy's own convention.
   const readEmitterEntryList = () => {
     const count = view.getInt32(offset, true); offset += 4;
@@ -752,19 +754,41 @@ function decodeFrame(buffer) {
     for (let i = 0; i < count; i++) {
       const name = readString();
       const rate = view.getFloat64(offset, true); offset += 8;
+      const rateSource = readString() || null;
       const maxAlive = view.getInt32(offset, true); offset += 4;
       const evictOldest = view.getUint8(offset) !== 0; offset += 1;
-      entries[i] = { name, rate, maxAlive, evictOldest };
+      entries[i] = { name, rate, rateSource, maxAlive, evictOldest };
     }
     return entries;
   };
   // §10.4's Wind.velocity read path: one entry per named Wind force - kept off the generic
   // fields list (unlike density, still read that way) since velocity is expression-capable and
   // needs the frame's own t to evaluate, same reason the emitter list above exists separately.
+  // velocitySource is rateSource's counterpart above.
   const readWindEntryList = () => {
     const count = view.getInt32(offset, true); offset += 4;
     const entries = new Array(count);
-    for (let i = 0; i < count; i++) entries[i] = { name: readString(), velocity: readVec() };
+    for (let i = 0; i < count; i++) {
+      const name = readString();
+      const velocity = readVec();
+      const velocitySource = readString() || null;
+      entries[i] = { name, velocity, velocitySource };
+    }
+    return entries;
+  };
+  // §10.4's new "show the current expression source" requirement, particle mass/radius's read
+  // path - naturally sparse (only particles whose mass/radius was live-edited via an expression
+  // string ever appear here), unlike the emitter/wind lists above which have one entry per named
+  // entity regardless. field is "mass" or "radius".
+  const readParticleExpressionEntryList = () => {
+    const count = view.getInt32(offset, true); offset += 4;
+    const entries = new Array(count);
+    for (let i = 0; i < count; i++) {
+      const particleId = view.getInt32(offset, true); offset += 4;
+      const field = readString();
+      const source = readString();
+      entries[i] = { particleId, field, source };
+    }
     return entries;
   };
 
@@ -859,6 +883,7 @@ function decodeFrame(buffer) {
     fields: readFieldEntryList(),
     emitters: readEmitterEntryList(),
     winds: readWindEntryList(),
+    particleExpressions: readParticleExpressionEntryList(),
   };
 
   // §10.2's "debug/--render-all mode... draws every collider as wireframe" - unconditional,
@@ -1146,7 +1171,7 @@ const objectPanelTitleEl = document.getElementById("objectPanelTitle");
 const objectPanelBodyEl = document.getElementById("objectPanelBody");
 
 let lastRegistrySignature = null;
-let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [], colliders: [], groupEnabled: {}, fields: [], emitters: [], winds: [] };
+let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [], colliders: [], groupEnabled: {}, fields: [], emitters: [], winds: [], particleExpressions: [] };
 let selectedKind = null; // "groups" | "forces" | "constraints" | "surfaces" | "colliders"
 let selectedName = null;
 let latestVisibleIds = null; // this frame's server-side dot filter, updated every frame in applyFrame
@@ -1158,6 +1183,8 @@ let latestColliders = []; // this frame's colliders, for the outliner's remove a
 let latestArrowGroups = []; // this frame's named arrow-sample groups, for the forces panel's toggle
 let objectPanelInspectEl = null; // the groups/surfaces panel's live numeric-readout text node
 let particleFieldInputs = null; // the particle panel's { massInput, radiusInput }, or null otherwise
+let particleMassSourceRow = null; // its companion §10.4 expression-source row, or null
+let particleRadiusSourceRow = null; // radius's counterpart to the above
 
 // Names of groups/surfaces a person has explicitly unchecked in the per-object panel. Composed
 // with (never replacing) whatever the server itself already decided - e.g. FlagDebugDemo sends
@@ -1384,6 +1411,42 @@ function addPanelInspect() {
 // (e.g. `= {}`) before the render pass that (re)populates it.
 let currentFieldInputs = {};
 
+// §10.4's new "show the current expression source" requirement: a read-only line placed
+// alongside an expression-capable field's live-value input (Wind.velocity, an emitter's rate, a
+// particle's mass/radius) showing the formula it was last set from - a second line rather than
+// replacing the live-value display, since "show the live number at rest" is still the right
+// default (requirements.md §10.4's own reasoning: freezing the input at a stale formula while a
+// time-varying value keeps moving underneath it would be misleading in its own way). Always
+// created (never conditionally appended) and toggled via `hidden` in updateExpressionSourceRow
+// instead, so a source that only becomes known *after* the panel is already open (the user's own
+// edit just landed) can still appear without needing a full panel rebuild - `renderPanel` only
+// re-runs on selection change or a registry *signature* change, which deliberately excludes
+// per-field values.
+function renderExpressionSourceRow(initialSource) {
+  const row = document.createElement("div");
+  row.className = "objectInfo";
+  row.style.opacity = "0.7";
+  row.hidden = !initialSource;
+  if (initialSource) row.textContent = "expr: " + initialSource;
+  objectPanelBodyEl.appendChild(row);
+  return row;
+}
+
+function updateExpressionSourceRow(row, source) {
+  if (!row) return;
+  row.hidden = !source;
+  if (source) row.textContent = "expr: " + source;
+}
+
+// A particle's mass/radius source is a sparse, id-addressed list (RegistryParticleExpressionEntry
+// - see BinaryFrame's own doc comment for why, unlike the emitter/wind lists, it only ever
+// carries entries for particles that actually have a known one), so it's looked up by
+// (particleId, field) rather than found by name like every other kind here.
+function particleExpressionSource(particleId, field) {
+  const entry = latestRegistry.particleExpressions.find((e) => e.particleId === particleId && e.field === field);
+  return entry ? entry.source : null;
+}
+
 function renderEditableFields(kind, name, inputsOut) {
   const fields = latestRegistry.fields.filter((f) => f.kind === kind && f.name === name);
   for (const f of fields) {
@@ -1529,6 +1592,7 @@ registerEntityKind({
 });
 
 let windVelocityInput = null; // the open forces panel's Wind.velocity text input, or null otherwise
+let windVelocitySourceRow = null; // its companion §10.4 expression-source row, or null
 // True while windVelocityInput holds text rejected by the client-side vector-literal check
 // below - suppresses updateLive's live-value overwrite so the user's bad text (and its error
 // styling) isn't stomped by the very next frame.
@@ -1551,8 +1615,8 @@ registerEntityKind({
     // renderEditableFields call above, unaffected. A plain text input, not three x/y/z number
     // boxes, since velocity is expression-capable - parsed server-side via
     // ExpressionParser.parseVector, so "[0, 0, 5 + 2*sin(t)]" is exactly as valid an edit as
-    // "[0, 0, 5]". Always shows the live evaluated vector, never the original expression source,
-    // same convention as a particle's mass/radius or an emitter's rate.
+    // "[0, 0, 5]". Shows the live evaluated vector; the companion expr row below (§10.4, new
+    // requirement) shows the formula it came from, when known.
     const windEntry = latestRegistry.winds.find((w) => w.name === selectedName);
     if (windEntry) {
       const velocityRow = document.createElement("div");
@@ -1593,6 +1657,9 @@ registerEntityKind({
       });
       velocityRow.appendChild(windVelocityInput);
       objectPanelBodyEl.appendChild(velocityRow);
+      windVelocitySourceRow = renderExpressionSourceRow(windEntry.velocitySource);
+    } else {
+      windVelocitySourceRow = null;
     }
 
     if (!hasArrows && !windEntry && latestRegistry.fields.every((f) => !(f.kind === "force" && f.name === selectedName))) {
@@ -1605,6 +1672,7 @@ registerEntityKind({
     if (windEntry && windVelocityInput && document.activeElement !== windVelocityInput && !windVelocityInvalid) {
       windVelocityInput.value = formatVectorExprLiteral(windEntry.velocity.x, windEntry.velocity.y, windEntry.velocity.z);
     }
+    updateExpressionSourceRow(windVelocitySourceRow, windEntry?.velocitySource);
   },
 });
 
@@ -1714,6 +1782,7 @@ registerEntityKind({
 // a separate cached list - there's no wireframe-style "geometry vs. registry" split here, an
 // emitter has nothing else to fetch.
 let emitterFieldInputs = null; // { rateInput, maxAliveInput, evictOldestCheckbox } for the open panel, or null
+let emitterRateSourceRow = null; // its companion §10.4 expression-source row, or null
 registerEntityKind({
   kind: "emitters",
   getNames: (registry) => registry.emitters.map((e) => e.name),
@@ -1721,9 +1790,9 @@ registerEntityKind({
     const entry = latestRegistry.emitters.find((e) => e.name === selectedName);
 
     // §10.4's expression-string editing, same convention as a particle's mass/radius: a plain
-    // text input, parsed server-side via ExpressionParser.parseScalar, always showing the live
-    // evaluated number rather than the original expression source (this class retains no source
-    // text to show). Edits only ever affect particles spawned after the edit - requirements.md
+    // text input, parsed server-side via ExpressionParser.parseScalar. Shows the live evaluated
+    // number; the companion expr row below (§10.4, new requirement) shows the formula it came
+    // from, when known. Edits only ever affect particles spawned after the edit - requirements.md
     // §10.4's own "never retroactive" framing for this field.
     const rateRow = document.createElement("div");
     rateRow.className = "objectField";
@@ -1737,6 +1806,7 @@ registerEntityKind({
     });
     rateRow.appendChild(rateInput);
     objectPanelBodyEl.appendChild(rateRow);
+    emitterRateSourceRow = renderExpressionSourceRow(entry?.rateSource);
 
     const maxAliveRow = document.createElement("div");
     maxAliveRow.className = "objectField";
@@ -1771,6 +1841,7 @@ registerEntityKind({
     if (document.activeElement !== emitterFieldInputs.rateInput) emitterFieldInputs.rateInput.value = String(entry.rate);
     if (document.activeElement !== emitterFieldInputs.maxAliveInput) emitterFieldInputs.maxAliveInput.value = entry.maxAlive;
     if (document.activeElement !== emitterFieldInputs.evictOldestCheckbox) emitterFieldInputs.evictOldestCheckbox.checked = entry.evictOldest;
+    updateExpressionSourceRow(emitterRateSourceRow, entry.rateSource);
   },
 });
 
@@ -1794,9 +1865,10 @@ registerEntityKind({
 
     // §10.4's expression-string editing (mass/radius design walkthrough): a plain text input,
     // not type="number" - the value sent is parsed server-side via ExpressionParser.parseScalar,
-    // so "2.0 + 0.1*sin(t)" is exactly as valid an edit as "5.0". Always shows the live evaluated
-    // number, never the original expression source - ParticleStore retains no source text to
-    // show, and this matches how a force/constraint's editableFields already behave.
+    // so "2.0 + 0.1*sin(t)" is exactly as valid an edit as "5.0". Shows the live evaluated
+    // number; the companion expr row below (§10.4, new requirement) shows the formula it came
+    // from, when known (most particles never had one - see ParticleStore.massSource's own doc
+    // comment).
     const massRow = document.createElement("div");
     massRow.className = "objectField";
     massRow.appendChild(document.createTextNode("mass: "));
@@ -1809,6 +1881,7 @@ registerEntityKind({
     });
     massRow.appendChild(massInput);
     objectPanelBodyEl.appendChild(massRow);
+    particleMassSourceRow = renderExpressionSourceRow(particleExpressionSource(particleId, "mass"));
 
     // radius is NaN (never the unset state itself) when this particle has none - rendered as an
     // empty input, never the literal string "NaN"; editing it in is how "a particle with no
@@ -1825,6 +1898,7 @@ registerEntityKind({
     });
     radiusRow.appendChild(radiusInput);
     objectPanelBodyEl.appendChild(radiusRow);
+    particleRadiusSourceRow = renderExpressionSourceRow(particleExpressionSource(particleId, "radius"));
     particleFieldInputs = { massInput, radiusInput };
 
     // The multi-group selection design: every containing group is listed as a reselectable
@@ -1869,6 +1943,8 @@ registerEntityKind({
         particleFieldInputs.radiusInput.value = Number.isNaN(p.radius) ? "" : String(p.radius);
       }
     }
+    updateExpressionSourceRow(particleMassSourceRow, particleExpressionSource(particleId, "mass"));
+    updateExpressionSourceRow(particleRadiusSourceRow, particleExpressionSource(particleId, "radius"));
   },
 });
 
@@ -1886,8 +1962,12 @@ function renderObjectPanel() {
   objectPanelInfoEl = null;
   objectPanelInspectEl = null;
   particleFieldInputs = null;
+  particleMassSourceRow = null;
+  particleRadiusSourceRow = null;
   emitterFieldInputs = null;
+  emitterRateSourceRow = null;
   windVelocityInput = null;
+  windVelocitySourceRow = null;
   windVelocityInvalid = false;
   if (selectedKind === null) {
     objectPanelEl.style.display = "none";

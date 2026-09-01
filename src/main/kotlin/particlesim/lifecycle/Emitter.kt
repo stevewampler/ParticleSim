@@ -131,12 +131,17 @@ class Emitter(
         return EmitResult(spawned, evicted)
     }
 
-    /** requirements.md §10.4's emitter read path: the live evaluated rate at [t], never the
-     * original expression source - same "show the current number, not the formula" convention
-     * as `ParticleStore.mass`/`radius`. Deliberately *not* clamped to zero like [update]'s own
-     * internal accumulation does - a pulsing/negative-going expression should be visible as
-     * negative, not silently floored just because it's being displayed. */
+    /** requirements.md §10.4's emitter read path: the live evaluated rate at [t] (see
+     * [currentRateSource] below for the companion expression-source read path). Deliberately
+     * *not* clamped to zero like [update]'s own internal accumulation does - a pulsing/
+     * negative-going expression should be visible as negative, not silently floored just
+     * because it's being displayed. */
     fun currentRate(t: Double): Double = rate.evaluate(t)
+
+    /** §10.4's new "show the current expression source" requirement - `null` when [rate] wasn't
+     * set from a parsed expression string (its constructor default, or a native DSL lambda
+     * passed directly to [ScalarExpr.of]). */
+    fun currentRateSource(): String? = rate.source
 
     fun currentCapPolicy(): EmitterCapPolicy = capPolicy
 

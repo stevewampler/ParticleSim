@@ -78,6 +78,34 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `§10_4 new requirement - a particle's live-edited mass and radius expression source round-trips in the registry`() {
+        val store = ParticleStore()
+        val id = store.create(mass = ScalarExpr.of(1.0))
+        store.setMass(id, particlesim.expr.ExpressionParser.parseScalar("2.0 + 0.1*sin(t)"), t = 0.0)
+        store.setRadius(id, particlesim.expr.ExpressionParser.parseScalar("0.05"), t = 0.0)
+
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(id), connections = emptyList())
+        val entries = BinaryFrame.decode(buffer).registry.particleExpressions
+
+        assertEquals(
+            setOf(
+                DecodedParticleExpressionEntry(id, "mass", "2.0 + 0.1*sin(t)"),
+                DecodedParticleExpressionEntry(id, "radius", "0.05"),
+            ),
+            entries.toSet(),
+        )
+    }
+
+    @Test
+    fun `§10_4 new requirement - a particle created with a plain Kotlin-literal mass has no known source`() {
+        val store = ParticleStore()
+        val id = store.create(mass = ScalarExpr.of(1.0))
+
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(id), connections = emptyList())
+        assertEquals(emptyList(), BinaryFrame.decode(buffer).registry.particleExpressions)
+    }
+
+    @Test
     fun `round-trips an empty frame`() {
         val store = ParticleStore()
         val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList())
@@ -412,8 +440,30 @@ class BinaryFrameTest {
         val entry = decoded.single()
         assertEquals("fountain", entry.name)
         assertEquals(20.0 + 15.0 * kotlin.math.sin(1.0), entry.rate, 1e-9)
+        assertNull(entry.rateSource) // built from a native Kotlin lambda, no expression string
         assertEquals(300, entry.maxAlive)
         assertEquals(true, entry.evictOldest)
+    }
+
+    @Test
+    fun `§10_4 new requirement - an emitter's rate set from a parsed expression round-trips its source`() {
+        val store = ParticleStore()
+        val emitter = particlesim.lifecycle.Emitter(
+            name = "fountain",
+            group = "sparks",
+            rate = ScalarExpr.of(10.0),
+            position = particlesim.lifecycle.VectorDistribution.UniformBox(Vector3.ZERO, Vector3.ZERO),
+            velocity = particlesim.lifecycle.VectorDistribution.UniformBox(Vector3.ZERO, Vector3.ZERO),
+            maxAlive = 100,
+            masterSeed = 1L,
+        )
+        emitter.setRate(particlesim.expr.ExpressionParser.parseScalar("10.0 + 5.0*sin(t)"))
+        val registry = SceneRegistry.build(emitters = listOf(emitter))
+
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), registry = registry)
+        val entry = BinaryFrame.decode(buffer).registry.emitters.single()
+
+        assertEquals("10.0 + 5.0*sin(t)", entry.rateSource)
     }
 
     @Test
@@ -443,11 +493,25 @@ class BinaryFrameTest {
         val entry = decoded.winds.single()
         assertEquals("wind", entry.name)
         assertEquals(Vector3(0.0, 0.0, 11.0), entry.velocity)
+        assertNull(entry.velocitySource) // built from a native Kotlin lambda, no expression string
         // density is unaffected - it keeps traveling in the ordinary fields list exactly as before.
         assertEquals(
             DecodedFieldEntry("force", "wind", "density", particlesim.physics.FieldValue.Scalar(1.2)),
             decoded.fields.single(),
         )
+    }
+
+    @Test
+    fun `§10_4 new requirement - a Wind velocity set from a parsed expression round-trips its source`() {
+        val store = ParticleStore()
+        val wind = particlesim.physics.Wind(triangles = emptyList(), velocity = VectorExpr.of(Vector3.ZERO), name = "wind")
+        wind.setVelocity(particlesim.expr.ExpressionParser.parseVector("[6.0 + 2.0*sin(t), 0, 0]"))
+        val registry = SceneRegistry.build(forces = listOf(wind))
+
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), registry = registry)
+        val entry = BinaryFrame.decode(buffer).registry.winds.single()
+
+        assertEquals("[6.0 + 2.0*sin(t), 0, 0]", entry.velocitySource)
     }
 
     @Test

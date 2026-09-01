@@ -30,6 +30,15 @@ class EmitterTest {
     )
 
     @Test
+    fun `§10_4 new requirement - currentRateSource is null for a plain literal rate, non-null after a parsed expression edit`() {
+        val e = emitter(rate = 10.0)
+        assertEquals(null, e.currentRateSource())
+
+        e.setRate(particlesim.expr.ExpressionParser.parseScalar("10.0 + 5.0*sin(t)"))
+        assertEquals("10.0 + 5.0*sin(t)", e.currentRateSource())
+    }
+
+    @Test
     fun `spawns exactly one particle per step when rate times dt equals one`() {
         val store = ParticleStore()
         val groups = Groups()

@@ -21,9 +21,9 @@ object ExpressionParser {
             throw ExpressionException("expected a scalar expression but \"$source\" is a vector")
         }
         return if (node.isConstant) {
-            ScalarExpr.of((node.evaluate(0.0) as Value.Num).v)
+            ScalarExpr.of((node.evaluate(0.0) as Value.Num).v, source)
         } else {
-            ScalarExpr.of { t -> (node.evaluate(t) as Value.Num).v }
+            ScalarExpr.OfTime({ t -> (node.evaluate(t) as Value.Num).v }, source)
         }
     }
 
@@ -33,9 +33,9 @@ object ExpressionParser {
             throw ExpressionException("expected a vector expression but \"$source\" is a scalar")
         }
         return if (node.isConstant) {
-            VectorExpr.of((node.evaluate(0.0) as Value.Vec).v)
+            VectorExpr.of((node.evaluate(0.0) as Value.Vec).v, source)
         } else {
-            VectorExpr.of { t -> (node.evaluate(t) as Value.Vec).v }
+            VectorExpr.OfTime({ t -> (node.evaluate(t) as Value.Vec).v }, source)
         }
     }
 }

@@ -65,6 +65,23 @@ import java.nio.charset.StandardCharsets
  *                                                            u8 valueKind (0=scalar, 1=vector),
  *                                                            valueKind==0: f64 value
  *                                                            valueKind==1: f64 x, y, z }
+ * i32  registryEmitterCount; registryEmitterCount * { i32 nameLen, nameLen UTF-8 bytes, f64 rate,
+ *                                                       i32 rateSourceLen, rateSourceLen UTF-8 bytes,
+ *                                                       i32 maxAlive, u8 evictOldest }
+ * i32  registryWindCount; registryWindCount * { i32 nameLen, nameLen UTF-8 bytes,
+ *                                                 f64 vx, vy, vz,
+ *                                                 i32 velocitySourceLen, velocitySourceLen UTF-8 bytes }
+ * i32  registryParticleExprCount; registryParticleExprCount * { i32 particleId,
+ *                                                                 i32 fieldLen, fieldLen UTF-8 bytes,
+ *                                                                 i32 sourceLen, sourceLen UTF-8 bytes }
+ *                                  (§10.4's new "show the current expression source"
+ *                                  requirement — one entry per particle whose mass/radius was
+ *                                  last set from a parsed expression string; empty for every
+ *                                  particle that never had one, which is the common case, and
+ *                                  a `*SourceLen 0` above means the same for a named
+ *                                  emitter/wind that never had one either, same "empty means
+ *                                  absent" convention every other optional string in this
+ *                                  format already uses)
  * i32  colliderCount
  * colliderCount * { u8 kind (0=plane, 1=sphere, 2=box), i32 nameLen, nameLen UTF-8 bytes,
  *                    f64 px, py, pz,
@@ -236,6 +253,7 @@ object BinaryFrame {
         val fieldEntries = collectEditableFields(registry)
         val emitterEntries = collectEmitterEntries(registry, t)
         val windEntries = collectWindEntries(registry, t)
+        val particleExpressionEntries = collectParticleExpressionSources(store)
         val size = HEADER_SIZE + ids.size * PARTICLE_SIZE +
             CONNECTION_HEADER_SIZE + connections.sumOf { CONNECTION_FIXED_SIZE + stringSize(connectionNames[it] ?: "") } +
             CAMERA_FLAG_SIZE + (if (camera != null) CAMERA_SIZE else 0) +
@@ -253,6 +271,7 @@ object BinaryFrame {
             fieldEntryListSize(fieldEntries) +
             emitterEntryListSize(emitterEntries) +
             windEntryListSize(windEntries) +
+            particleExpressionEntryListSize(particleExpressionEntries) +
             COLLIDER_HEADER_SIZE + colliders.sumOf { colliderEntrySize(it) } +
             EVENT_HEADER_SIZE + events.sumOf { eventEntrySize(it) } +
             nameListSize(availableScenes) + stringSize(activeScene)
@@ -348,6 +367,7 @@ object BinaryFrame {
         for (entry in emitterEntries) {
             putString(buffer, entry.name)
             buffer.putDouble(entry.rate)
+            putString(buffer, entry.rateSource ?: "")
             buffer.putInt(entry.maxAlive)
             buffer.put(if (entry.evictOldest) 1 else 0)
         }
@@ -355,6 +375,13 @@ object BinaryFrame {
         for (entry in windEntries) {
             putString(buffer, entry.name)
             putVector(buffer, entry.velocity)
+            putString(buffer, entry.velocitySource ?: "")
+        }
+        buffer.putInt(particleExpressionEntries.size)
+        for (entry in particleExpressionEntries) {
+            buffer.putInt(entry.particleId)
+            putString(buffer, entry.field)
+            putString(buffer, entry.source)
         }
         buffer.putInt(colliders.size)
         for (collider in colliders) {
@@ -458,6 +485,7 @@ object BinaryFrame {
             fields = getFieldEntryList(buf),
             emitters = getEmitterEntryList(buf),
             winds = getWindEntryList(buf),
+            particleExpressions = getParticleExpressionEntryList(buf),
         )
         val colliderCount = buf.int
         val colliders = (0 until colliderCount).map {
@@ -535,29 +563,46 @@ object BinaryFrame {
     /** §10.4's emitter read path: one entry per named [particlesim.lifecycle.Emitter] in the
      * registry (every emitter is named - see [SceneRegistry]'s own doc comment - so unlike
      * [collectEditableFields] there's no per-entity opt-in check here). `rate` is the live
-     * evaluated number at this frame's [t], not the expression source - same convention as a
-     * particle's mass/radius. */
+     * evaluated number at this frame's [t]; `rateSource` (§10.4, new requirement) is the
+     * expression string it was last set from, alongside it rather than instead of it. */
     private fun collectEmitterEntries(registry: SceneRegistry, t: Double): List<RegistryEmitterEntry> =
         registry.emitters.map { (name, emitter) ->
-            RegistryEmitterEntry(name, emitter.currentRate(t), emitter.maxAlive, emitter.currentCapPolicy() == EmitterCapPolicy.EVICT_OLDEST)
+            RegistryEmitterEntry(
+                name, emitter.currentRate(t), emitter.currentRateSource(), emitter.maxAlive,
+                emitter.currentCapPolicy() == EmitterCapPolicy.EVICT_OLDEST,
+            )
         }
 
     private fun emitterEntryListSize(entries: List<RegistryEmitterEntry>): Int =
-        REGISTRY_LIST_HEADER_SIZE + entries.sumOf { stringSize(it.name) + 8 + 4 + 1 }
+        REGISTRY_LIST_HEADER_SIZE + entries.sumOf { stringSize(it.name) + 8 + stringSize(it.rateSource ?: "") + 4 + 1 }
 
     /** §10.4's `Wind.velocity` read path: one entry per named [Wind] force in the registry -
      * kept off the generic `fields`/[EditableFields] list the same reason [collectEmitterEntries]
      * keeps `rate` off it: the value is a live-evaluated expression, and [collectEditableFields]
      * has no `t` to evaluate one against. `velocity` is the live evaluated vector at this
-     * frame's [t], never the expression source - same convention as `rate`. `density` is
-     * unaffected - it keeps traveling in the ordinary `fields` list exactly as before. */
+     * frame's [t]; `velocitySource` (§10.4, new requirement) is the expression string it was
+     * last set from. `density` is unaffected - it keeps traveling in the ordinary `fields` list
+     * exactly as before. */
     private fun collectWindEntries(registry: SceneRegistry, t: Double): List<RegistryWindEntry> =
         registry.forces.entries.mapNotNull { (name, force) ->
-            (force as? Wind)?.let { RegistryWindEntry(name, it.currentVelocity(t)) }
+            (force as? Wind)?.let { RegistryWindEntry(name, it.currentVelocity(t), it.currentVelocitySource()) }
         }
 
     private fun windEntryListSize(entries: List<RegistryWindEntry>): Int =
-        REGISTRY_LIST_HEADER_SIZE + entries.sumOf { stringSize(it.name) + 24 }
+        REGISTRY_LIST_HEADER_SIZE + entries.sumOf { stringSize(it.name) + 24 + stringSize(it.velocitySource ?: "") }
+
+    /** §10.4's new "show the current expression source" requirement, particle mass/radius's
+     * read path - see [RegistryParticleExpressionEntry]'s own doc comment for why this list is
+     * naturally sparse rather than one entry per live particle. */
+    private fun collectParticleExpressionSources(store: ParticleStore): List<RegistryParticleExpressionEntry> {
+        val entries = ArrayList<RegistryParticleExpressionEntry>()
+        for ((id, source) in store.massSources()) entries += RegistryParticleExpressionEntry(id, "mass", source)
+        for ((id, source) in store.radiusSources()) entries += RegistryParticleExpressionEntry(id, "radius", source)
+        return entries
+    }
+
+    private fun particleExpressionEntryListSize(entries: List<RegistryParticleExpressionEntry>): Int =
+        REGISTRY_LIST_HEADER_SIZE + entries.sumOf { 4 + stringSize(it.field) + stringSize(it.source) }
 
     private fun colliderEntrySize(collider: Collider): Int {
         val shapeSize = when (collider) {
@@ -635,15 +680,31 @@ object BinaryFrame {
         return (0 until count).map {
             val name = getString(buffer)
             val rate = buffer.double
+            val rateSource = getString(buffer).ifEmpty { null }
             val maxAlive = buffer.int
             val evictOldest = buffer.get().toInt() != 0
-            DecodedEmitterEntry(name, rate, maxAlive, evictOldest)
+            DecodedEmitterEntry(name, rate, rateSource, maxAlive, evictOldest)
         }
     }
 
     private fun getWindEntryList(buffer: ByteBuffer): List<DecodedWindEntry> {
         val count = buffer.int
-        return (0 until count).map { DecodedWindEntry(getString(buffer), getVector(buffer)) }
+        return (0 until count).map {
+            val name = getString(buffer)
+            val velocity = getVector(buffer)
+            val velocitySource = getString(buffer).ifEmpty { null }
+            DecodedWindEntry(name, velocity, velocitySource)
+        }
+    }
+
+    private fun getParticleExpressionEntryList(buffer: ByteBuffer): List<DecodedParticleExpressionEntry> {
+        val count = buffer.int
+        return (0 until count).map {
+            val particleId = buffer.int
+            val field = getString(buffer)
+            val source = getString(buffer)
+            DecodedParticleExpressionEntry(particleId, field, source)
+        }
     }
 
     private fun getBoolNameList(buffer: ByteBuffer): Map<String, Boolean> {
@@ -700,20 +761,37 @@ private data class RegistryFieldEntry(val kind: String, val name: String, val fi
 data class DecodedFieldEntry(val kind: String, val name: String, val field: String, val value: FieldValue)
 
 /** One named [particlesim.lifecycle.Emitter]'s §10.4 read path - used internally by [encode]
- * only, mirroring [RegistryFieldEntry]'s split from its decoded counterpart. */
-private data class RegistryEmitterEntry(val name: String, val rate: Double, val maxAlive: Int, val evictOldest: Boolean)
+ * only, mirroring [RegistryFieldEntry]'s split from its decoded counterpart. [rateSource] is
+ * §10.4's new "show the current expression source" requirement - `null` (encoded as an empty
+ * string, same "empty means absent" convention [DecodedMesh.name] already uses) when [rate]
+ * wasn't set from a parsed expression string. */
+private data class RegistryEmitterEntry(val name: String, val rate: Double, val rateSource: String?, val maxAlive: Int, val evictOldest: Boolean)
 
 /** [RegistryEmitterEntry], decoded. `evictOldest == true` means
  * [particlesim.lifecycle.EmitterCapPolicy.EVICT_OLDEST], matching
  * [particlesim.debug.SceneControlMessage.SetEmitterCapPolicy]'s own convention. */
-data class DecodedEmitterEntry(val name: String, val rate: Double, val maxAlive: Int, val evictOldest: Boolean)
+data class DecodedEmitterEntry(val name: String, val rate: Double, val rateSource: String?, val maxAlive: Int, val evictOldest: Boolean)
 
 /** One named [Wind] force's §10.4 `velocity` read path - used internally by [encode] only,
- * mirroring [RegistryEmitterEntry]'s split from its decoded counterpart. */
-private data class RegistryWindEntry(val name: String, val velocity: Vector3)
+ * mirroring [RegistryEmitterEntry]'s split from its decoded counterpart. [velocitySource] is
+ * [RegistryEmitterEntry.rateSource]'s counterpart for [velocity]. */
+private data class RegistryWindEntry(val name: String, val velocity: Vector3, val velocitySource: String?)
 
 /** [RegistryWindEntry], decoded. */
-data class DecodedWindEntry(val name: String, val velocity: Vector3)
+data class DecodedWindEntry(val name: String, val velocity: Vector3, val velocitySource: String? = null)
+
+/** One particle's mass or radius §10.4 expression-source read path - the id-addressed
+ * counterpart to [RegistryEmitterEntry.rateSource]/[RegistryWindEntry.velocitySource]. Unlike
+ * those two (one entry per named force, source always present in the list, empty string when
+ * absent), this list only ever contains entries for particles that actually have a known source
+ * ([particlesim.core.ParticleStore.massSources]/[particlesim.core.ParticleStore.radiusSources]
+ * are already sparse) - naturally empty for a scene where mass/radius has never been live-edited
+ * via an expression string, so this section costs nothing in the common case. [field] is
+ * `"mass"` or `"radius"`. */
+private data class RegistryParticleExpressionEntry(val particleId: Int, val field: String, val source: String)
+
+/** [RegistryParticleExpressionEntry], decoded. */
+data class DecodedParticleExpressionEntry(val particleId: Int, val field: String, val source: String)
 
 /** One named collider's §10.4 activation state — kept in the registry (unlike the unconditional
  * wireframe [DecodedCollider] section) so an inactive collider's name is still reachable to
@@ -732,6 +810,7 @@ data class DecodedRegistry(
     val fields: List<DecodedFieldEntry> = emptyList(),
     val emitters: List<DecodedEmitterEntry> = emptyList(),
     val winds: List<DecodedWindEntry> = emptyList(),
+    val particleExpressions: List<DecodedParticleExpressionEntry> = emptyList(),
 )
 
 data class DecodedFrame(

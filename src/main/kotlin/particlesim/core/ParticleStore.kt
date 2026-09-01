@@ -10,8 +10,11 @@ package particlesim.core
  * Expression-capable fields (mass, radius, lifetime — §3) always have their *current*
  * evaluated value in the array (the hot-path read); a field whose [ScalarExpr] is a
  * function of time is additionally retained in a sparse id-keyed map so it can be
- * re-evaluated later. Constant-valued fields are evaluated once at creation and not
- * retained anywhere.
+ * re-evaluated later. Constant-valued fields are evaluated once at creation and the
+ * [ScalarExpr] itself isn't retained — except for mass/radius's own *source-text* map
+ * ([massSource]/[radiusSource], §10.4, new requirement), which keeps the originating
+ * expression string (if any) around for both constant and time-varying values alike, since
+ * that's a separate, much smaller thing to remember than the whole expression.
  *
  * Mass carries the runtime safety net required by §13.2: a constant mass that evaluates
  * non-positive is rejected immediately (the Kotlin-DSL equivalent of "reject at validation
@@ -51,6 +54,15 @@ class ParticleStore(private val onWarning: (String) -> Unit = { System.err.print
     private val radiusExprs = HashMap<Int, ScalarExpr.OfTime>()
     private val lifetimeExprs = HashMap<Int, ScalarExpr.OfTime>()
 
+    // §10.4's new "show the current expression source" requirement: unlike massExprs/radiusExprs
+    // above (which only retain a *time-varying* expression, since a constant one is evaluated
+    // once and baked into the primitive array), a constant expression's source text would
+    // otherwise be lost entirely the instant create()/setMass()/setRadius() evaluates it - so
+    // this pair is kept separately, populated for *either* kind whenever the expression actually
+    // carries a source (i.e. it came from ExpressionParser, not a Kotlin literal/native lambda).
+    private val massSourceById = HashMap<Int, String>()
+    private val radiusSourceById = HashMap<Int, String>()
+
     /** Number of live particles. */
     val size: Int get() = idToSlot.size
 
@@ -77,9 +89,11 @@ class ParticleStore(private val onWarning: (String) -> Unit = { System.err.print
 
         massArr[slot] = evaluateMassGuarded(mass, spawnTime, id)
         setOrClearExpr(massExprs, id, mass)
+        setOrClearSource(massSourceById, id, mass)
 
         radiusArr[slot] = radius?.evaluate(spawnTime) ?: Double.NaN
         setOrClearExpr(radiusExprs, id, radius)
+        setOrClearSource(radiusSourceById, id, radius)
 
         spawnTimeArr[slot] = spawnTime
 
@@ -96,6 +110,8 @@ class ParticleStore(private val onWarning: (String) -> Unit = { System.err.print
         massExprs.remove(id)
         radiusExprs.remove(id)
         lifetimeExprs.remove(id)
+        massSourceById.remove(id)
+        radiusSourceById.remove(id)
     }
 
     fun contains(id: Int): Boolean = idToSlot.containsKey(id)
@@ -137,6 +153,11 @@ class ParticleStore(private val onWarning: (String) -> Unit = { System.err.print
     fun mass(id: Int): Double = massArr[slotOf(id)]
     fun hasDynamicMass(id: Int): Boolean = massExprs.containsKey(id)
 
+    /** §10.4's new "show the current expression source" requirement - `null` when this
+     * particle's mass was never set from a parsed expression string (the common case: most
+     * particles are created with a Kotlin-literal [ScalarExpr], which has no source text). */
+    fun massSource(id: Int): String? = massSourceById[id]
+
     /** §10.4's live-editing write path for mass: replaces the particle's stored [ScalarExpr]
      * outright (same [setOrClearExpr] promotion/demotion [create] itself uses), evaluated once
      * at [t]. Rejects — returns `false`, leaves mass unchanged — on NaN/Infinite/non-positive,
@@ -150,10 +171,15 @@ class ParticleStore(private val onWarning: (String) -> Unit = { System.err.print
         if (raw.isNaN() || raw.isInfinite() || raw <= 0.0) return false
         massArr[slot] = raw
         setOrClearExpr(massExprs, id, expr)
+        setOrClearSource(massSourceById, id, expr)
         return true
     }
 
     fun radius(id: Int): Double? = slotOf(id).let { radiusArr[it] }.let { if (it.isNaN()) null else it }
+
+    /** §10.4's new "show the current expression source" requirement, radius's counterpart to
+     * [massSource]. */
+    fun radiusSource(id: Int): String? = radiusSourceById[id]
 
     /** §10.4's live-editing write path for radius — the same outright-replace as [setMass], but
      * with no positivity guard: [create] never validates radius sign either, so an edit doesn't
@@ -166,6 +192,7 @@ class ParticleStore(private val onWarning: (String) -> Unit = { System.err.print
         if (raw.isNaN() || raw.isInfinite()) return false
         radiusArr[slot] = raw
         setOrClearExpr(radiusExprs, id, expr)
+        setOrClearSource(radiusSourceById, id, expr)
         return true
     }
     fun lifetime(id: Int): Double? = slotOf(id).let { lifetimeArr[it] }.let { if (it.isNaN()) null else it }
@@ -236,6 +263,19 @@ class ParticleStore(private val onWarning: (String) -> Unit = { System.err.print
     private fun setOrClearExpr(map: MutableMap<Int, ScalarExpr.OfTime>, id: Int, expr: ScalarExpr?) {
         if (expr is ScalarExpr.OfTime) map[id] = expr else map.remove(id)
     }
+
+    private fun setOrClearSource(map: MutableMap<Int, String>, id: Int, expr: ScalarExpr?) {
+        val source = expr?.source
+        if (source != null) map[id] = source else map.remove(id)
+    }
+
+    /** Every live particle id with a known mass expression source, for
+     * [particlesim.debug.BinaryFrame]'s §10.4 read path - a read-only view, not a snapshot copy,
+     * since it's consumed fresh every frame and never retained by the caller. */
+    fun massSources(): Map<Int, String> = massSourceById
+
+    /** [massSources]' radius counterpart. */
+    fun radiusSources(): Map<Int, String> = radiusSourceById
 
     private fun evaluateMassGuarded(expr: ScalarExpr, t: Double, id: Int): Double {
         val raw = expr.evaluate(t)
