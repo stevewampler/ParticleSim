@@ -155,41 +155,74 @@ class ForceComponentTest {
     fun `EditableFields (§10_4) - Spring exposes extensionStiffness and compressionStiffness, not the base stiffness`() {
         val spring = Spring(0, 1, restLength = 1.0, stiffness = 10.0, compressionStiffness = 2.0)
         assertEquals(
-            mapOf("extensionStiffness" to FieldValue.Scalar(10.0), "compressionStiffness" to FieldValue.Scalar(2.0)),
+            mapOf(
+                "extensionStiffness" to FieldValue.Scalar(10.0), "compressionStiffness" to FieldValue.Scalar(2.0),
+                "extensionBreakThreshold" to FieldValue.Scalar(Double.POSITIVE_INFINITY),
+                "compressionBreakThreshold" to FieldValue.Scalar(Double.POSITIVE_INFINITY),
+            ),
             spring.editableFields(),
         )
 
         assertTrue(spring.setField("extensionStiffness", FieldValue.Scalar(5.0)))
         assertTrue(spring.setField("compressionStiffness", FieldValue.Scalar(6.0)))
-        assertEquals(
-            mapOf("extensionStiffness" to FieldValue.Scalar(5.0), "compressionStiffness" to FieldValue.Scalar(6.0)),
-            spring.editableFields(),
-        )
+        assertEquals(FieldValue.Scalar(5.0), spring.editableFields()["extensionStiffness"])
+        assertEquals(FieldValue.Scalar(6.0), spring.editableFields()["compressionStiffness"])
 
         assertFalse(spring.setField("stiffness", FieldValue.Scalar(1.0))) // base param not exposed
         assertFalse(spring.setField("extensionStiffness", FieldValue.Vector(Vector3.ZERO))) // wrong value kind
     }
 
     @Test
+    fun `EditableFields (§10_4, new requirement) - Spring's break thresholds are readable, settable, and reject NaN`() {
+        val spring = Spring(0, 1, restLength = 1.0, stiffness = 10.0, breakThreshold = 0.5)
+        assertEquals(FieldValue.Scalar(0.5), spring.editableFields()["extensionBreakThreshold"])
+        assertEquals(FieldValue.Scalar(0.5), spring.editableFields()["compressionBreakThreshold"])
+
+        assertTrue(spring.setField("extensionBreakThreshold", FieldValue.Scalar(2.0)))
+        assertTrue(spring.setField("compressionBreakThreshold", FieldValue.Scalar(1.0)))
+        assertEquals(FieldValue.Scalar(2.0), spring.editableFields()["extensionBreakThreshold"])
+        assertEquals(FieldValue.Scalar(1.0), spring.editableFields()["compressionBreakThreshold"])
+
+        // A live edit is user input arriving over the wire (e.g. an emptied number input, §10.3)
+        // and must never silently make a threshold NaN, which would break every edge instantly.
+        assertFalse(spring.setField("extensionBreakThreshold", FieldValue.Scalar(Double.NaN)))
+        assertEquals(FieldValue.Scalar(2.0), spring.editableFields()["extensionBreakThreshold"]) // unchanged
+    }
+
+    @Test
     fun `EditableFields (§10_4) - Damper exposes extensionDamping and compressionDamping, not the base damping`() {
         val damper = Damper(0, 1, damping = 3.0, extensionDamping = 5.0)
         assertEquals(
-            mapOf("extensionDamping" to FieldValue.Scalar(5.0), "compressionDamping" to FieldValue.Scalar(3.0)),
+            mapOf(
+                "extensionDamping" to FieldValue.Scalar(5.0), "compressionDamping" to FieldValue.Scalar(3.0),
+                "extensionBreakThreshold" to FieldValue.Scalar(Double.POSITIVE_INFINITY),
+                "compressionBreakThreshold" to FieldValue.Scalar(Double.POSITIVE_INFINITY),
+            ),
             damper.editableFields(),
         )
 
         assertTrue(damper.setField("extensionDamping", FieldValue.Scalar(1.0)))
         assertTrue(damper.setField("compressionDamping", FieldValue.Scalar(2.0)))
-        assertEquals(
-            mapOf("extensionDamping" to FieldValue.Scalar(1.0), "compressionDamping" to FieldValue.Scalar(2.0)),
-            damper.editableFields(),
-        )
+        assertEquals(FieldValue.Scalar(1.0), damper.editableFields()["extensionDamping"])
+        assertEquals(FieldValue.Scalar(2.0), damper.editableFields()["compressionDamping"])
 
         assertFalse(damper.setField("damping", FieldValue.Scalar(1.0))) // base param not exposed
     }
 
     @Test
-    fun `EditableFields (§10_4) - MeshSprings exposes all four stiffness+damping fields, not restLength`() {
+    fun `EditableFields (§10_4, new requirement) - Damper's break thresholds are readable, settable, and reject NaN`() {
+        val damper = Damper(0, 1, damping = 1.0, breakThreshold = 3.0)
+        assertEquals(FieldValue.Scalar(3.0), damper.editableFields()["extensionBreakThreshold"])
+
+        assertTrue(damper.setField("compressionBreakThreshold", FieldValue.Scalar(4.0)))
+        assertEquals(FieldValue.Scalar(4.0), damper.editableFields()["compressionBreakThreshold"])
+
+        assertFalse(damper.setField("compressionBreakThreshold", FieldValue.Scalar(Double.NaN)))
+        assertEquals(FieldValue.Scalar(4.0), damper.editableFields()["compressionBreakThreshold"]) // unchanged
+    }
+
+    @Test
+    fun `EditableFields (§10_4) - MeshSprings exposes stiffness+damping+break-threshold fields, not restLength`() {
         val store = ParticleStore()
         val a = store.create(position = Vector3(0.0, 0.0, 0.0))
         val b = store.create(position = Vector3(1.0, 0.0, 0.0))
@@ -205,6 +238,8 @@ class ForceComponentTest {
                 "compressionStiffness" to FieldValue.Scalar(10.0),
                 "extensionDamping" to FieldValue.Scalar(1.0),
                 "compressionDamping" to FieldValue.Scalar(1.0),
+                "extensionBreakThreshold" to FieldValue.Scalar(Double.POSITIVE_INFINITY),
+                "compressionBreakThreshold" to FieldValue.Scalar(Double.POSITIVE_INFINITY),
             ),
             mesh.editableFields(),
         )
@@ -215,6 +250,26 @@ class ForceComponentTest {
         assertEquals(FieldValue.Scalar(2.0), mesh.editableFields()["extensionDamping"])
 
         assertFalse(mesh.setField("restLength", FieldValue.Scalar(1.0))) // per-edge array, not exposed
+    }
+
+    @Test
+    fun `EditableFields (§10_4, new requirement) - MeshSprings' break thresholds are readable, settable, and reject NaN`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3(0.0, 0.0, 0.0))
+        val b = store.create(position = Vector3(1.0, 0.0, 0.0))
+        val mesh = MeshSprings(
+            edges = listOf(particlesim.surface.Grid.Edge(a, b)),
+            store = store,
+            stiffness = 10.0,
+            breakThreshold = 0.1,
+        )
+        assertTrue(mesh.setField("extensionBreakThreshold", FieldValue.Scalar(0.2)))
+        assertTrue(mesh.setField("compressionBreakThreshold", FieldValue.Scalar(0.3)))
+        assertEquals(FieldValue.Scalar(0.2), mesh.editableFields()["extensionBreakThreshold"])
+        assertEquals(FieldValue.Scalar(0.3), mesh.editableFields()["compressionBreakThreshold"])
+
+        assertFalse(mesh.setField("extensionBreakThreshold", FieldValue.Scalar(Double.NaN)))
+        assertEquals(FieldValue.Scalar(0.2), mesh.editableFields()["extensionBreakThreshold"]) // unchanged
     }
 
     @Test

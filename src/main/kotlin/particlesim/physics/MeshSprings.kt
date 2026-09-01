@@ -39,28 +39,39 @@ class MeshSprings(
     private var compressionDamping: Double = damping,
     private val minLength: Double = Spring.DEFAULT_MIN_LENGTH,
     private val breakThreshold: Double = Double.POSITIVE_INFINITY,
-    private val extensionBreakThreshold: Double = breakThreshold,
-    private val compressionBreakThreshold: Double = breakThreshold,
+    private var extensionBreakThreshold: Double = breakThreshold,
+    private var compressionBreakThreshold: Double = breakThreshold,
     override val name: String? = null,
 ) : Force, EditableFields {
-    /** Same rationale as [Spring.editableFields]: exposes the four fields [accumulate] actually
-     * reads, not the base [stiffness]/[damping] constructor defaults. Per-edge [restLength] is
-     * deliberately not exposed here — unlike stiffness/damping it isn't one shared value but an
-     * array computed per-edge at construction, and editing it live is a different feature. */
+    /** Same rationale as [Spring.editableFields]: exposes the six fields [accumulate]/
+     * [activeConnectionsWithBreakProximity] actually read, not the base [stiffness]/[damping]/
+     * [breakThreshold] constructor defaults - the break-threshold pair is §10.4's new
+     * requirement, letting a surface's tear resistance (e.g. the flag's structural springs,
+     * §7.3) be tuned live the same way its stiffness/damping already could. Per-edge
+     * [restLength] is deliberately not exposed here — unlike stiffness/damping/break-threshold
+     * it isn't one shared value but an array computed per-edge at construction, and editing it
+     * live is a different feature. Lowering a break threshold below an edge's current
+     * displacement/relative-velocity breaks that edge on its very next [accumulate] call, same
+     * as reaching it via normal simulation — there is no "undo" that restores an already-broken
+     * edge by raising the threshold back up (§5.4: breaking is permanent). */
     override fun editableFields(): Map<String, FieldValue> = mapOf(
         "extensionStiffness" to FieldValue.Scalar(extensionStiffness),
         "compressionStiffness" to FieldValue.Scalar(compressionStiffness),
         "extensionDamping" to FieldValue.Scalar(extensionDamping),
         "compressionDamping" to FieldValue.Scalar(compressionDamping),
+        "extensionBreakThreshold" to FieldValue.Scalar(extensionBreakThreshold),
+        "compressionBreakThreshold" to FieldValue.Scalar(compressionBreakThreshold),
     )
 
     override fun setField(field: String, value: FieldValue): Boolean {
-        if (value !is FieldValue.Scalar) return false
+        if (value !is FieldValue.Scalar || value.value.isNaN()) return false
         when (field) {
             "extensionStiffness" -> extensionStiffness = value.value
             "compressionStiffness" -> compressionStiffness = value.value
             "extensionDamping" -> extensionDamping = value.value
             "compressionDamping" -> compressionDamping = value.value
+            "extensionBreakThreshold" -> extensionBreakThreshold = value.value
+            "compressionBreakThreshold" -> compressionBreakThreshold = value.value
             else -> return false
         }
         return true

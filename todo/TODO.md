@@ -3218,12 +3218,14 @@ wording; recorded once below, not as two separate items.
       form survives past `ExpressionParser.parse*`, so there's nothing to
       show back even before any UI work. Presentation not decided (a
       second read-only line? a toggle?).
-- [ ] Flag surface self-collision: the flag's own particles shouldn't be
-      able to pass through its own surface as it billows/folds
-      (requirements.md §12.4's "Surface self-collision" bullet, still
-      `[stretch]` - genuinely unbuilt anywhere in this codebase, unlike
-      the particle-vs-surface case below). Likely the largest single
-      piece of new physics work in this batch.
+- [ ] `[stretch]` Flag surface self-collision: the flag's own particles
+      shouldn't be able to pass through its own surface as it
+      billows/folds (requirements.md §12.4's "Surface self-collision"
+      bullet, already `[stretch]` there - genuinely unbuilt anywhere in
+      this codebase, unlike the particle-vs-surface case below). Likely
+      the largest single piece of new physics work in this batch;
+      deprioritized behind §10.4's live-editing work per direct user
+      request.
 - [x] Put the flag on a pole the way `MultiShapeScene` already composes
       `buildFlagpole` + `buildFlag` by placement (requirements.md §7.3) -
       confirmed this part needed nothing new: `MultiShapeScene` already
@@ -3353,21 +3355,78 @@ wording; recorded once below, not as two separate items.
       genuinely dynamic, not a frozen copy of the old rigid pin - and no
       NaN/blow-up. No console errors. The scene picker dropdown correctly
       lists `flagOnRope` alongside every other scene.
-- [ ] Rope/pole vs. flag surface collision: neither the rope nor the pole
-      should be able to pass through the flag's surface
-      (requirements.md §12.4's "Particle vs. triangulated surface"
-      bullet - already built and no longer `[stretch]`, per
-      `SurfaceCollisionSystem`/the trampoline worked example). This is
-      *wiring* that existing mechanism to a new collision-group pairing
-      (§12.3), not new collision physics.
-- [ ] A surface's spring/damper **breaking limits**
+- [ ] `[stretch]` Rope/pole vs. flag surface collision: neither the rope
+      nor the pole should be able to pass through the flag's surface
+      (requirements.md §12.4's "Particle vs. triangulated surface" bullet
+      - the underlying mechanism is already built, no longer `[stretch]`
+      itself, per `SurfaceCollisionSystem`/the trampoline worked example;
+      only *this pairing's wiring* is now marked `[stretch]`, per direct
+      user request, to prioritize §10.4's live-editing work below first).
+      This is *wiring* that existing mechanism to a new collision-group
+      pairing (§12.3), not new collision physics.
+- [x] A surface's spring/damper **breaking limits**
       (`breakThreshold`/`extensionBreakThreshold`/
       `compressionBreakThreshold`) exposed as editable alongside
       stiffness/damping in the group's springs/dampers tab
-      (requirements.md §10.4/§5.4). Currently `private val`s with no
-      `editableFields()` entry at all on `Spring`/`Damper` - the same
-      "real implementation gap, not just a UI one" already noted for
-      every other still-`private val` force/constraint field in §10.4.
+      (requirements.md §10.4/§5.4). `extensionBreakThreshold`/
+      `compressionBreakThreshold` promoted from `private val` to
+      `private var` on `Spring`, `Damper`, and `MeshSprings`, and added to
+      each class's existing `editableFields()`/`setField()` map alongside
+      stiffness/damping - **zero frontend/wire-protocol changes needed**:
+      `BinaryFrame.collectEditableFields` already flattens *every*
+      `EditableFields` field a named force exposes into the generic
+      `fields` list every frame, and `viewer.html`'s `renderEditableFields`
+      already renders whatever it finds there for a group's qualifying
+      spring/damper/`MeshSprings` tab - confirmed by reading that whole
+      chain before writing any code, not assumed. `setField` on all three
+      classes now rejects `NaN` (`value.value.isNaN()) return false`),
+      the same "a live edit is user input arriving over the wire and must
+      never silently corrupt state" stance `ParticleStore.setMass` already
+      documents - without this, an emptied number input sending
+      `parseFloat("") === NaN` would have set a break threshold to `NaN`,
+      breaking every edge on the very next `accumulate` call (`NaN`
+      comparisons are always false, so `shouldBreak`'s displacement check
+      would misbehave rather than throw, a silent corruption rather than
+      a crash).
+      **A real UX wrinkle caught before it shipped, not after**: every
+      threshold defaults to `Double.POSITIVE_INFINITY` ("never breaks") -
+      the first editable field in this codebase with a non-finite default.
+      A `type="number"` input can't hold `Infinity` as an actual value
+      (browsers silently coerce it to an empty box), which would have
+      looked indistinguishable from "value 0" or a rendering bug with zero
+      indication of what it actually means. Fixed generically in
+      `viewer.html`'s shared `renderEditableFields`/`updateEditableFieldsLive`
+      (not special-cased to break thresholds) - a non-finite scalar value
+      now renders as an empty input with a `"∞ (no limit)"` (or `"-∞"`)
+      placeholder instead, and an untouched-and-still-empty input no
+      longer sends an edit at all (guards the same accidental-NaN path
+      from the client side too, belt-and-suspenders with the server-side
+      `setField` guard above).
+      **Breaking is still permanent, editing the threshold doesn't undo
+      it**: lowering a threshold below an edge's current displacement/
+      relative-velocity breaks that edge on its very next physics step,
+      same as reaching it through normal simulation; raising the
+      threshold back up afterward does not restore an already-broken edge
+      (§5.4's "breaking is permanent" applies exactly the same to a
+      live-edited threshold as to one reached by simulation alone) - noted
+      here explicitly so this isn't later mistaken for a bug.
+      8 new/updated tests in `ForceComponentTest.kt`: `Spring`/`Damper`/
+      `MeshSprings`' existing `editableFields()` tests updated to expect
+      the two new infinite-default entries; three new tests (one per
+      class) confirming the break-threshold pair is readable, settable,
+      and that `setField` rejects `FieldValue.Scalar(Double.NaN)` (returns
+      `false`, leaves the previous value in place).
+      **Verified live in Chrome** against the `flag` scene: selected the
+      `cloth` group, opened its `structural` spring tab, confirmed
+      `extensionBreakThreshold`/`compressionBreakThreshold` both render as
+      empty inputs with the `∞ (no limit)` placeholder at their infinite
+      defaults (not blank-looking-like-zero); typed `0.01` into
+      `extensionBreakThreshold` and tabbed out - the input kept showing
+      `0.01` on every subsequent live-refresh (confirming the edit stuck,
+      not reverted), and the flag's cloth mesh visibly changed shape
+      within a few seconds (structural edges breaking under normal
+      wind-driven flapping displacement, well within a threshold that
+      tight). No console errors.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

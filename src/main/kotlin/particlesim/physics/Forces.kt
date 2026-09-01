@@ -149,26 +149,31 @@ class Spring(
     private var compressionStiffness: Double = stiffness,
     private val minLength: Double = DEFAULT_MIN_LENGTH,
     private val breakThreshold: Double = Double.POSITIVE_INFINITY,
-    private val extensionBreakThreshold: Double = breakThreshold,
-    private val compressionBreakThreshold: Double = breakThreshold,
+    private var extensionBreakThreshold: Double = breakThreshold,
+    private var compressionBreakThreshold: Double = breakThreshold,
     override val name: String? = null,
 ) : Force, Breakable, PairwiseForce, EditableFields {
     override val particleA: Int get() = idA
     override val particleB: Int get() = idB
 
-    /** Exposes only the extension/compression pair actually read by [accumulate] — the base
-     * [stiffness] constructor default is never read again once those two are set, so editing
-     * it live would be a silent no-op. */
+    /** Exposes the extension/compression stiffness pair actually read by [accumulate], plus
+     * (§10.4, new requirement) the extension/compression break-threshold pair [shouldBreak]
+     * reads — the base [stiffness]/[breakThreshold] constructor defaults are never read again
+     * once those pairs are set, so editing either default live would be a silent no-op. */
     override fun editableFields(): Map<String, FieldValue> = mapOf(
         "extensionStiffness" to FieldValue.Scalar(extensionStiffness),
         "compressionStiffness" to FieldValue.Scalar(compressionStiffness),
+        "extensionBreakThreshold" to FieldValue.Scalar(extensionBreakThreshold),
+        "compressionBreakThreshold" to FieldValue.Scalar(compressionBreakThreshold),
     )
 
     override fun setField(field: String, value: FieldValue): Boolean {
-        if (value !is FieldValue.Scalar) return false
+        if (value !is FieldValue.Scalar || value.value.isNaN()) return false
         when (field) {
             "extensionStiffness" -> extensionStiffness = value.value
             "compressionStiffness" -> compressionStiffness = value.value
+            "extensionBreakThreshold" -> extensionBreakThreshold = value.value
+            "compressionBreakThreshold" -> compressionBreakThreshold = value.value
             else -> return false
         }
         return true
@@ -235,25 +240,29 @@ class Damper(
     private var compressionDamping: Double = damping,
     private val minLength: Double = Spring.DEFAULT_MIN_LENGTH,
     private val breakThreshold: Double = Double.POSITIVE_INFINITY,
-    private val extensionBreakThreshold: Double = breakThreshold,
-    private val compressionBreakThreshold: Double = breakThreshold,
+    private var extensionBreakThreshold: Double = breakThreshold,
+    private var compressionBreakThreshold: Double = breakThreshold,
     override val name: String? = null,
 ) : Force, Breakable, PairwiseForce, EditableFields {
     override val particleA: Int get() = idA
     override val particleB: Int get() = idB
 
-    /** Same rationale as [Spring.editableFields] — the base [damping] default is never read
-     * again once the extension/compression pair is set. */
+    /** Same rationale as [Spring.editableFields] — the base [damping]/[breakThreshold] defaults
+     * are never read again once their extension/compression pairs are set. */
     override fun editableFields(): Map<String, FieldValue> = mapOf(
         "extensionDamping" to FieldValue.Scalar(extensionDamping),
         "compressionDamping" to FieldValue.Scalar(compressionDamping),
+        "extensionBreakThreshold" to FieldValue.Scalar(extensionBreakThreshold),
+        "compressionBreakThreshold" to FieldValue.Scalar(compressionBreakThreshold),
     )
 
     override fun setField(field: String, value: FieldValue): Boolean {
-        if (value !is FieldValue.Scalar) return false
+        if (value !is FieldValue.Scalar || value.value.isNaN()) return false
         when (field) {
             "extensionDamping" -> extensionDamping = value.value
             "compressionDamping" -> compressionDamping = value.value
+            "extensionBreakThreshold" -> extensionBreakThreshold = value.value
+            "compressionBreakThreshold" -> compressionBreakThreshold = value.value
             else -> return false
         }
         return true

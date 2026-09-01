@@ -1394,9 +1394,19 @@ function renderEditableFields(kind, name, inputsOut) {
       const input = document.createElement("input");
       input.type = "number";
       input.step = "any";
-      input.value = f.value.value;
+      // An infinite value (e.g. a never-breaks Spring/Damper/MeshSprings break threshold, §5.4)
+      // can't be a type="number" input's actual value - the browser silently renders it as an
+      // empty box either way, so make that "no limit" reading explicit via a placeholder rather
+      // than leaving a blank field indistinguishable from "value 0" or a rendering bug.
+      if (Number.isFinite(f.value.value)) {
+        input.value = f.value.value;
+      } else {
+        input.value = "";
+        input.placeholder = f.value.value > 0 ? "∞ (no limit)" : "-∞";
+      }
       selectAllOnFocus(input);
       input.addEventListener("change", () => {
+        if (input.value === "") return; // left blank (still infinite) - nothing to send
         sendEdit({ type: "set_scalar_field", kind, name, field: f.field, value: parseFloat(input.value) });
       });
       row.appendChild(input);
@@ -1430,7 +1440,9 @@ function updateEditableFieldsLive(kind, name, inputsIn) {
     const entry = inputsIn[f.field];
     if (!entry) continue;
     if (entry.valueKind === "scalar") {
-      if (document.activeElement !== entry.input) entry.input.value = f.value.value;
+      if (document.activeElement !== entry.input) {
+        entry.input.value = Number.isFinite(f.value.value) ? f.value.value : "";
+      }
     } else {
       ["x", "y", "z"].forEach((axis, i) => {
         if (document.activeElement !== entry.inputs[i]) entry.inputs[i].value = f.value[axis];

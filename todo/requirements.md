@@ -1286,12 +1286,15 @@ main lever for performance.
   friction/rest-clamp formulas but with an equal-and-opposite reaction
   impulse split across the deformable surface's three vertex particles by
   barycentric weight — the genuinely new part a static `Collider` never
-  needed). *(New requirement)* §7.3's pole/rope extension needs this same
-  mechanism applied to a second pairing: the rope and pole shouldn't be
-  able to pass through the flag's surface either. This is *wiring* an
-  existing mechanism to a new group pair (§12.3), not new collision
-  physics — the same "already built, just needs a second consumer"
-  situation, not a from-scratch gap.
+  needed). *(New requirement, `[stretch]`)* §7.3's pole/rope extension
+  would benefit from this same mechanism applied to a second pairing: the
+  rope and pole shouldn't be able to pass through the flag's surface
+  either. This is *wiring* an existing mechanism to a new group pair
+  (§12.3), not new collision physics — the same "already built, just needs
+  a second consumer" situation, not a from-scratch gap — but deprioritized
+  behind §10.4's live-editing work (expression-source visibility,
+  spring/damper break limits) per direct user request; pick it up whenever
+  the pole/rope worked example needs it for real, not before.
 - **Surface self-collision** (cloth colliding with itself) is `[stretch]`
   and likely last in priority — expensive and only needed for
   heavily-folding cloth scenarios. *(New requirement)* §7.3's flag now has
