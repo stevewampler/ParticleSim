@@ -3224,20 +3224,86 @@ wording; recorded once below, not as two separate items.
       `[stretch]` - genuinely unbuilt anywhere in this codebase, unlike
       the particle-vs-surface case below). Likely the largest single
       piece of new physics work in this batch.
-- [ ] Put the flag on a pole the way `MultiShapeScene` already composes
+- [x] Put the flag on a pole the way `MultiShapeScene` already composes
       `buildFlagpole` + `buildFlag` by placement (requirements.md §7.3) -
-      this part reuses an existing, already-built mechanism; the open
-      question is only which demo/scene should show it (today only
-      `MultiShapeScene` composes the two; the flag scene proper doesn't).
-- [ ] A new **rope** shape (a spring-chain of particles, the same
-      primitive as e.g. the drag chain) whose top is fixed to the pole's
-      top particle and whose bottom is fixed partway up the pole -
-      requirements.md §7.3. Doesn't exist yet as a reusable shape.
+      confirmed this part needed nothing new: `MultiShapeScene` already
+      does exactly this (`buildFlag`'s placement offset is
+      `Vector3(0, poleHeight, 0)`, putting the flag's top row level with
+      the pole's own top). Not yet pulled into the flag scene proper or
+      the new `poleRope` scene below - still open, tracked in the next
+      item now that the rope it needs to attach to actually exists.
+- [x] A new **rope** shape (`particlesim.examples.buildRope`) - a chain
+      of particles between two fixed anchors, connected by individual
+      `Spring`/`Damper` pairs per link (the same per-edge pattern
+      `buildTire` already uses for a similarly small edge count, not
+      `MeshSprings`' one-`Force`-for-thousands treatment a mesh needs).
+      **Slack, not rigid**: `compressionStiffness = 0.0` by default,
+      requirements.md §5.4's own stated reasoning for why a rope
+      shouldn't resist compression the way a rod would - with both ends
+      pinned, this is what lets it sag into a natural drape under gravity
+      instead of holding a straight rigid line. Anchors are relative to
+      `ShapePlacement.offset`, the same convention every other shape
+      uses. Stiffness/mass picked against the same §13.1 budget
+      `buildFlag`'s structural springs already use
+      (`2*sqrt(0.005/200) ≈ 0.02`, ~20x margin over `FLAG_DT = 1e-3`),
+      since this shape's first consumer will share that dt.
+      **A real physical subtlety, not just wiring, caught during live
+      verification**: the first version of the demo scene below placed
+      the rope's top and bottom anchors on the exact same vertical line
+      (same x/z, only y differing) - a degenerate case for a slack chain,
+      since the straight-line rest configuration is then already
+      parallel to gravity, with no lateral direction to sag *into*. Live
+      in Chrome it showed up as a settled, motionless rope bunched
+      exactly along its initial straight layout (`avg speed: 0.000 m/s`
+      in the group panel, centroid unchanged from the initial average) -
+      correct-looking arithmetic, wrong physical setup. Fixed by giving
+      the bottom anchor a genuine sideways offset from the top anchor
+      (matching a real halyard: a pulley at the pole's top centerline,
+      a cleat mounted on the pole's *side* partway down) - not by
+      changing `buildRope` itself, which already handled a diagonal
+      anchor pair correctly (see `RopeTest`'s own diagonal setup, which
+      caught none of this because it was never degenerate to begin with).
+      6 new tests (`RopeTest`): even spacing between anchors before
+      stepping, too-few-segments rejection, placement offset applied to
+      both anchors and every particle between them, both anchors
+      provably immovable under stepping (bit-identical position after
+      2000 steps under gravity), a diagonal-anchor rope sags below the
+      straight line between its anchors and stays finite over 4
+      simulated seconds, and instance-name namespacing (including that
+      an anchor particle correctly belongs to *both* the rope group and
+      a separate anchors-only group, needed for the `FixedPosition` call,
+      while an interior particle belongs only to the former).
+      **New library scene, `poleRope`** (`particlesim.debug.PoleRopeScene`,
+      reachable via the picker or `./gradlew runSceneLibraryDemo
+      --args="poleRope"`) composes `buildFlagpole` + `buildRope` alone -
+      no flag yet, deliberately: verifying the rope's own shape/behavior
+      in isolation first, before wiring anything to it, mirrors the
+      staged approach `RopeTest` already takes at the unit level, and
+      keeps the well-known-good `flag` scene untouched as a reference
+      while this settles (per-scene isolation, not a replacement).
+      **Verified live in Chrome**: 18 particles (7 pole + 11 rope) load
+      and render as two line-connected chains via the outliner's
+      `pole.pole`/`rope.rope`/`rope.rope-anchors` groups and
+      `rope.rope-anchor` constraint; after the anchor-geometry fix above,
+      the rope visibly drapes into a diagonal bow between its two anchors
+      rather than sitting perfectly straight, holds that shape unchanged
+      after 5+ further seconds of running (settled, not oscillating or
+      drifting), and the pole's own particles stay exactly fixed
+      throughout. No console errors.
 - [ ] Attach the flag's pole-side edge to the rope's top portion instead
       of directly to the pole via `FixedPosition.atCurrentPositions`
       (requirements.md §7.3) - a real behavior change to the existing
       flag worked example (the attachment becomes dynamic/swaying, not
-      rigidly fixed), not just an added decoration alongside it.
+      rigidly fixed), not just an added decoration alongside it. `buildRope`
+      exists now (previous entry) - this is the next concrete step, likely
+      landing in a new scene composing `buildFlagpole` + `buildRope` +
+      `buildFlag` together (`PoleRopeScene` above is pole+rope only, on
+      purpose) rather than changing `buildFlag` itself, since
+      `FlagScenario.constraints` is just `listOf(pole-anchor)` - a
+      composing scene can simply not forward that constraint and attach
+      springs from the flag's `grid[row][0]` particles to
+      `rope.ropeIds.take(rows)` instead, with zero signature change to
+      `buildFlag`.
 - [ ] Rope/pole vs. flag surface collision: neither the rope nor the pole
       should be able to pass through the flag's surface
       (requirements.md §12.4's "Particle vs. triangulated surface"
