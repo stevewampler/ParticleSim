@@ -451,6 +451,26 @@ This scenario should work as a first-class example in the eventual example
 library — it exercises surfaces, constraints, structural springs, and
 variable field forces together.
 
+*(New requirement)* Extend this worked example with a pole and a rope,
+replacing the flag's current direct pole-edge attachment:
+- **Pole**: the flag stands beside a vertical pole, the same composition
+  §4.5's shape library already supports — `buildFlagpole` (a static line
+  of particles pinned with `FixedPosition.atCurrentPositions`, purely a
+  visual/structural anchor) placed next to a `buildFlag` instance, as
+  `MultiShapeScene` already demonstrates. Not physically connected to the
+  flag today; that connection is exactly what the rope below adds.
+- **Rope**: a new flexible connector (spring-chain of particles, the same
+  primitive already used for e.g. §9.4's drag chain) whose top end is
+  fixed to the pole's *top* particle and whose bottom end is fixed partway
+  up the pole (not at the base) — a halyard-style loop, not a straight
+  line down the pole's full height.
+- **Flag attachment**: the flag's pole-side edge attaches to the rope's
+  *top* portion (the segment nearest the pole's top), not directly to the
+  pole itself the way it does today via `FixedPosition.atCurrentPositions`
+  on that edge. This makes the flag's attachment dynamic — it can now
+  sway with the rope — rather than rigidly fixed, a real behavior change
+  to the existing worked example, not just an added decoration.
+
 ## 8. Time Control & Integration
 
 - Simulation `duration` (s) and `dt` (fixed timestep, s) are required
@@ -828,7 +848,7 @@ it's being built, before its real renderers exist.
 
 **Particle & surface renderers**: `dot`, `sphere` (§10, using the group's
 particles' `radius` by default), or a shaded/wireframe mesh for a surface.
-*(New requirement)* A surface mesh should also be able to render with an
+*(New requirement, `[stretch]`)* A surface mesh should also be able to render with an
 **image texture** instead of (or as) its shaded material — e.g. an actual
 flag graphic mapped onto §7.3's flag surface, rather than a flat solid
 color. This needs two things neither exists today: **UV coordinates**
@@ -1028,6 +1048,23 @@ entity type before the per-type detail:
   mid-step, read by chunk 0 before the edit and chunk 3 after, would
   silently break both determinism and chunk-order-independence. Applying
   every edit only between steps avoids the question entirely.
+- *(New requirement)* Every expression-capable field's edit control should
+  show the **expression that's currently in effect**, not just its
+  momentarily-evaluated numeric value, so a user can see what they're
+  about to change before overwriting it wholesale. Today (particle mass/
+  radius, `Emitter.rate`, `Wind.velocity`) every one of these fields
+  displays the live evaluated number/vector each frame — the right thing
+  to *show at rest*, since the alternative (freezing the display at the
+  original formula while a time-varying value keeps moving underneath it)
+  would be misleading in its own way — but it means the field a user
+  clicks into never contains the formula they'd actually want to tweak
+  (e.g. re-opening `"2.0 + 0.1*sin(t)"` to change the `0.1`), only its
+  current output (e.g. `2.087...`), and editing wholesale is the only
+  option. None of `ScalarExpr`/`VectorExpr`/`ParticleStore` retain the
+  original source string today — only the parsed, evaluated form — so
+  showing it back requires actually keeping it somewhere, not just a UI
+  change. Exact presentation (a second read-only "formula" line beside
+  the live value? a toggle between the two?) isn't decided here.
 
 Most of what follows also surfaces a real implementation gap, not just a
 UI one: `Spring`/`Damper`/`MeshSprings`' stiffness/damping and most
@@ -1081,6 +1118,16 @@ exists; a plain constant is the more common case, though.
   neither group's tab under this rule; that case doesn't arise in any
   shape built so far (every structural spring set is generated within
   one shape's own group), so it isn't specced further here.
+  *(New requirement)* The same tab should also expose each connection's
+  **breaking limits** (§5.4's `breakThreshold`/`extensionBreakThreshold`/
+  `compressionBreakThreshold`) as editable, alongside stiffness/damping —
+  today these are `private val`s fixed at construction, with no
+  `editableFields()` entry at all, so a surface's tear-resistance (e.g.
+  the flag's structural springs, §7.3) can't be tuned live the way its
+  stiffness already can. Requested specifically for a surface's springs,
+  but the field lives on `Spring`/`Damper` themselves, so this is the
+  same per-group scan as stiffness/damping above, not a surface-specific
+  mechanism.
 - **Group enable/disable**: same fully-inert-and-hidden/reactivatable-
   from-its-tab semantics as a collider's activation, above.
 - Rendering: a per-particle render override, plus per-group color
@@ -1232,16 +1279,29 @@ main lever for performance.
   prevent this is `[stretch]`, along with §8's sub-stepping as a cheaper
   partial mitigation (smaller dt = less tunneling risk either way).
 - **Particle vs. triangulated surface** (a particle colliding with a flag
-  or cloth, rather than with a plane/box/sphere collider) is `[stretch]` —
-  meaningfully harder (point-vs-triangle tests, deformable target) than
-  particle vs. static primitive. No longer purely speculative: §12.8's
-  trampoline worked example needs exactly this, so it's the concrete
-  consumer that's been missing so far (the same "deferred until something
-  concretely needs it" pattern §5.2's wind position-dependence already
-  followed) — still not scheduled, but no longer a guess at future need.
+  or cloth, rather than with a plane/box/sphere collider) — no longer
+  `[stretch]`: built for §12.8's trampoline worked example
+  (`particlesim.collision.SurfaceCollisionSystem`, point-vs-triangle via
+  `Triangle.closestPoint`, reusing a static collider's own restitution/
+  friction/rest-clamp formulas but with an equal-and-opposite reaction
+  impulse split across the deformable surface's three vertex particles by
+  barycentric weight — the genuinely new part a static `Collider` never
+  needed). *(New requirement)* §7.3's pole/rope extension needs this same
+  mechanism applied to a second pairing: the rope and pole shouldn't be
+  able to pass through the flag's surface either. This is *wiring* an
+  existing mechanism to a new group pair (§12.3), not new collision
+  physics — the same "already built, just needs a second consumer"
+  situation, not a from-scratch gap.
 - **Surface self-collision** (cloth colliding with itself) is `[stretch]`
   and likely last in priority — expensive and only needed for
-  heavily-folding cloth scenarios.
+  heavily-folding cloth scenarios. *(New requirement)* §7.3's flag now has
+  a second, concrete reason to want this sooner: the flag's own particles
+  shouldn't be able to pass through its own surface as it billows and
+  folds under wind. Doesn't change the `[stretch]` designation by itself
+  — genuine cloth self-intersection avoidance is still real, unbuilt work
+  (nothing like it exists anywhere in this codebase today, unlike the
+  particle-vs-surface case above) — but it's no longer purely speculative
+  either.
 
 ### 12.5 Response
 

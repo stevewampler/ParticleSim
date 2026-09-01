@@ -3183,9 +3183,11 @@ next session picks them up instead of losing them.
       through several seconds of running simulation after unpausing;
       re-verified that normal editing (a fresh time-varying expression)
       still works afterward. No console errors.
-- [ ] Texture-mapped surfaces - an image (e.g. a flag graphic) rendered
-      onto a surface's mesh instead of/alongside its flat shaded color
-      (requirements.md §10.2). Two real gaps to close, neither trivial:
+- [ ] `[stretch]` Texture-mapped surfaces - an image (e.g. a flag graphic)
+      rendered onto a surface's mesh instead of/alongside its flat shaded
+      color (requirements.md §10.2, marked `[stretch]` at the user's
+      request - also pointed to from the master "Deferred `[stretch]`"
+      list below). Two real gaps to close, neither trivial:
       (1) no UV coordinates exist anywhere in this codebase today
       (`Triangle`/`Surface` carry none; `TriangleClosestPoint`'s u/v/w
       are barycentric closest-point coordinates, unrelated) - for a
@@ -3201,6 +3203,56 @@ next session picks them up instead of losing them.
       but distinct from the `[stretch]` Lighting & materials item below -
       that's general per-object material properties (color, shininess),
       this is specifically an external image asset mapped onto a mesh.
+
+## Expression-source visibility, flag pole/rope/self-collision, and surface break-limit editing (§7.3/§10.4/§12.4, new requirements) — not yet phased
+Raised by the user directly, recorded in `requirements.md` rather than
+implemented immediately - captured here so the next session picks them
+up instead of losing them. The user listed "the flag's particles should
+not be able to penetrate the flag surface" twice in slightly different
+wording; recorded once below, not as two separate items.
+- [ ] Show a field's **current expression source**, not just its live
+      evaluated value, in every §10.4 expression-editable control
+      (requirements.md §10.4's new cross-cutting bullet). Needs
+      `ScalarExpr`/`VectorExpr`/`ParticleStore` to actually retain the
+      original source string somewhere - today only the parsed/evaluated
+      form survives past `ExpressionParser.parse*`, so there's nothing to
+      show back even before any UI work. Presentation not decided (a
+      second read-only line? a toggle?).
+- [ ] Flag surface self-collision: the flag's own particles shouldn't be
+      able to pass through its own surface as it billows/folds
+      (requirements.md §12.4's "Surface self-collision" bullet, still
+      `[stretch]` - genuinely unbuilt anywhere in this codebase, unlike
+      the particle-vs-surface case below). Likely the largest single
+      piece of new physics work in this batch.
+- [ ] Put the flag on a pole the way `MultiShapeScene` already composes
+      `buildFlagpole` + `buildFlag` by placement (requirements.md §7.3) -
+      this part reuses an existing, already-built mechanism; the open
+      question is only which demo/scene should show it (today only
+      `MultiShapeScene` composes the two; the flag scene proper doesn't).
+- [ ] A new **rope** shape (a spring-chain of particles, the same
+      primitive as e.g. the drag chain) whose top is fixed to the pole's
+      top particle and whose bottom is fixed partway up the pole -
+      requirements.md §7.3. Doesn't exist yet as a reusable shape.
+- [ ] Attach the flag's pole-side edge to the rope's top portion instead
+      of directly to the pole via `FixedPosition.atCurrentPositions`
+      (requirements.md §7.3) - a real behavior change to the existing
+      flag worked example (the attachment becomes dynamic/swaying, not
+      rigidly fixed), not just an added decoration alongside it.
+- [ ] Rope/pole vs. flag surface collision: neither the rope nor the pole
+      should be able to pass through the flag's surface
+      (requirements.md §12.4's "Particle vs. triangulated surface"
+      bullet - already built and no longer `[stretch]`, per
+      `SurfaceCollisionSystem`/the trampoline worked example). This is
+      *wiring* that existing mechanism to a new collision-group pairing
+      (§12.3), not new collision physics.
+- [ ] A surface's spring/damper **breaking limits**
+      (`breakThreshold`/`extensionBreakThreshold`/
+      `compressionBreakThreshold`) exposed as editable alongside
+      stiffness/damping in the group's springs/dampers tab
+      (requirements.md §10.4/§5.4). Currently `private val`s with no
+      `editableFields()` entry at all on `Spring`/`Damper` - the same
+      "real implementation gap, not just a UI one" already noted for
+      every other still-`private val` force/constraint field in §10.4.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
@@ -3396,3 +3448,8 @@ next session picks them up instead of losing them.
       fast-forward to the exact target frame, then hand off to live input
       (§9.4, §9.5)
 - [ ] Export Kotlin-authored scene to YAML (§4.3)
+- [ ] Texture-mapped surfaces (§10.2) - marked `[stretch]` at the user's
+      request; see the detailed write-up further up this file, in the
+      "Force-arrow selection, wind gust/direction editing, and textured
+      surfaces" section, for the two concrete gaps (UV coordinates, image
+      asset delivery) still blocking it
