@@ -1286,10 +1286,13 @@ function formatVec(x, y, z) { return `(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toF
 
 // §10.4's vector-expression editing display value - a valid `[x, y, z]` literal the expression
 // grammar (ExpressionParser.parseVector) actually accepts, unlike formatVec's rounded "(x, y, z)"
-// read-only display text, which isn't parseable input and would silently fail to round-trip if
-// left unedited. Raw values (not toFixed), same "full precision, not rounded for display"
-// convention as a particle's mass/radius text inputs (String(p.mass), not p.mass.toFixed(2)).
-function formatVectorExprLiteral(x, y, z) { return `[${x}, ${y}, ${z}]`; }
+// read-only display text, which isn't parseable input. Rounded to 2 decimal places for
+// readability (the live-evaluated wind velocity this feeds is long, noisy floating point
+// otherwise) - a deliberate precision loss, unlike a particle's mass/radius text inputs (still
+// full precision, String(p.mass) not p.mass.toFixed(2)): editing just one component and
+// committing without touching the other two now locks those two in at 2-decimal precision
+// rather than their exact prior value, accepted as the right tradeoff for this field.
+function formatVectorExprLiteral(x, y, z) { return `[${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)}]`; }
 
 // Every §10.4 editable-value input displays the current *evaluated* value, not the original
 // formula (see formatVectorExprLiteral's own comment) - so partially editing that text never
