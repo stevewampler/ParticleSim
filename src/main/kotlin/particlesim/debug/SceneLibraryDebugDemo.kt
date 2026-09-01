@@ -36,6 +36,7 @@ fun main(args: Array<String>) {
         "spatialGrid" to { SpatialGridScene() },
         "multiShape" to { MultiShapeScene() },
         "poleRope" to { PoleRopeScene() },
+        "flagOnRope" to { FlagOnRopeScene() },
     )
     val requestedScene = args.getOrNull(0)
     if (requestedScene != null && requestedScene !in factories) {

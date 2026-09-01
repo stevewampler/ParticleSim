@@ -3290,20 +3290,69 @@ wording; recorded once below, not as two separate items.
       after 5+ further seconds of running (settled, not oscillating or
       drifting), and the pole's own particles stay exactly fixed
       throughout. No console errors.
-- [ ] Attach the flag's pole-side edge to the rope's top portion instead
+- [x] Attach the flag's pole-side edge to the rope's top portion instead
       of directly to the pole via `FixedPosition.atCurrentPositions`
       (requirements.md §7.3) - a real behavior change to the existing
       flag worked example (the attachment becomes dynamic/swaying, not
-      rigidly fixed), not just an added decoration alongside it. `buildRope`
-      exists now (previous entry) - this is the next concrete step, likely
-      landing in a new scene composing `buildFlagpole` + `buildRope` +
-      `buildFlag` together (`PoleRopeScene` above is pole+rope only, on
-      purpose) rather than changing `buildFlag` itself, since
-      `FlagScenario.constraints` is just `listOf(pole-anchor)` - a
-      composing scene can simply not forward that constraint and attach
-      springs from the flag's `grid[row][0]` particles to
-      `rope.ropeIds.take(rows)` instead, with zero signature change to
-      `buildFlag`.
+      rigidly fixed), not just an added decoration alongside it.
+      Landed as `particlesim.debug.buildFlagOnRopeScenario` +
+      `FlagOnRopeScene` (`particlesim/debug/FlagOnRopeScene.kt`), reachable
+      via the picker or `./gradlew runSceneLibraryDemo
+      --args="flagOnRope"` - a plain top-level function colocated with its
+      one consumer scene (not a new `examples/build*` shape, since unlike
+      `buildRope`/`buildFlagpole`/`buildFlag` this composition has exactly
+      one consumer and isn't meant to be composed further), so
+      `FlagOnRopeSceneTest` can assert on its internals through a real
+      return value rather than reaching through `DemoScene`'s narrow
+      public surface. Composes `buildFlagpole` + `buildRope` + `buildFlag`
+      and deliberately never forwards `FlagScenario.constraints` (the
+      flag's own `pole-anchor` `FixedPosition` pin) into the scenario's own
+      constraints - instead, each `flagGrid[row][0]` pole-edge particle is
+      connected to `rope.ropeIds[row]` by its own `Spring`/`Damper` pair
+      (stiffness/damping matching the flag's own structural springs, 200.0
+      / 1.0), so the flag now hangs from a dynamic rope instead of a rigid
+      pin.
+      **Row-for-row vertical alignment is exact by construction**: the
+      rope's `ropeSegments` (13) and its bottom anchor's height are chosen
+      so `(topAnchor.y - bottomAnchor.y) / ropeSegments` exactly equals
+      the flag's own row `spacing` (0.15) - every attached row's rope
+      particle sits at exactly the same height as its flag-edge
+      counterpart, verified in `FlagOnRopeSceneTest` (`each flag pole-edge
+      row starts at the same height as its corresponding rope particle`,
+      checked to 1e-9). Only a small, deliberate sideways gap remains (the
+      rope drifts toward `ropeBottomOffsetX = 0.15` while the flag's edge
+      stays at `x = 0`, at most ~0.08 by the flag's lowest attached row) -
+      what gives the attachment springs a small nonzero rest length
+      (computed from the particles' actual initial distance, per-row, at
+      construction) rather than a rigid zero-length pin. The rope has more
+      segments (13) than the flag has rows (8), so its bottom portion
+      continues on past the flag's lowest attached row down to its own
+      real anchor "partway up the pole" - the requirement's literal "top
+      portion of the rope" phrasing, kept visually distinct in the scene's
+      connection list. A `require` rejects a rope with too few segments to
+      reach every flag row (checked before any particles are built).
+      Five new component/stability tests in
+      `src/test/kotlin/particlesim/debug/FlagOnRopeSceneTest.kt`: the
+      row-height alignment above; too-few-rope-segments rejected via
+      `IllegalArgumentException`; the flag's own `pole-anchor` constraint
+      is absent from the composed scenario while the rope's anchor
+      constraint is still present; the flag's bottom-row pole-edge
+      particle actually moves over 2 simulated seconds (the discriminating
+      check that the attachment is dynamic, not still effectively frozen);
+      and a 4-second stability smoke test (max particle speed stays under
+      50 m/s) for the full pole+rope+flag assembly, mirroring
+      `FlagStabilityTest`'s own approach.
+      **Verified live in Chrome**: `flagOnRope` scene loads with 133
+      particles (7 pole + 14 rope + 112 flag = 8 rows x 14 cols), renders
+      the pole/rope as thin nearly-overlapping vertical lines (the small
+      sideways gap isn't visually distinguishable at this scale, as
+      expected) with the flag's cloth mesh swaying naturally under wind
+      from its attached edge; watched continuously from t=28s to t=93s
+      (65+ more simulated seconds) with the flag's shape visibly changing
+      frame to frame as wind direction varies - confirming the edge is
+      genuinely dynamic, not a frozen copy of the old rigid pin - and no
+      NaN/blow-up. No console errors. The scene picker dropdown correctly
+      lists `flagOnRope` alongside every other scene.
 - [ ] Rope/pole vs. flag surface collision: neither the rope nor the pole
       should be able to pass through the flag's surface
       (requirements.md §12.4's "Particle vs. triangulated surface"
