@@ -1284,14 +1284,24 @@ function vectorLength(x, y, z) { return Math.sqrt(x * x + y * y + z * z); }
 
 function formatVec(x, y, z) { return `(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)})`; }
 
+// §10.4's particle mass/radius display value - rounds to a fixed number of *significant*
+// figures rather than decimal places (formatVectorExprLiteral's toFixed(2) below), since typical
+// masses in this codebase are small (e.g. 0.005) where toFixed(2) would collapse to "0.01" or
+// "0.00" - a much larger relative error than a fixed-decimal rounding tolerates for values that
+// aren't all roughly the same order of magnitude. Number(...) strips toPrecision's trailing
+// zeros and avoids exponential notation for anything in a normal physical range.
+function formatSigFigs(x, digits = 3) { return String(Number(x.toPrecision(digits))); }
+
 // §10.4's vector-expression editing display value - a valid `[x, y, z]` literal the expression
 // grammar (ExpressionParser.parseVector) actually accepts, unlike formatVec's rounded "(x, y, z)"
 // read-only display text, which isn't parseable input. Rounded to 2 decimal places for
 // readability (the live-evaluated wind velocity this feeds is long, noisy floating point
-// otherwise) - a deliberate precision loss, unlike a particle's mass/radius text inputs (still
-// full precision, String(p.mass) not p.mass.toFixed(2)): editing just one component and
-// committing without touching the other two now locks those two in at 2-decimal precision
-// rather than their exact prior value, accepted as the right tradeoff for this field.
+// otherwise) - fixed decimal places rather than formatSigFigs' significant figures, unlike mass/
+// radius above, since a wind velocity's components are all roughly the same order of magnitude
+// (no single-field equivalent of a mass like 0.005 next to one like 5.0). A deliberate precision
+// loss either way: editing just one component and committing without touching the other two now
+// locks those two in at reduced precision rather than their exact prior value, accepted as the
+// right tradeoff for readability over exactness in these fields.
 function formatVectorExprLiteral(x, y, z) { return `[${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)}]`; }
 
 // Every §10.4 editable-value input displays the current *evaluated* value, not the original
@@ -1877,7 +1887,7 @@ registerEntityKind({
     massRow.appendChild(document.createTextNode("mass: "));
     const massInput = document.createElement("input");
     massInput.type = "text";
-    massInput.value = p ? String(p.mass) : "";
+    massInput.value = p ? formatSigFigs(p.mass) : "";
     selectAllOnFocus(massInput);
     massInput.addEventListener("change", () => {
       sendEdit({ type: "set_particle_scalar_field", particleId, field: "mass", expression: massInput.value });
@@ -1894,7 +1904,7 @@ registerEntityKind({
     radiusRow.appendChild(document.createTextNode("radius: "));
     const radiusInput = document.createElement("input");
     radiusInput.type = "text";
-    radiusInput.value = p && !Number.isNaN(p.radius) ? String(p.radius) : "";
+    radiusInput.value = p && !Number.isNaN(p.radius) ? formatSigFigs(p.radius) : "";
     selectAllOnFocus(radiusInput);
     radiusInput.addEventListener("change", () => {
       sendEdit({ type: "set_particle_scalar_field", particleId, field: "radius", expression: radiusInput.value });
@@ -1941,9 +1951,9 @@ registerEntityKind({
         : "no live data";
     }
     if (particleFieldInputs && p) {
-      if (document.activeElement !== particleFieldInputs.massInput) particleFieldInputs.massInput.value = String(p.mass);
+      if (document.activeElement !== particleFieldInputs.massInput) particleFieldInputs.massInput.value = formatSigFigs(p.mass);
       if (document.activeElement !== particleFieldInputs.radiusInput) {
-        particleFieldInputs.radiusInput.value = Number.isNaN(p.radius) ? "" : String(p.radius);
+        particleFieldInputs.radiusInput.value = Number.isNaN(p.radius) ? "" : formatSigFigs(p.radius);
       }
     }
     updateExpressionSourceRow(particleMassSourceRow, particleExpressionSource(particleId, "mass"));
