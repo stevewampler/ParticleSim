@@ -8,29 +8,42 @@ package particlesim.debug
  * function) landed first; `drag`/`particleCollision`/`spatialGrid`/`multiShape` (which build
  * their scenario ad hoc inline in the original standalone `main()`, with real demo-specific
  * interactive logic - spawn timers, collider rules, drag-exclusion) followed once each one's
- * logic had been ported onto [DemoScene] rather than left standalone indefinitely. Every
- * original `run*Demo` gradle task still exists and still works unmodified - this is a second,
- * additional way to reach the same scenarios, not a replacement.
+ * logic had been ported onto [DemoScene] rather than left standalone indefinitely. The original
+ * standalone `run*Demo` gradle tasks and their `*DebugDemo.kt` `main()`s (one per scenario) were
+ * removed once this picker was confirmed to reach every one of them losslessly - keeping both
+ * meant every new interactive/control-message feature (e.g. §10.4's live-editing messages) had
+ * to be wired twice, once here and once in each standalone demo's own hand-rolled dispatch.
  *
  * The viewer's `#controlPanel` shows a scene picker (§10.3) whenever `availableScenes` is
- * non-empty - every other demo leaves it `emptyList()`/`""` (this method's own defaults), so the
- * picker just stays hidden for them, no per-demo opt-out needed.
+ * non-empty - `DebugRendererDemo` (the one demo this doesn't replace - see its own doc comment)
+ * leaves it `emptyList()`/`""` (this method's own defaults), so the picker stays hidden there.
+ *
+ * `args[0]`, if given, is which scene to start on instead of the `flag` default - e.g.
+ * `./gradlew runSceneLibraryDemo --args="trampoline"`. An unrecognized name prints the valid
+ * list and exits rather than falling back silently, the same "fail fast on a malformed request"
+ * stance [SceneLibrary.load] takes at runtime for a bad `load_scene` message, except a CLI typo
+ * gets a chance to be corrected before anything starts rather than an ignored no-op.
  */
-fun main() {
+fun main(args: Array<String>) {
     val viewerInput = ViewerInput()
-    val library = SceneLibrary(
-        factories = linkedMapOf(
-            "flag" to { FlagScene(viewerInput.dragQueue) },
-            "ballBounce" to { BallBounceScene() },
-            "trampoline" to { TrampolineScene() },
-            "sparks" to { SparksScene() },
-            "drag" to { DragScene(viewerInput.dragQueue) },
-            "particleCollision" to { ParticleCollisionScene() },
-            "spatialGrid" to { SpatialGridScene() },
-            "multiShape" to { MultiShapeScene() },
-        ),
-        defaultSceneName = "flag",
+    val factories = linkedMapOf<String, () -> DemoScene>(
+        "flag" to { FlagScene(viewerInput.dragQueue) },
+        "ballBounce" to { BallBounceScene() },
+        "trampoline" to { TrampolineScene() },
+        "sparks" to { SparksScene() },
+        "drag" to { DragScene(viewerInput.dragQueue) },
+        "particleCollision" to { ParticleCollisionScene() },
+        "spatialGrid" to { SpatialGridScene() },
+        "multiShape" to { MultiShapeScene() },
     )
+    val requestedScene = args.getOrNull(0)
+    if (requestedScene != null && requestedScene !in factories) {
+        System.err.println(
+            "no such scene: '$requestedScene' - available scenes: ${factories.keys.joinToString(", ")}",
+        )
+        return
+    }
+    val library = SceneLibrary(factories = factories, defaultSceneName = requestedScene ?: "flag")
 
     val renderer = DebugRenderer(onTextMessage = viewerInput::onTextMessage)
     renderer.start()

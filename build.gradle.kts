@@ -41,71 +41,24 @@ dependencies {
 }
 
 application {
-    // `./gradlew run` — the spring-chain demo. `./gradlew runFlagDemo` below runs §7.3's
-    // flag instead; the `application` plugin only wires up one default `run` task, so the
-    // second demo gets its own JavaExec task rather than a way to swap `run`'s target.
+    // `./gradlew run` — the spring-chain demo, the original Phase 3 debug renderer. Every
+    // other worked example (flag, ballBounce, trampoline, sparks, drag, particleCollision,
+    // spatialGrid, multiShape) used to each get its own JavaExec task and standalone `main()`,
+    // but that meant every new interactive/control-message feature had to be wired twice —
+    // once for the scene-library `*Scene` classes below and once for each standalone demo's own
+    // hand-rolled dispatch. Superseded by `runSceneLibraryDemo`'s scene picker (§9.6), which
+    // reaches every one of those scenarios losslessly; the standalone demos and their tasks were
+    // removed once that was confirmed. The `application` plugin only wires up one default `run`
+    // task, so `runSceneLibraryDemo` still gets its own JavaExec task rather than a way to swap
+    // `run`'s target.
     mainClass.set("particlesim.debug.DebugRendererDemoKt")
-}
-
-tasks.register<JavaExec>("runFlagDemo") {
-    group = "application"
-    description = "Runs §7.3's flag worked example through the Phase 3 debug renderer."
-    classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("particlesim.debug.FlagDebugDemoKt")
-}
-
-tasks.register<JavaExec>("runBallBounceDemo") {
-    group = "application"
-    description = "Runs §12.6's ball-bounce worked example through the Phase 3 debug renderer."
-    classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("particlesim.debug.BallBounceDebugDemoKt")
-}
-
-tasks.register<JavaExec>("runSparksDemo") {
-    group = "application"
-    description = "Runs §14's spark-fountain worked example through the Phase 3 debug renderer."
-    classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("particlesim.debug.SparksDebugDemoKt")
-}
-
-tasks.register<JavaExec>("runDragDemo") {
-    group = "application"
-    description = "Runs §9.4's interactive drag worked example (click-and-drag a spring-chain particle)."
-    classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("particlesim.debug.DragDebugDemoKt")
-}
-
-tasks.register<JavaExec>("runMultiShapeDemo") {
-    group = "application"
-    description = "Runs §4.5's shape-library worked example (two flags and a ball-bounce sharing one scene)."
-    classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("particlesim.debug.MultiShapeDebugDemoKt")
-}
-
-tasks.register<JavaExec>("runTrampolineDemo") {
-    group = "application"
-    description = "Runs §12.8's trampoline worked example (a ball bouncing off a deforming pinned-rim surface)."
-    classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("particlesim.debug.TrampolineDebugDemoKt")
-}
-
-tasks.register<JavaExec>("runParticleCollisionDemo") {
-    group = "application"
-    description = "Runs §12.4/§12.5's particle-vs-particle collision worked example (a cluster of balls piling up on a floor)."
-    classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("particlesim.debug.ParticleCollisionDebugDemoKt")
-}
-
-tasks.register<JavaExec>("runSpatialGridDemo") {
-    group = "application"
-    description = "Runs §9.3's spatial-partitioning grid at scale (a few thousand balls bouncing in a sealed box)."
-    classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("particlesim.debug.SpatialGridDebugDemoKt")
 }
 
 tasks.register<JavaExec>("runSceneLibraryDemo") {
     group = "application"
-    description = "Runs §9.6's scene library (flag/ballBounce/trampoline/sparks, switchable via load_scene without reconnecting)."
+    description = "Runs §9.6's scene library (flag/ballBounce/trampoline/sparks/drag/particleCollision/spatialGrid/multiShape, " +
+        "switchable via load_scene without reconnecting). Pass --args=\"<sceneName>\" to start on a scene other than " +
+        "the flag default, e.g. ./gradlew runSceneLibraryDemo --args=\"trampoline\"."
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("particlesim.debug.SceneLibraryDebugDemoKt")
 }

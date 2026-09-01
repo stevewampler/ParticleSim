@@ -2904,6 +2904,45 @@ real prerequisite, not just unstarted — see the note below.
         `particleCollision`'s collider removal/delete, `spatialGrid`'s
         2000-ball box, and `multiShape`'s new outliner presence all work
         as rendered, not just at the wire level.
+- [x] Standalone `run*Demo` gradle tasks and their `*DebugDemo.kt`
+      `main()`s removed, now that all eight scenes above were confirmed
+      reachable through the picker losslessly - every entry above kept
+      saying "the original standalone task is untouched, this is a
+      second way to reach it," which was true but meant keeping two
+      parallel copies of the same scenario indefinitely. The actual cost
+      showed up repeatedly this session: adding one new
+      `SceneControlMessage` variant (`SetWindVelocity`, §10.4) meant
+      touching an exhaustive-`when` branch in four *separate* standalone
+      demos on top of the one real dispatch site in `DemoScene`/
+      `SceneLibrary`, purely to keep them compiling - pure upkeep tax,
+      not anything the standalone copies used for their own logic. Removed
+      `BallBounceDebugDemo.kt`, `DragDebugDemo.kt`, `FlagDebugDemo.kt`,
+      `MultiShapeDebugDemo.kt`, `ParticleCollisionDebugDemo.kt`,
+      `SparksDebugDemo.kt`, `SpatialGridDebugDemo.kt`,
+      `TrampolineDebugDemo.kt` and their eight `build.gradle.kts` tasks
+      (`runFlagDemo` etc.) - confirmed via `grep` that nothing outside
+      each file itself (no import, no test) referenced any of them.
+      `DebugRendererDemo`/`./gradlew run` (the original Phase 3 bare
+      renderer, never part of the scene library) is untouched - it isn't
+      a duplicate of anything the picker reaches.
+
+      Added `args: Array<String>` to `SceneLibraryDebugDemo.main` so a
+      single demo can still be launched directly without clicking through
+      the picker after startup - `./gradlew runSceneLibraryDemo
+      --args="trampoline"` starts on that scene instead of the `flag`
+      default. An unrecognized name prints the valid scene list to
+      stderr and returns without starting the server, rather than either
+      silently falling back to the default or crashing with a bare
+      `IllegalArgumentException` from `SceneLibrary`'s own `require`.
+      **Verified**: `./gradlew compileKotlin test` green after the
+      removal (nothing broke); `./gradlew tasks --group=application` now
+      lists only `run`/`runSceneLibraryDemo`; `--args="bogus-scene"`
+      printed the expected error and exited immediately without opening
+      a port; `--args="trampoline"` **verified live in Chrome** - the
+      viewer loaded directly onto the trampoline scene (mat/rim/ball
+      groups, `rim-anchor` constraint, matching outliner) rather than the
+      flag default, and switching scenes afterward via the picker's
+      `<select>` still worked normally. No console errors.
 
 ## Shape library (§4.5, new requirement) — not yet phased
 - [x] Kotlin DSL: `ShapePlacement` (`particlesim.examples`) — an
