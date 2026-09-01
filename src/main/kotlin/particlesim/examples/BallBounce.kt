@@ -32,6 +32,7 @@ data class BallBounceScenario(
     val forces: List<Force>,
     val collisions: CollisionSystem,
     val ballId: Int,
+    val floor: PlaneCollider,
 )
 
 const val BALL_BOUNCE_DT = 1e-3
@@ -49,7 +50,7 @@ fun buildBallBounce(
     val ballId = store.create(position = Vector3(0.0, dropHeight, 0.0) + placement.offset, radius = ScalarExpr.of(0.2))
     groups.add(ballGroup, ballId)
 
-    val gravity = UniformGravity(ballGroup, Vector3(0.0, -9.8, 0.0))
+    val gravity = UniformGravity(ballGroup, Vector3(0.0, -9.8, 0.0), name = placement.name("gravity"))
     val floor = PlaneCollider(VectorExpr.of(placement.offset), normal = Vector3(0.0, 1.0, 0.0), name = placement.name("floor"))
     val rule = ParticleColliderRule(
         group = ballGroup,
@@ -65,5 +66,6 @@ fun buildBallBounce(
         forces = listOf(gravity),
         collisions = CollisionSystem(listOf(rule)),
         ballId = ballId,
+        floor = floor,
     )
 }

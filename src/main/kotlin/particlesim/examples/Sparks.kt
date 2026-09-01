@@ -35,6 +35,7 @@ data class SparksScenario(
     val forces: List<Force>,
     val emitter: Emitter,
     val destruction: DestructionSystem,
+    val floor: PlaneCollider,
 )
 
 const val SPARKS_DT = 1e-3
@@ -65,10 +66,10 @@ fun buildSparks(masterSeed: Long = 1L): SparksScenario {
         masterSeed = masterSeed,
     )
 
-    val gravity = UniformGravity("sparks", Vector3(0.0, -9.8, 0.0))
-    val drag = Drag("sparks", coefficient = 0.05)
+    val gravity = UniformGravity("sparks", Vector3(0.0, -9.8, 0.0), name = "gravity")
+    val drag = Drag("sparks", coefficient = 0.05, name = "drag")
 
-    val floor = PlaneCollider(VectorExpr.of(Vector3.ZERO), normal = Vector3(0.0, 1.0, 0.0))
+    val floor = PlaneCollider(VectorExpr.of(Vector3.ZERO), normal = Vector3(0.0, 1.0, 0.0), name = "floor")
     val destruction = DestructionSystem(
         destroyConditions = listOf(
             DestroyCondition("sparks") { s, id, _ ->
@@ -79,5 +80,5 @@ fun buildSparks(masterSeed: Long = 1L): SparksScenario {
         collisionDestroyRules = listOf(CollisionDestroyRule("sparks", floor)),
     )
 
-    return SparksScenario(store, groups, listOf(gravity, drag), emitter, destruction)
+    return SparksScenario(store, groups, listOf(gravity, drag), emitter, destruction, floor)
 }

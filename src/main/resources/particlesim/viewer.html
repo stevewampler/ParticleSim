@@ -258,6 +258,20 @@ scene.add(sunLight);
 const controls = new OrbitControls(camera, renderer.domElement);
 let cameraMode = "scripted";
 let lastScriptedLookAt = new THREE.Vector3(0, 0, 0);
+// Set once, from the very first frame's activeScene (see applyFrame) - later frames must never
+// re-touch it, or every frame would stomp a manual orbit the user had already grabbed.
+let hasSetInitialCameraMode = false;
+
+// The flag demo's scripted orbit (FlagScene.kt's own CameraFunction, §10.1) makes aiming a
+// right-click at one particle to inspect it fight the camera's own motion - defaults to manual
+// there so a session opens already under the user's control, same as if they'd just grabbed it;
+// still reachable via "return to scripted camera" like any other manually-overridden scene.
+// Every other scene keeps starting scripted, unchanged - "flag" is the only scene with a
+// scripted camera at all today. Used both for the very first frame ever received (applyFrame)
+// and every explicit scene switch/restart (resetViewerStateForSceneChange) below.
+function defaultCameraModeForScene(sceneName) {
+  return sceneName === "flag" ? "manual" : "scripted";
+}
 
 function enterManualCamera() {
   if (cameraMode === "manual") return;
@@ -483,6 +497,16 @@ function buildMeshGeometry(meshDecl, byId) {
 
 function applyFrame(frame) {
   latestStep = frame.step;
+
+  // First frame ever received: pick the starting cameraMode from which scene is actually active,
+  // via defaultCameraModeForScene (see its own comment - today only "flag" defaults to manual).
+  // Must run before the scripted-pose block below so a "manual" default suppresses it immediately,
+  // and must run only once - resetViewerStateForSceneChange owns every later scene switch/restart.
+  if (!hasSetInitialCameraMode) {
+    hasSetInitialCameraMode = true;
+    cameraMode = defaultCameraModeForScene(frame.activeScene);
+    returnToScriptedEl.style.display = cameraMode === "manual" ? "block" : "none";
+  }
 
   // §10.1's scripted camera: engine-evaluated, so applying it here is just "set the numbers
   // we were sent" — no expression/lambda evaluation needed client-side. Omitted entirely by
@@ -966,7 +990,7 @@ document.getElementById("stepOnceBtn").addEventListener("click", () => {
 // selection and the per-object panel it drives, plus the hidden-group/-surface/-force toggles,
 // which would otherwise silently persist onto a scene whose names may not even mean the same
 // thing (or exist at all).
-function resetViewerStateForSceneChange() {
+function resetViewerStateForSceneChange(sceneName) {
   resetStats();
   resetEventLog();
   selectedKind = null;
@@ -985,10 +1009,12 @@ function resetViewerStateForSceneChange() {
   // click "return to scripted," so a reset gated on cameraMode === "scripted" would silently
   // no-op and leave the camera exactly where they last dragged it. A scene switch is a big
   // enough context change that carrying over a manual framing from the *previous* scene doesn't
-  // make sense either way, so this always drops back to scripted and the default pose - a scene
-  // with its own scripted camera overwrites it on the very next frame (costs nothing there).
-  cameraMode = "scripted";
-  returnToScriptedEl.style.display = "none";
+  // make sense either way, so this always drops back to the target scene's default (per
+  // defaultCameraModeForScene - "scripted" except for "flag") rather than the pose the *previous*
+  // scene's orbit last computed - a scene with its own scripted camera overwrites it on the very
+  // next frame (costs nothing there).
+  cameraMode = defaultCameraModeForScene(sceneName);
+  returnToScriptedEl.style.display = cameraMode === "manual" ? "block" : "none";
   lastScriptedLookAt.set(0, 0, 0);
   camera.position.set(6, 4, 8);
   camera.up.set(0, 1, 0);
@@ -1001,7 +1027,7 @@ function resetViewerStateForSceneChange() {
 // dropped" stance every message type here already takes).
 document.getElementById("restartBtn").addEventListener("click", () => {
   send({ type: "restart" });
-  resetViewerStateForSceneChange();
+  resetViewerStateForSceneChange(sceneSelectEl.value);
 });
 
 // §9.6's scene picker - hidden (see its own CSS) until a frame reports a non-empty
@@ -1035,7 +1061,7 @@ function updateScenePicker(frame) {
 
 sceneSelectEl.addEventListener("change", () => {
   send({ type: "load_scene", name: sceneSelectEl.value });
-  resetViewerStateForSceneChange();
+  resetViewerStateForSceneChange(sceneSelectEl.value);
 });
 
 document.querySelectorAll("#speedButtons button").forEach((btn) => {
@@ -1282,27 +1308,26 @@ function containedForceNamesForGroup(groupName) {
 // live numeric readout (no per-object magnitude on the wire yet); constraints have neither.
 function vectorLength(x, y, z) { return Math.sqrt(x * x + y * y + z * z); }
 
-function formatVec(x, y, z) { return `(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)})`; }
-
-// §10.4's particle mass/radius display value - rounds to a fixed number of *significant*
-// figures rather than decimal places (formatVectorExprLiteral's toFixed(2) below), since typical
-// masses in this codebase are small (e.g. 0.005) where toFixed(2) would collapse to "0.01" or
-// "0.00" - a much larger relative error than a fixed-decimal rounding tolerates for values that
-// aren't all roughly the same order of magnitude. Number(...) strips toPrecision's trailing
-// zeros and avoids exponential notation for anything in a normal physical range.
+// Every decimal readout in this viewer (particle mass/radius, position/velocity, group centroid/
+// avg speed, wind velocity, ...) rounds to significant figures rather than fixed decimal places,
+// so a small value (a mass of 0.005, a slow settling velocity of 0.03) keeps at least 3 real
+// digits of precision instead of collapsing to "0.01" or "0.00" the way a fixed-decimal rounding
+// would - a much larger relative error for values that aren't all roughly the same order of
+// magnitude. Number(...) strips toPrecision's trailing zeros and avoids exponential notation for
+// anything in a normal physical range.
 function formatSigFigs(x, digits = 3) { return String(Number(x.toPrecision(digits))); }
+
+function formatVec(x, y, z) { return `(${formatSigFigs(x)}, ${formatSigFigs(y)}, ${formatSigFigs(z)})`; }
 
 // §10.4's vector-expression editing display value - a valid `[x, y, z]` literal the expression
 // grammar (ExpressionParser.parseVector) actually accepts, unlike formatVec's rounded "(x, y, z)"
-// read-only display text, which isn't parseable input. Rounded to 2 decimal places for
-// readability (the live-evaluated wind velocity this feeds is long, noisy floating point
-// otherwise) - fixed decimal places rather than formatSigFigs' significant figures, unlike mass/
-// radius above, since a wind velocity's components are all roughly the same order of magnitude
-// (no single-field equivalent of a mass like 0.005 next to one like 5.0). A deliberate precision
-// loss either way: editing just one component and committing without touching the other two now
-// locks those two in at reduced precision rather than their exact prior value, accepted as the
-// right tradeoff for readability over exactness in these fields.
-function formatVectorExprLiteral(x, y, z) { return `[${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)}]`; }
+// read-only display text, which isn't parseable input. Uses the same formatSigFigs rounding as
+// every other readout above rather than a fixed decimal count, so a small wind-velocity component
+// doesn't lose all its precision next to a large one. A deliberate precision loss either way:
+// editing just one component and committing without touching the other two now locks those two in
+// at reduced precision rather than their exact prior value, accepted as the right tradeoff for
+// readability over exactness in these fields.
+function formatVectorExprLiteral(x, y, z) { return `[${formatSigFigs(x)}, ${formatSigFigs(y)}, ${formatSigFigs(z)}]`; }
 
 // Every §10.4 editable-value input displays the current *evaluated* value, not the original
 // formula (see formatVectorExprLiteral's own comment) - so partially editing that text never
@@ -1475,7 +1500,7 @@ function renderEditableFields(kind, name, inputsOut) {
       // empty box either way, so make that "no limit" reading explicit via a placeholder rather
       // than leaving a blank field indistinguishable from "value 0" or a rendering bug.
       if (Number.isFinite(f.value.value)) {
-        input.value = f.value.value;
+        input.value = formatSigFigs(f.value.value);
       } else {
         input.value = "";
         input.placeholder = f.value.value > 0 ? "∞ (no limit)" : "-∞";
@@ -1496,7 +1521,7 @@ function renderEditableFields(kind, name, inputsOut) {
         selectAllOnFocus(el);
         return el;
       });
-      inputs[0].value = f.value.x; inputs[1].value = f.value.y; inputs[2].value = f.value.z;
+      inputs[0].value = formatSigFigs(f.value.x); inputs[1].value = formatSigFigs(f.value.y); inputs[2].value = formatSigFigs(f.value.z);
       const onChange = () => {
         sendEdit({
           type: "set_vector_field", kind, name, field: f.field,
@@ -1517,11 +1542,11 @@ function updateEditableFieldsLive(kind, name, inputsIn) {
     if (!entry) continue;
     if (entry.valueKind === "scalar") {
       if (document.activeElement !== entry.input) {
-        entry.input.value = Number.isFinite(f.value.value) ? f.value.value : "";
+        entry.input.value = Number.isFinite(f.value.value) ? formatSigFigs(f.value.value) : "";
       }
     } else {
       ["x", "y", "z"].forEach((axis, i) => {
-        if (document.activeElement !== entry.inputs[i]) entry.inputs[i].value = f.value[axis];
+        if (document.activeElement !== entry.inputs[i]) entry.inputs[i].value = formatSigFigs(f.value[axis]);
       });
     }
   }
@@ -1596,7 +1621,7 @@ registerEntityKind({
       }
       objectPanelInspectEl.textContent = count === 0
         ? "no live data"
-        : `centroid: ${formatVec(sumX / count, sumY / count, sumZ / count)}\navg speed: ${(sumSpeed / count).toFixed(3)} m/s`;
+        : `centroid: ${formatVec(sumX / count, sumY / count, sumZ / count)}\navg speed: ${formatSigFigs(sumSpeed / count)} m/s`;
     }
     for (const forceName of Object.keys(groupForceFieldInputs)) {
       updateEditableFieldsLive("force", forceName, groupForceFieldInputs[forceName]);
@@ -1743,7 +1768,7 @@ registerEntityKind({
     }
     objectPanelInspectEl.textContent = count === 0
       ? "no live data"
-      : `${meshDecl.triangles.length} triangle(s)\navg vertex speed: ${(sumSpeed / count).toFixed(3)} m/s\n` +
+      : `${meshDecl.triangles.length} triangle(s)\navg vertex speed: ${formatSigFigs(sumSpeed / count)} m/s\n` +
         "(this surface's vertices are shown as dots while selected, even if normally mesh-only)";
   },
 });
@@ -1812,7 +1837,7 @@ registerEntityKind({
     rateRow.appendChild(document.createTextNode("rate: "));
     const rateInput = document.createElement("input");
     rateInput.type = "text";
-    rateInput.value = entry ? String(entry.rate) : "";
+    rateInput.value = entry ? formatSigFigs(entry.rate) : "";
     selectAllOnFocus(rateInput);
     rateInput.addEventListener("change", () => {
       sendEdit({ type: "set_emitter_rate", name: selectedName, expression: rateInput.value });
@@ -1851,7 +1876,7 @@ registerEntityKind({
   updateLive: () => {
     const entry = latestRegistry.emitters.find((e) => e.name === selectedName);
     if (!entry || !emitterFieldInputs) return;
-    if (document.activeElement !== emitterFieldInputs.rateInput) emitterFieldInputs.rateInput.value = String(entry.rate);
+    if (document.activeElement !== emitterFieldInputs.rateInput) emitterFieldInputs.rateInput.value = formatSigFigs(entry.rate);
     if (document.activeElement !== emitterFieldInputs.maxAliveInput) emitterFieldInputs.maxAliveInput.value = entry.maxAlive;
     if (document.activeElement !== emitterFieldInputs.evictOldestCheckbox) emitterFieldInputs.evictOldestCheckbox.checked = entry.evictOldest;
     updateExpressionSourceRow(emitterRateSourceRow, entry.rateSource);

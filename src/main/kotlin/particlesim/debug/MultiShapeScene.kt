@@ -16,12 +16,9 @@ import particlesim.render.SceneRegistry
  * doc comment for the shape-composition/placement reasoning, unchanged here. Unlike the
  * standalone demo (which never drained `sceneControlQueue` or built a [SceneRegistry] at all -
  * a pre-existing gap noted early in this session's own §10.3 work), this wrapping wires both in:
- * the four shapes' own named forces/constraints/surface become outliner-reachable and editable
- * the same way every other library scene's are, since there's no reason a scene reached through
- * the picker should be a second-class citizen relative to its neighbors. Colliders aren't wired
- * (`buildTire`/`buildBallBounce` don't expose their own `Collider` objects, only wrapped inside a
- * `CollisionSystem` - surfacing them would mean changing those shapes' own return shape, out of
- * scope for a scene-library wrapping).
+ * the four shapes' own named forces/constraints/surface/colliders become outliner-reachable and
+ * editable the same way every other library scene's are, since there's no reason a scene reached
+ * through the picker should be a second-class citizen relative to its neighbors.
  */
 class MultiShapeScene : DemoScene {
     private val poleHeight = 3.5
@@ -47,8 +44,10 @@ class MultiShapeScene : DemoScene {
     private val allIds = flagpole.poleIds + flag.grid.flatten() + tire.rimIds + listOf(ball.ballId)
     private val allForces = flag.forces + tire.forces + ball.forces
     private val allConstraints = flagpole.constraints + flag.constraints
+    private val allColliders = listOf(tire.floor, ball.floor)
     private val registry = SceneRegistry.build(
-        forces = allForces, constraints = allConstraints, surfaces = listOf(flag.surface), groups = groups,
+        forces = allForces, constraints = allConstraints, surfaces = listOf(flag.surface),
+        groups = groups, colliders = allColliders,
     )
     private val integrator = Integrator()
 
@@ -72,5 +71,6 @@ class MultiShapeScene : DemoScene {
             flag.meshSprings[0].activeConnections() +
             tire.rimIds.indices.map { i -> tire.rimIds[i] to tire.rimIds[(i + 1) % tire.rimIds.size] },
         registry = registry,
+        colliders = allColliders,
     )
 }

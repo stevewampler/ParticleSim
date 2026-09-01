@@ -82,11 +82,16 @@ fun buildRope(
     groups.add(anchorsGroup, ropeIds.last())
 
     val segmentRestLength = (bottomAnchor - topAnchor).length() / segments
-    val springs = ropeIds.zipWithNext().map { (a, b) ->
-        Spring(a, b, restLength = segmentRestLength, stiffness = extensionStiffness, compressionStiffness = compressionStiffness)
+    val springs = ropeIds.zipWithNext().mapIndexed { i, (a, b) ->
+        Spring(
+            a, b, restLength = segmentRestLength, stiffness = extensionStiffness, compressionStiffness = compressionStiffness,
+            name = placement.name("segment-spring-$i"),
+        )
     }
-    val dampers = ropeIds.zipWithNext().map { (a, b) -> Damper(a, b, damping = damping) }
-    val gravity = UniformGravity(ropeGroup, Vector3(0.0, -9.8, 0.0))
+    val dampers = ropeIds.zipWithNext().mapIndexed { i, (a, b) ->
+        Damper(a, b, damping = damping, name = placement.name("segment-damper-$i"))
+    }
+    val gravity = UniformGravity(ropeGroup, Vector3(0.0, -9.8, 0.0), name = placement.name("gravity"))
 
     val constraints = listOf(FixedPosition.atCurrentPositions(anchorsGroup, store, groups, name = placement.name("rope-anchor")))
 

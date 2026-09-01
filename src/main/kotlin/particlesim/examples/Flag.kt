@@ -116,7 +116,7 @@ fun buildFlag(
         density = 1.2,
         name = placement.name("wind"),
     )
-    val gravity = UniformGravity(clothGroup, Vector3(0.0, -9.8, 0.0))
+    val gravity = UniformGravity(clothGroup, Vector3(0.0, -9.8, 0.0), name = placement.name("gravity"))
 
     val constraints = listOf(FixedPosition.atCurrentPositions(poleGroup, store, groups, name = placement.name("pole-anchor")))
 

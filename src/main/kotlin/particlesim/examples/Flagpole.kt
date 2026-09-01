@@ -46,7 +46,7 @@ fun buildFlagpole(
         id
     }
 
-    val constraints = listOf(FixedPosition.atCurrentPositions(poleGroup, store, groups))
+    val constraints = listOf(FixedPosition.atCurrentPositions(poleGroup, store, groups, name = placement.name("pole-anchor")))
 
     return FlagpoleScenario(
         store = store,

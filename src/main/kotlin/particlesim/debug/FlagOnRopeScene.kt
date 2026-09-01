@@ -107,10 +107,10 @@ fun buildFlagOnRopeScenario(
     val attachmentSprings = (0 until flagRows).map { row ->
         val a = flag.grid[row][0]
         val b = rope.ropeIds[row]
-        Spring(a, b, restLength = (store.position(b) - store.position(a)).length(), stiffness = 200.0)
+        Spring(a, b, restLength = (store.position(b) - store.position(a)).length(), stiffness = 200.0, name = "attachment-spring-$row")
     }
     val attachmentDampers = (0 until flagRows).map { row ->
-        Damper(flag.grid[row][0], rope.ropeIds[row], damping = 1.0)
+        Damper(flag.grid[row][0], rope.ropeIds[row], damping = 1.0, name = "attachment-damper-$row")
     }
 
     return FlagOnRopeScenario(

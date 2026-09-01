@@ -92,19 +92,22 @@ fun buildTrampoline(
     val structural = MeshSprings(
         Grid.structuralEdges(grid), store,
         stiffness = 2000.0, damping = 4.0,
+        name = placement.name("structural-springs"),
     )
     val shear = MeshSprings(
         Grid.shearEdges(grid), store,
         stiffness = 1000.0, damping = 2.0,
+        name = placement.name("shear-springs"),
     )
     val bend = MeshSprings(
         Grid.bendEdges(grid), store,
         stiffness = 200.0, damping = 0.5,
+        name = placement.name("bend-springs"),
     )
 
     val triangles = Grid.triangles(grid)
     val surface = Surface(triangles, name = placement.name("mat-surface"))
-    val gravity = UniformGravity(matGroup, Vector3(0.0, -9.8, 0.0))
+    val gravity = UniformGravity(matGroup, Vector3(0.0, -9.8, 0.0), name = placement.name("gravity"))
 
     val rimAnchor = FixedPosition.atCurrentPositions(rimGroup, store, groups, name = placement.name("rim-anchor"))
 
@@ -113,7 +116,7 @@ fun buildTrampoline(
         radius = ScalarExpr.of(ballRadius),
     )
     groups.add(ballGroup, ballId)
-    val ballGravity = UniformGravity(ballGroup, Vector3(0.0, -9.8, 0.0))
+    val ballGravity = UniformGravity(ballGroup, Vector3(0.0, -9.8, 0.0), name = placement.name("ball-gravity"))
 
     val collisionRule = SurfaceCollisionRule(
         group = ballGroup,

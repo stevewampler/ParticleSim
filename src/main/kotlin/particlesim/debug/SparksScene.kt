@@ -39,7 +39,11 @@ class SparksScene : DemoScene {
 
     override fun frame(t: Double): SceneFrame {
         val frame = SceneFrame(
-            registry = SceneRegistry.build(forces = scenario.forces, groups = scenario.groups, emitters = listOf(scenario.emitter)),
+            registry = SceneRegistry.build(
+                forces = scenario.forces, groups = scenario.groups,
+                emitters = listOf(scenario.emitter), colliders = listOf(scenario.floor),
+            ),
+            colliders = listOf(scenario.floor),
             events = events.toList(),
         )
         events.clear()

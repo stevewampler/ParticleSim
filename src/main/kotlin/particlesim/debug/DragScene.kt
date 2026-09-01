@@ -42,7 +42,7 @@ class DragScene(private val dragQueue: DragMessageQueue) : DemoScene {
         val springs = pairs.mapIndexed { i, (a, b) ->
             Spring(a, b, restLength = spacing, stiffness = stiffness, breakThreshold = springBreakThreshold, name = "link-$i")
         }
-        val dampers = pairs.map { (a, b) -> Damper(a, b, damping = damping) }
+        val dampers = pairs.mapIndexed { i, (a, b) -> Damper(a, b, damping = damping, name = "link-$i-damper") }
         return springs to dampers
     }
 
@@ -71,8 +71,8 @@ class DragScene(private val dragQueue: DragMessageQueue) : DemoScene {
         dampers = initialDampers
     }
 
-    private val drag = Drag("chain", coefficient = 1.5)
-    private var forces: List<Force> = listOf(UniformGravity("chain", Vector3(0.0, -9.8, 0.0)), drag) + springs + dampers
+    private val drag = Drag("chain", coefficient = 1.5, name = "drag")
+    private var forces: List<Force> = listOf(UniformGravity("chain", Vector3(0.0, -9.8, 0.0), name = "gravity"), drag) + springs + dampers
     // Named (unlike the standalone DragDebugDemo's identical constraint) specifically so §10.4's
     // shared-position editing has a real, reachable target to verify against - a single-particle
     // pin is the one case in this codebase where the shared-position and per-particle variants

@@ -3509,6 +3509,114 @@ wording; recorded once below, not as two separate items.
       wind-driven flapping displacement, well within a threshold that
       tight). No console errors.
 
+## Universal entity outliner reachability, viewer precision sweep, and flag camera default (§9.6/§10.3/§10.4, follow-up) — not yet phased
+- [x] Every force/constraint/surface/collider across every scene-library
+      scene now reaches the outliner and gets a working panel, not just a
+      hand-picked subset. Root cause: `SceneRegistry.build` filters
+      forces/constraints/surfaces/colliders by `it.name != null` before
+      they ever become outliner-reachable, and the overwhelming majority
+      of `Force`/`Constraint`/`Collider` constructions across the
+      `examples`/`debug` packages left `name` at its `null` default -
+      not a bug in the outliner/panel UI itself (that machinery, audited
+      first, was already correct end to end), but a silent gap upstream
+      of it. Named every previously-anonymous construction: `Flag.kt`'s
+      `gravity`; `Trampoline.kt`'s `gravity`/`ball-gravity` and its three
+      `MeshSprings` (`structural-springs`/`shear-springs`/`bend-springs`);
+      `Sparks.kt`'s `gravity`/`drag`/`floor`; `DragScene.kt`'s
+      `gravity`/`drag` and all 11 per-link dampers (`link-$i-damper` -
+      the springs were already named, the dampers never were);
+      `Tire.kt`'s `gravity` and every rim/diameter spring and damper
+      (`rim-spring-$i`/`diameter-spring-$i`/`rim-damper-$i`/
+      `diameter-damper-$i`); `Rope.kt`'s `gravity` and every segment
+      spring/damper (`segment-spring-$i`/`segment-damper-$i`);
+      `BallBounce.kt`'s `gravity`; `Flagpole.kt`'s pole-pin `FixedPosition`
+      (`buildFlagpole` had no way to name it at all - now
+      `placement.name("pole-anchor")`, matching `buildFlag`'s own
+      pole-anchor); `FlagOnRopeScene.kt`'s per-row attachment
+      springs/dampers (`attachment-spring-$row`/`attachment-damper-$row`).
+      Every `placement`-aware shape uses `ShapePlacement.name(...)` so
+      composed scenes (`multiShape`, `flagOnRope`, `poleRope`) get
+      collision-free instance-prefixed names (`tire.gravity`,
+      `flag.gravity`, ...) for free.
+      **Two scenes had structural gaps beyond naming**: `BallBounceScene`
+      never called `SceneRegistry.build` at all - `frame()` returned a
+      bare `SceneFrame()`, so its group/force/collider were *entirely*
+      absent from the outliner regardless of naming. `Sparks.kt` and
+      `Tire.kt` each built their own floor `PlaneCollider` but never
+      exposed it on `SparksScenario`/`TireScenario`, so even a named
+      floor had no path to either the registry or the actual rendered
+      wireframe (`SceneFrame.colliders`, a separate field from
+      `registry` - the wire-format list `DebugRenderer` actually draws
+      wireframes from) - both scenarios gained a `floor: PlaneCollider`
+      field, and `SparksScene`/`BallBounceScene`/`MultiShapeScene` (which
+      composes both `buildTire` and `buildBallBounce`) now pass those
+      colliders into both `registry` and `colliders`. `MultiShapeScene`'s
+      own doc comment previously asserted colliders "aren't wired" for
+      exactly this reason - now stale and corrected alongside the fix.
+      All pre-existing tests pass unchanged (naming a force doesn't
+      change its physics); no new tests added - this is wiring, not new
+      behavior, and every affected scene's existing physics/analytic
+      tests already cover the underlying force/constraint math.
+      **Verified live in Chrome** against every one of the 10 scene-library
+      scenes (`flag`, `sparks`, `ballBounce`, `trampoline`, `multiShape`,
+      `flagOnRope`, `drag`, plus the already-correct `particleCollision`/
+      `spatialGrid`/`poleRope`): confirmed every force, constraint,
+      surface, collider, and emitter now lists in the outliner with a
+      working panel, including previously-invisible cases like
+      `ballBounce`'s entire registry, `sparks`' `floor` collider (now
+      actually rendered as a wireframe plane, not just named), and
+      `multiShape`'s `tire.floor`/`ball.floor` colliders (both now
+      visibly rendered where neither was before).
+- [x] Viewer decimal-value precision: every numeric readout now shows
+      at least three significant figures via the existing `formatSigFigs`
+      helper (`x.toPrecision(3)`, trailing zeros/exponential notation
+      stripped), not just particle mass/radius (already fixed in the
+      prior session). Extended to `formatVec` (position/velocity
+      read-only display), `formatVectorExprLiteral` (wind's editable
+      velocity vector - superseding the prior session's `toFixed(2)`
+      choice for it, since a small component like a `0.03` wind gust
+      would round to a single significant figure under fixed-decimal
+      rounding), group centroid/avg-speed and surface avg-vertex-speed
+      text, every generic scalar/vector `EditableFields` input
+      (`renderEditableFields`/`updateEditableFieldsLive` - spring
+      stiffness, damper coefficient, break thresholds, ...), and the
+      emitter panel's `rate` field, which previously displayed the raw
+      evaluated double with full floating-point noise (e.g.
+      `13.470015621365189`) since it read `String(entry.rate)` directly
+      rather than going through any formatting helper at all.
+      Deliberately left untouched: the top-bar `t=`/lag/steps-per-second
+      HUD text - session/performance chrome, not simulation-entity data,
+      so out of scope for this pass.
+      **Verified live in Chrome**: the `flag` scene's wind velocity panel
+      now shows `[6.41, -0.222, -0.646]` (3 significant figures per
+      component, not fixed-decimal); the `sparks` scene's `fountain`
+      emitter rate panel now shows a clean `6.09` instead of a
+      17-character noisy float.
+- [x] Flag demo's scripted camera off by default: `flag` is the only
+      scene-library scene with an engine-scripted camera at all today
+      (`FlagScene.kt`'s own `CameraFunction`, §10.1), and its orbit
+      fights right-clicking a particle to inspect it - now defaults to
+      manual (viewer-controlled) camera on both the very first frame the
+      viewer ever receives (`applyFrame`, gated by a one-shot
+      `hasSetInitialCameraMode` flag keyed off that first frame's
+      `activeScene`) and every later scene switch/restart
+      (`resetViewerStateForSceneChange`, now parameterized by the target
+      scene name instead of hardcoding `"scripted"`), via a single new
+      `defaultCameraModeForScene(sceneName)` helper. Every other scene
+      keeps defaulting to scripted, unchanged. The existing "return to
+      scripted camera" button still re-enables the flag's orbit on
+      request, and clicking it, switching away, and switching back to
+      `flag` again correctly re-defaults to manual rather than sticking
+      on whatever mode was last active.
+      **Verified live in Chrome**: a fresh page load lands on `flag`
+      already tagged `[manual camera]` with the "return to scripted
+      camera" button visible (confirmed on a hard reload, not just a
+      scene-switch, proving the first-frame path works independently of
+      the switch/restart path); clicking that button correctly restored
+      the scripted orbit (tag and button both disappeared, camera
+      resumed animating on its own); switching to another scene and back
+      to `flag` re-entered manual mode as expected.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

@@ -5,6 +5,7 @@ import particlesim.core.Vector3
 import particlesim.examples.BALL_BOUNCE_DT
 import particlesim.examples.buildBallBounce
 import particlesim.physics.Integrator
+import particlesim.render.SceneRegistry
 
 /**
  * §9.6 scene-library wrapping of [BallBounceDebugDemo]'s worked example - see that file's own
@@ -18,6 +19,9 @@ class BallBounceScene : DemoScene {
     private val integrator = Integrator()
     private var cycleStart = 0.0
     private val ids = listOf(scenario.ballId)
+    private val registry = SceneRegistry.build(
+        forces = scenario.forces, groups = scenario.groups, colliders = listOf(scenario.floor),
+    )
 
     override val dt = BALL_BOUNCE_DT
     override val store: ParticleStore = scenario.store
@@ -38,5 +42,5 @@ class BallBounceScene : DemoScene {
         scenario.collisions.resolve(scenario.store, scenario.groups, t, dt)
     }
 
-    override fun frame(t: Double): SceneFrame = SceneFrame()
+    override fun frame(t: Double): SceneFrame = SceneFrame(registry = registry, colliders = listOf(scenario.floor))
 }

@@ -41,6 +41,7 @@ data class TireScenario(
     /** Rim particle ids, in ring order (`rimIds[i]` and `rimIds[(i+1) % segments]` are
      * neighbors) — for rendering the rim as a closed line loop. */
     val rimIds: List<Int>,
+    val floor: PlaneCollider,
 )
 
 const val TIRE_DT = 1e-3
@@ -75,19 +76,25 @@ fun buildTire(
 
     val neighborRestLength = 2.0 * radius * sin(PI / segments)
     val neighborSprings = rimIds.indices.map { i ->
-        Spring(rimIds[i], rimIds[(i + 1) % segments], restLength = neighborRestLength, stiffness = rimStiffness)
+        Spring(
+            rimIds[i], rimIds[(i + 1) % segments], restLength = neighborRestLength, stiffness = rimStiffness,
+            name = placement.name("rim-spring-$i"),
+        )
     }
     // Diameter braces only need to connect each opposite pair once, not both directions.
     val diameterSprings = (0 until segments / 2).map { i ->
-        Spring(rimIds[i], rimIds[i + segments / 2], restLength = 2.0 * radius, stiffness = diameterStiffness)
+        Spring(
+            rimIds[i], rimIds[i + segments / 2], restLength = 2.0 * radius, stiffness = diameterStiffness,
+            name = placement.name("diameter-spring-$i"),
+        )
     }
     val dampers = rimIds.indices.map { i ->
-        Damper(rimIds[i], rimIds[(i + 1) % segments], damping = rimDamping)
+        Damper(rimIds[i], rimIds[(i + 1) % segments], damping = rimDamping, name = placement.name("rim-damper-$i"))
     } + (0 until segments / 2).map { i ->
-        Damper(rimIds[i], rimIds[i + segments / 2], damping = diameterDamping)
+        Damper(rimIds[i], rimIds[i + segments / 2], damping = diameterDamping, name = placement.name("diameter-damper-$i"))
     }
 
-    val gravity = UniformGravity(rimGroup, Vector3(0.0, -9.8, 0.0))
+    val gravity = UniformGravity(rimGroup, Vector3(0.0, -9.8, 0.0), name = placement.name("gravity"))
     val floor = PlaneCollider(VectorExpr.of(placement.offset), normal = Vector3(0.0, 1.0, 0.0), name = placement.name("floor"))
     val rule = ParticleColliderRule(
         group = rimGroup,
@@ -103,5 +110,6 @@ fun buildTire(
         forces = listOf(gravity) + neighborSprings + diameterSprings + dampers,
         collisions = CollisionSystem(listOf(rule)),
         rimIds = rimIds,
+        floor = floor,
     )
 }
