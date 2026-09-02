@@ -31,7 +31,7 @@ class FlagSelfCollisionStabilityTest {
 
         repeat(steps) {
             integrator.step(scenario.store, scenario.groups, scenario.forces, scenario.constraints, t, FLAG_DT)
-            selfCollisions.resolve(scenario.store)
+            selfCollisions.resolve(scenario.store, scenario.groups, scenario.constraints)
             t += FLAG_DT
             for (id in scenario.store.liveIds()) {
                 val speed = scenario.store.velocity(id).length()

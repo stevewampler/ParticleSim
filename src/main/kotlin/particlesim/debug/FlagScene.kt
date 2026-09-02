@@ -62,10 +62,13 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
     // none of which live on FlagScenario either. thickness/excludeRings tuned empirically against
     // this exact scenario (see todo/TODO.md's entry for the scratch-benchmark method): thickness
     // = 0.05 (~1/3 of the flag's own row spacing of 0.15) catches genuine folds without firing on
-    // the sheet's ordinary billowing curvature; excludeRings = 2 was confirmed necessary, not
-    // just a guess - rings 0-1 fired every single step even at a much larger thickness (pure
-    // local-curvature false positives), rings 2-4 converged to the same, much smaller contact
-    // count, so 2 is the minimum that actually excludes local curvature.
+    // the sheet's ordinary billowing curvature. excludeRings = 2 is a safety margin, not a
+    // measured floor at this thickness - rings 0/1/2 all produced identical results at
+    // thickness=0.05 (no local-curvature false positives even at ring 0 here). The floor was
+    // only observed at a much larger thickness (0.15, comparable to row spacing): there, rings
+    // 0-1 fired every single step (pure local-curvature false positives) and rings 2-4 converged
+    // to the same, much smaller contact count. So 2 is known to be sufficient once thickness
+    // approaches spacing - raise thickness later without re-checking this, and it may need to.
     private val selfCollisions = SurfaceSelfCollisionSystem(
         listOf(SurfaceSelfCollisionRule(surface = scenario.surface, thickness = 0.05, excludeRings = 2)),
     )
@@ -107,7 +110,7 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
         }
         val constraints: List<Constraint> = activeDrag?.let { scenario.constraints + it } ?: scenario.constraints
         integrator.step(scenario.store, scenario.groups, scenario.forces, constraints, t, dt)
-        selfCollisions.resolve(scenario.store)
+        selfCollisions.resolve(scenario.store, scenario.groups, constraints)
     }
 
     override fun frame(t: Double): SceneFrame {

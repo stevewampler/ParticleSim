@@ -3385,6 +3385,53 @@ wording; recorded once below, not as two separate items.
       self-collision tests above) and the live behavior already observed
       cover the mechanism's correctness independently of that one
       interrupted browser session.
+      **Follow-up fixes from a second review pass, before this was
+      considered done** (all four caught before shipping, not filed as
+      separate bugs):
+      1. The original fold test placed the query vertex *exactly* on the
+         triangle's closest point, so `dist ≈ 0` and `deepestContact`
+         fell back to its degenerate-normal case (`(0,1,0)`) - which
+         happens to be the physically correct direction on that test's
+         flat, y=0 fixture, so the test passed for the wrong reason and
+         wouldn't have caught a sign error or missing normalization in
+         the real (non-degenerate) branch. Fixed by offsetting the vertex
+         off the triangle's plane by less than `thickness` instead, and
+         asserting the *distance to the triangle strictly increased*
+         after `resolve()`, not just that the position changed.
+      2. §12.5's "constrained particles behave as infinite mass in
+         collision response" (already implemented for
+         `ParticleCollisionSystem`, CLAUDE.md-locked) was silently not
+         honored here - the flag's own pole-edge column is
+         `FixedPosition`-pinned and is a real triangle vertex in
+         self-contacts, but was absorbing a finite share of the impulse/
+         positional correction that the constraint then discarded on the
+         very next step, silently under-correcting the free side.
+         `resolve()` now takes the step's live `groups`/`constraints`
+         (mirroring `ParticleCollisionSystem`'s own signature exactly)
+         and zeroes a pinned vertex's inverse mass via
+         `Constraint.pinnedIds`, with the same "every side pinned - an
+         immovable object meeting one" divide-by-zero guard
+         `ParticleCollisionSystem.respond` already uses. New test: a
+         pinned query vertex never moves and the triangle it lands near
+         absorbs the entire correction instead of splitting it.
+      3. `compressionDamping` was dead weight at the shipped
+         `restitution = 0.0` default - the formula multiplied the whole
+         damped term by `restitution`, so any `compressionDamping` value
+         produced identical output. Removed rather than documented around
+         (§12.5-adjacent CLAUDE.md minimalism: no knob that does nothing
+         at every value this rule ships with) - the doc comment now
+         explains restitution = 0.0 as a hard inelastic stop, and notes
+         where a damping term would need to come back if a future
+         scenario wants genuine bounce.
+      4. `FlagScene`'s own comment overstated the tuning data: it claimed
+         `excludeRings = 2` was "confirmed necessary," but the scratch
+         run only showed rings 0-1 falsely firing at `thickness = 0.15`
+         (comparable to row spacing) - at the *shipped* `thickness =
+         0.05`, rings 0/1/2 all produced identical results, so 2 is a
+         safety margin at these parameters, not a measured floor. Comment
+         corrected to say exactly that, so a future tuner raising
+         `thickness` toward spacing knows that's when the floor starts to
+         bind and re-checking is warranted.
 - [x] Put the flag on a pole the way `MultiShapeScene` already composes
       `buildFlagpole` + `buildFlag` by placement (requirements.md §7.3) -
       confirmed this part needed nothing new: `MultiShapeScene` already

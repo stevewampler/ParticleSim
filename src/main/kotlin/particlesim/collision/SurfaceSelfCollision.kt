@@ -1,10 +1,11 @@
 package particlesim.collision
 
+import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
+import particlesim.physics.Constraint
 import particlesim.surface.Surface
 import kotlin.math.abs
-import kotlin.math.sqrt
 
 /**
  * One surface-vs-itself collision rule (§12.4's "Surface self-collision," promoted out of
@@ -28,12 +29,15 @@ data class SurfaceSelfCollisionRule(
      * own the way a colliding ball does. No sensible generic default — depends entirely on the
      * mesh's own scale (spacing between neighboring particles). */
     val thickness: Double,
-    // Fully damped, no bounce by default — like SurfaceCollisionRule's pole/rope use, this
-    // pairing exists to stop interpenetration, not to make the cloth bounce off itself.
-    // Deliberately no extensionDamping counterpart: a self-contact that's already separating
-    // needs no correction, the same as SurfaceCollisionRule's own extensionDamping = 0.0 default.
+    // A hard inelastic stop by default (restitution = 0.0 fully absorbs the approach velocity
+    // along the contact normal) — like SurfaceCollisionRule's pole/rope use, this pairing exists
+    // to stop interpenetration, not to make the cloth bounce off itself. Deliberately no
+    // damping/extensionDamping knobs, unlike SurfaceCollisionRule: at restitution = 0.0 a
+    // compression-damping term would be dead weight (already fully absorbed), and a contact
+    // that's already separating needs no correction either way - if a future scenario wants
+    // genuine bounce (restitution > 0.0), reintroduce compressionDamping then, not speculatively
+    // now.
     val restitution: Double = 0.0,
-    val compressionDamping: Double = 1.0,
     val correctionFactor: Double = 0.2,
     /** Triangles within this many mesh-*edge* hops of a query vertex's own incident triangles
      * are excluded from that vertex's narrow phase. Without this, a vertex is trivially
@@ -45,7 +49,7 @@ data class SurfaceSelfCollisionRule(
 )
 
 /**
- * Resolves a [Surface] against itself, mirroring [SurfaceCollisionSystem]'s restitution/damping/
+ * Resolves a [Surface] against itself, mirroring [SurfaceCollisionSystem]'s restitution/
  * rest-clamp formulas (§12.7) but with both sides of a contact being the *same* kind of
  * finite-mass cloth particle — unlike a static [Collider] or a particle-vs-surface contact,
  * there's no "which side is the immovable one" here, so both the query vertex and the contact
@@ -65,6 +69,13 @@ data class SurfaceSelfCollisionRule(
  * high-valence vertices much faster than the surface itself actually spreads), not recomputed
  * per step since a [Surface]'s triangle list doesn't change over a scenario's lifetime (§14.3
  * explicitly scopes destruction/mesh-repair as still open).
+ *
+ * [resolve] takes the step's live `constraints`, the same reason [ParticleCollisionSystem] does
+ * (§12.5: "constrained particles behave as infinite mass in collision response"): a mesh vertex
+ * pinned by e.g. [particlesim.physics.FixedPosition] (the flag's own pole edge) is a real
+ * triangle vertex in self-contacts, and must contribute zero inverse mass to the impulse/
+ * positional-correction split — otherwise it would absorb a share of the correction that a
+ * constraint discards on the very next step, silently under-correcting the free side.
  */
 class SurfaceSelfCollisionSystem(
     private val rules: List<SurfaceSelfCollisionRule>,
@@ -77,12 +88,15 @@ class SurfaceSelfCollisionSystem(
         RuleState(vertexIdsOf(rule.surface), buildExclusion(rule.surface, rule.excludeRings))
     }
 
-    fun resolve(store: ParticleStore) {
+    fun resolve(store: ParticleStore, groups: Groups, constraints: List<Constraint>) {
+        val pinnedIds = HashSet<Int>()
+        for (constraint in constraints) pinnedIds += constraint.pinnedIds(groups)
+
         for ((rule, state) in rules.zip(states)) {
             for (vertexId in state.vertices) {
                 val excluded = state.excludedTriangles[vertexId] ?: emptySet()
                 val contact = deepestContact(store, rule.surface, excluded, vertexId, rule.thickness) ?: continue
-                respond(store, vertexId, contact, rule)
+                respond(store, vertexId, contact, rule, pinnedIds)
             }
         }
     }
@@ -120,11 +134,17 @@ class SurfaceSelfCollisionSystem(
         return best
     }
 
-    private fun respond(store: ParticleStore, vertexId: Int, contact: TriangleContact, rule: SurfaceSelfCollisionRule) {
-        val invMassP = 1.0 / store.mass(vertexId)
-        val invMassA = 1.0 / store.mass(contact.a)
-        val invMassB = 1.0 / store.mass(contact.b)
-        val invMassC = 1.0 / store.mass(contact.c)
+    private fun respond(store: ParticleStore, vertexId: Int, contact: TriangleContact, rule: SurfaceSelfCollisionRule, pinnedIds: Set<Int>) {
+        val invMassP = if (vertexId in pinnedIds) 0.0 else 1.0 / store.mass(vertexId)
+        val invMassA = if (contact.a in pinnedIds) 0.0 else 1.0 / store.mass(contact.a)
+        val invMassB = if (contact.b in pinnedIds) 0.0 else 1.0 / store.mass(contact.b)
+        val invMassC = if (contact.c in pinnedIds) 0.0 else 1.0 / store.mass(contact.c)
+        val invMassSum = invMassP +
+            contact.u * contact.u * invMassA + contact.v * contact.v * invMassB + contact.w * contact.w * invMassC
+        // Every side pinned (e.g. the query vertex and the whole contact triangle all sit on a
+        // FixedPosition edge) - an immovable object meeting one, same guard ParticleCollisionSystem
+        // uses.
+        if (invMassSum <= 0.0) return
 
         val velP = store.velocity(vertexId)
         val velA = store.velocity(contact.a)
@@ -138,13 +158,10 @@ class SurfaceSelfCollisionSystem(
 
         val newRelVel = when {
             isResting -> 0.0
-            relVel < 0.0 -> -rule.restitution * relVel / sqrt(1.0 + rule.compressionDamping)
+            relVel < 0.0 -> -rule.restitution * relVel // 0.0 by default - a hard inelastic stop
             else -> relVel // already separating - no correction needed (see class doc)
         }
         val deltaRelVel = newRelVel - relVel
-
-        val invMassSum = invMassP +
-            contact.u * contact.u * invMassA + contact.v * contact.v * invMassB + contact.w * contact.w * invMassC
         val impulse = deltaRelVel / invMassSum
 
         store.setVelocity(vertexId, velP + contact.normal * (impulse * invMassP))
