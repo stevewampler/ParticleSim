@@ -39,6 +39,14 @@ object Grid {
      * by zero here too, hence the same `rows >= 2`/`cols >= 2` guard). Falls out directly from
      * grid position with no separate authoring needed, exactly the case requirements.md §10.2
      * calls out as the practical starting point for texture mapping.
+     *
+     * `v` is measured **from the last row**, not the first: row 0 (e.g. `buildFlag`'s pole-top
+     * edge, `Vector3(c * spacing, -r * spacing, 0.0)` — increasing `r` moves *down*) gets `v=1`.
+     * This matches three.js's default `Texture.flipY = true`, under which `v=1` lands on the
+     * *first* (topmost) row of pixels in the source image file — an image loaded right-side up
+     * renders right-side up on the mesh only if grid-row-0 (visually the top) maps to `v=1`, not
+     * `v=0`. Getting this backwards doesn't error or distort — every triangle still has valid UVs
+     * — it just renders the whole image upside down, which is exactly the bug this fixed.
      */
     fun uvs(ids: List<List<Int>>): Map<Int, UV> {
         val rows = ids.size
@@ -48,7 +56,7 @@ object Grid {
 
         val result = HashMap<Int, UV>(rows * cols)
         for (r in 0 until rows) for (c in 0 until cols) {
-            result[ids[r][c]] = UV(c.toDouble() / (cols - 1), r.toDouble() / (rows - 1))
+            result[ids[r][c]] = UV(c.toDouble() / (cols - 1), 1.0 - r.toDouble() / (rows - 1))
         }
         return result
     }

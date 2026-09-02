@@ -58,19 +58,19 @@ class GridTest {
     }
 
     @Test
-    fun `uvs cover every vertex, normalized to 0,1 at the grid's corners`() {
+    fun `uvs cover every vertex, normalized to 0,1 at the grid's corners, v flipped so row 0 is v=1`() {
         val store = ParticleStore()
         val ids = makeGrid(store, rows = 4, cols = 6)
         val uvs = Grid.uvs(ids)
 
         assertEquals(4 * 6, uvs.size)
-        assertEquals(UV(0.0, 0.0), uvs.getValue(ids[0][0]))
-        assertEquals(UV(1.0, 0.0), uvs.getValue(ids[0][5]))
-        assertEquals(UV(0.0, 1.0), uvs.getValue(ids[3][0]))
-        assertEquals(UV(1.0, 1.0), uvs.getValue(ids[3][5]))
+        assertEquals(UV(0.0, 1.0), uvs.getValue(ids[0][0]))
+        assertEquals(UV(1.0, 1.0), uvs.getValue(ids[0][5]))
+        assertEquals(UV(0.0, 0.0), uvs.getValue(ids[3][0]))
+        assertEquals(UV(1.0, 0.0), uvs.getValue(ids[3][5]))
         // mid-grid: exactly halfway along both axes for an even 4x6 layout at row 1.5/col 2.5 -
         // check a specific interior point instead, since there's no exact center cell here.
-        assertEquals(UV(2.0 / 5.0, 1.0 / 3.0), uvs.getValue(ids[1][2]))
+        assertEquals(UV(2.0 / 5.0, 1.0 - 1.0 / 3.0), uvs.getValue(ids[1][2]))
     }
 
     @Test

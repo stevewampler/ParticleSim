@@ -20,6 +20,7 @@ import particlesim.physics.MeshSprings
 import particlesim.physics.Spring
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
+import particlesim.render.TextureAssets
 import particlesim.surface.Surface
 
 /**
@@ -171,7 +172,13 @@ fun buildFlagOnRopeScenario(
 class FlagOnRopeScene : DemoScene {
     private val scenario = buildFlagOnRopeScenario()
     private val flagRows = scenario.flagGrid.size
-    private val clothMesh = SurfaceRenderer(scenario.flagSurface, wireframe = false)
+    // §10.2's texture-mapped surfaces, same asset FlagScene uses. scenario.flagSurface already
+    // carries Grid.uvs (buildFlag attaches it unconditionally).
+    private val clothMesh = SurfaceRenderer(scenario.flagSurface, wireframe = false, textureName = TextureAssets.USA_FLAG)
+    // Pole/rope particles have no mesh of their own, so they stay in visibleIds (as plain dots,
+    // same as before); the flag grid's own dots are dropped now that the textured mesh already
+    // shows it, the same "visibleIds=poleIds" reasoning FlagScene uses for its cloth.
+    private val visibleIds = (scenario.flagpole.poleIds + scenario.rope.ropeIds).toSet()
     private val registry = SceneRegistry.build(
         forces = scenario.forces, constraints = scenario.constraints, surfaces = listOf(scenario.flagSurface), groups = scenario.groups,
     )
@@ -197,6 +204,7 @@ class FlagOnRopeScene : DemoScene {
             scenario.flagStructural.activeConnections() +
             (0 until flagRows).map { row -> scenario.flagGrid[row][0] to scenario.rope.ropeIds[row] },
         meshes = listOf(clothMesh),
+        visibleIds = visibleIds,
         registry = registry,
     )
 }

@@ -3289,8 +3289,52 @@ next session picks them up instead of losing them.
       **Verified live in Chrome**: loaded `flag`, confirmed the actual
       stars-and-stripes flag renders correctly mapped across the
       wind-billowed, folding cloth (matching the checked-in asset, no
-      seams/flipping/stretching visible even where the surface curls),
-      no console errors in a fresh tab.
+      seams/stretching visible even where the surface curls), no console
+      errors in a fresh tab. **Missed at the time**: the flag was actually
+      upside down (canton at the bottom) - not caught by this verification
+      pass, only noticed afterward by the user. Fixed in the next
+      follow-up below.
+      **Second follow-up, same session - the upside-down bug, plus
+      `flagOnRope`**: `Grid.uvs`'s `v = r / (rows - 1)` put row 0 (the
+      pole-top edge, world-space *top* of the flag) at `v=0`. Three.js's
+      default `Texture.flipY = true` puts the *first* (topmost) row of the
+      source image's own pixels at `v=1`, not `v=0` - so row 0 (world-top)
+      was landing on the *last* row of the source image (the bottom
+      stripe) instead of the first (the canton), flipping the whole image
+      vertically. No error, no distortion, just wrong - every triangle
+      still had valid, consistent UVs, which is exactly why the live
+      verification above didn't catch it (nothing looked "broken," it
+      just looked like a flag flying upside down, easy to read as
+      correct at a glance). Fixed by flipping the formula to
+      `v = 1 - r / (rows - 1)`, so row 0 now lands on `v=1`. `GridTest`'s
+      corner-value assertions inverted to match (`ids[0][*]` now `v=1`,
+      `ids[rows-1][*]` now `v=0`); the interior mid-grid assertion needed
+      `1.0 - 1.0/3.0` rather than the algebraically-equal `2.0/3.0` literal
+      to avoid a one-ULP floating-point mismatch against the production
+      formula's own rounding.
+      Also textured `FlagOnRopeScene`'s flag with the same `USA_FLAG`
+      asset (`scenario.flagSurface` already carries `Grid.uvs` from
+      `buildFlag`, so no new UV work needed) and set its `SceneFrame.
+      visibleIds` to just the pole + rope ids, dropping the flag grid's
+      own particle dots now that the textured mesh already shows it - the
+      same reasoning `FlagScene` already applies to its own cloth
+      (`visibleIds = poleIds`), extended here to also keep the rope's
+      dots visible since nothing else renders the rope's individual
+      vertices. Deliberately *not* `emptySet()` - the pole/rope have no
+      mesh of their own, and excluding a particle from `visibleIds`
+      server-side is permanent for that frame (the client's own per-group
+      "show particles" toggle only ever *hides further*, never restores
+      something the server already excluded - confirmed by reading
+      `viewer.html`'s `hiddenGroups` handling before relying on it).
+      **Verified live in Chrome**: loaded `flag`, confirmed the canton is
+      now at the top-left near the pole, right-side up. Switched to
+      `flagOnRope` (via a direct `<select>` value + `change` event, since
+      the native dropdown isn't drivable through click coordinates),
+      manually orbited the camera (the scripted default camera doesn't
+      frame this scene's flag), and confirmed: the flag renders with the
+      same upright texture: no grid-vertex dots on the flag while the
+      rope's own dots remain visible and draggable-looking as before; no
+      console errors.
 
 ## Expression-source visibility, flag pole/rope/self-collision, and surface break-limit editing (§7.3/§10.4/§12.4, new requirements) — not yet phased
 Raised by the user directly, recorded in `requirements.md` rather than
