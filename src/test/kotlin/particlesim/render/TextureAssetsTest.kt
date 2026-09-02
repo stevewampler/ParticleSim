@@ -9,13 +9,24 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** §10.2's texture-mapped surfaces: [TextureAssets] is the only source of image bytes this
- * project ships (procedurally generated, never fetched externally or checked in as a binary
- * asset) — proven here as valid, decodable PNG data, not just "some bytes came back". */
+ * project ships (procedurally generated, or one checked-in resource) — proven here as valid,
+ * decodable PNG data, not just "some bytes came back". */
 class TextureAssetsTest {
 
     @Test
     fun `a known texture name returns decodable, non-trivial PNG bytes`() {
         val bytes = TextureAssets.pngBytes(TextureAssets.FLAG_STRIPES)
+        assertNotNull(bytes)
+        assertTrue(bytes.size > 100, "expected real image data, got ${bytes.size} bytes")
+
+        val image = ImageIO.read(ByteArrayInputStream(bytes))
+        assertNotNull(image, "TextureAssets should produce bytes ImageIO can actually decode as an image")
+        assertTrue(image.width > 1 && image.height > 1)
+    }
+
+    @Test
+    fun `the checked-in USA flag resource also returns decodable, non-trivial PNG bytes`() {
+        val bytes = TextureAssets.pngBytes(TextureAssets.USA_FLAG)
         assertNotNull(bytes)
         assertTrue(bytes.size > 100, "expected real image data, got ${bytes.size} bytes")
 

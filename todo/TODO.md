@@ -3263,6 +3263,34 @@ next session picks them up instead of losing them.
       per-frame stream carries no version field, so a stale tab decodes new
       frames with pre-change JS until reloaded; not a bug in the shipped
       code, confirmed by the fresh tab being clean throughout.)
+      **Follow-up, same session**: swapped `FlagScene`'s texture from the
+      procedural stripes above to an actual American flag image the user
+      pasted directly in chat. `TextureAssets` gained a second name,
+      `USA_FLAG`, alongside `FLAG_STRIPES` - not a replacement, since
+      `FLAG_STRIPES`'s own reason to exist (an asymmetric high-contrast
+      pattern that makes a UV mapping mistake obvious) still holds and
+      stays tested. This is the project's first-ever checked-in binary
+      asset (`src/main/resources/particlesim/textures/us-flag.png`) rather
+      than a procedurally-generated one - legitimate here specifically
+      because the user supplied the source image directly (never fetched
+      or guessed from a URL). The pasted image (1588x1588, sticker-style
+      with padding/drop-shadow around the actual flag) was cropped to its
+      real content bounds (1560x1041) and downscaled to 512x342 via a
+      throwaway `jshell` script (flattened onto an opaque white
+      background first, dropping the shadow/alpha fringe, then encoded as
+      `TYPE_INT_RGB` PNG) - the same "spike script, run once, delete"
+      pattern the self-collision tuning work used, not checked in.
+      `TextureAssets.loadUsaFlag()` reads the resource from the classpath
+      once (`getResourceAsStream`) and caches it the same way the
+      generated textures are cached, so `pngBytes(name)` callers don't
+      need to know which kind of texture a name refers to.
+      New test: `TextureAssetsTest` ("the checked-in USA flag resource
+      also returns decodable, non-trivial PNG bytes").
+      **Verified live in Chrome**: loaded `flag`, confirmed the actual
+      stars-and-stripes flag renders correctly mapped across the
+      wind-billowed, folding cloth (matching the checked-in asset, no
+      seams/flipping/stretching visible even where the surface curls),
+      no console errors in a fresh tab.
 
 ## Expression-source visibility, flag pole/rope/self-collision, and surface break-limit editing (§7.3/§10.4/§12.4, new requirements) — not yet phased
 Raised by the user directly, recorded in `requirements.md` rather than

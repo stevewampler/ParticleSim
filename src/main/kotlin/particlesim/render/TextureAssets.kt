@@ -7,25 +7,35 @@ import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
 
 /**
- * §10.2's texture-mapped surfaces (`[stretch]`, now built): a small named registry of
- * procedurally-generated PNG images, rather than a checked-in binary asset (this project has
- * none anywhere else) or an externally-fetched one (no legitimate source for "the actual flag
- * graphic" to pull from, and URLs are never fetched/guessed on a user's behalf for this kind of
- * request). Each image is generated once per process and cached — [particlesim.debug.ViewerHttpServer]
+ * §10.2's texture-mapped surfaces (`[stretch]`, now built): a small named registry of PNG
+ * images — most procedurally generated (this project checks in no other binary asset), plus
+ * [USA_FLAG], a checked-in resource the user supplied directly in chat (never fetched or
+ * guessed from a URL on the user's behalf). Each generated image is built once per process and
+ * cached; the checked-in one is read from the classpath once and cached the same way, so
+ * callers don't need to care which kind [name] refers to. [particlesim.debug.ViewerHttpServer]
  * serves the bytes as a static file at `/textures/<name>.png`, referenced by a
  * [SurfaceRenderer.textureName], not pushed through the per-frame binary protocol.
  */
 object TextureAssets {
     const val FLAG_STRIPES = "flag-stripes"
+    const val USA_FLAG = "us-flag"
 
     private val cache = HashMap<String, ByteArray>()
 
-    /** `null` if [name] isn't a known generated texture. */
+    /** `null` if [name] isn't a known texture. */
     @Synchronized
     fun pngBytes(name: String): ByteArray? = when (name) {
         FLAG_STRIPES -> cache.getOrPut(name) { generateFlagStripes() }
+        USA_FLAG -> cache.getOrPut(name) { loadUsaFlag() }
         else -> null
     }
+
+    /** Cropped/downscaled from the image the user pasted in chat — see `todo/TODO.md`'s entry
+     * for the crop/resize provenance (a throwaway `jshell` script, not checked in). */
+    private fun loadUsaFlag(): ByteArray =
+        checkNotNull(javaClass.getResourceAsStream("/particlesim/textures/us-flag.png")) {
+            "missing classpath resource /particlesim/textures/us-flag.png"
+        }.use { it.readBytes() }
 
     /**
      * A striped pattern with a colored block in one corner — deliberately not a reproduction of
