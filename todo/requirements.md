@@ -1297,16 +1297,18 @@ main lever for performance.
   second pairing: the rope and pole can't pass through the flag's surface
   either (`buildFlagOnRopeScenario`'s `poleRopeCollidable` group vs.
   `flag.surface`, see `todo/TODO.md`'s own entry for the wiring detail).
-- **Surface self-collision** (cloth colliding with itself) is `[stretch]`
-  and likely last in priority — expensive and only needed for
-  heavily-folding cloth scenarios. *(New requirement)* §7.3's flag now has
-  a second, concrete reason to want this sooner: the flag's own particles
-  shouldn't be able to pass through its own surface as it billows and
-  folds under wind. Doesn't change the `[stretch]` designation by itself
-  — genuine cloth self-intersection avoidance is still real, unbuilt work
-  (nothing like it exists anywhere in this codebase today, unlike the
-  particle-vs-surface case above) — but it's no longer purely speculative
-  either.
+- **Surface self-collision** (cloth colliding with itself) — no longer
+  `[stretch]`: built for §7.3's flag, so the flag's own particles can't
+  pass through its own surface as it billows and folds under wind
+  (`particlesim.collision.SurfaceSelfCollisionRule`/
+  `SurfaceSelfCollisionSystem`, wired into `FlagScene`; see
+  `todo/TODO.md`'s own entry for the exclusion-topology/tuning detail).
+  A documented approximation, not a from-first-principles cloth solver —
+  brute-force narrow phase, no continuous collision detection, and a
+  single resolve() pass can correct the same tight fold from two
+  different vertices' queries in one step (each nudge pushes the two
+  layers apart, so this doesn't diverge, but it isn't a simultaneous
+  solve either).
 
 ### 12.5 Response
 

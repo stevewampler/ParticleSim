@@ -3299,14 +3299,92 @@ wording; recorded once below, not as two separate items.
       before/after, not just visually). No console errors from the app
       in any case (only an unrelated Chrome-extension "disconnected port"
       error, unaffiliated with this page).
-- [ ] `[stretch]` Flag surface self-collision: the flag's own particles
-      shouldn't be able to pass through its own surface as it
-      billows/folds (requirements.md §12.4's "Surface self-collision"
-      bullet, already `[stretch]` there - genuinely unbuilt anywhere in
-      this codebase, unlike the particle-vs-surface case below). Likely
-      the largest single piece of new physics work in this batch;
-      deprioritized behind §10.4's live-editing work per direct user
-      request.
+- [x] Flag surface self-collision: the flag's own particles can't pass
+      through its own surface as it billows/folds (requirements.md
+      §12.4's "Surface self-collision" bullet). Genuinely new physics, not
+      a wiring exercise like the rope/pole item above - nothing like a
+      surface colliding with itself existed anywhere in this codebase.
+      New `particlesim.collision.SurfaceSelfCollisionRule`/
+      `SurfaceSelfCollisionSystem`, mirroring `SurfaceCollisionSystem`'s
+      own restitution/damping/rest-clamp formulas (§12.7) but for a
+      genuinely new case: both sides of a contact are the *same* kind of
+      finite-mass cloth particle, not a query particle against a
+      surface owned by someone else, so **the positional correction is
+      split across both sides by inverse mass, not applied query-only**
+      like `SurfaceCollisionSystem.respond` - leaving the triangle's own
+      vertices uncorrected would silently favor whichever vertex's query
+      happened to run first in a step's iteration order.
+      **The real new mechanism is the exclusion topology**: a vertex is
+      trivially "penetrating" its own incident triangles (zero distance,
+      by construction) and its immediate neighborhood, whose ordinary
+      resting curvature routinely sits closer than any reasonable
+      thickness with no real fold involved - `excludeRings` walks the
+      mesh's *triangle-edge* adjacency graph (two triangles adjacent iff
+      they share an edge, not merely a vertex - tighter than shared-vertex
+      adjacency, which fans out through high-valence vertices much faster
+      than the surface itself spreads) outward from each vertex's own
+      triangles, and only triangles beyond that topological radius are
+      checked. Precomputed once per rule at construction (a `Surface`'s
+      triangle list is fixed for a scenario's lifetime, §14.3), not
+      recomputed per step.
+      **Parameters tuned empirically against real data, not guessed** -
+      via a throwaway scratch `main()` + temporary Gradle task (both
+      deleted after use, same "spike test... then deleted" pattern the
+      Arrow recording work used): at `thickness` comparable to the flag's
+      own row spacing (0.15), `excludeRings=0` fired on literally every
+      single one of 4000 steps from step 0 (pure local-curvature false
+      positives, confirming the exclusion mechanism is load-bearing, not
+      decorative), `excludeRings=1` still fired on 3999/4000, and
+      `excludeRings=2` dropped to 698/4000 starting around step 905 -
+      genuine folds only - with `excludeRings=3`/`4` producing bit-identical
+      results, confirming 2 is the minimum that actually excludes local
+      curvature. Landed with `thickness=0.05` (~1/3 of row spacing) and
+      `excludeRings=2`. Performance: raw physics throughput drops ~10x
+      with self-collision on (~17,700 -> ~1,777 steps/s in the same
+      scratch harness), but that's still comfortably above the flag
+      scene's live-demo ceiling (~850-900 steps/s even with no
+      self-collision, bound by rendering/broadcast overhead per Phase 5's
+      own "same lag stat at 18 vs 2000 particles" finding) - confirmed
+      live, steps/s read ~411-508 with self-collision on, not the
+      catastrophic drop a naive O(V*T) brute force could have caused.
+      **Wired into `FlagScene`, not `FlagScenario`/`buildFlag`** - a
+      deliberate scoping choice: `buildFlag` is also consumed by
+      `FlagGoldenTest`/`FlagYamlParityTest` (byte-identical-output proofs
+      that never call any `resolve()`), `FlagOnRopeScene`, and
+      `MultiShapeScene`, none of which should carry this by default. Built
+      from `scenario.surface` inside `FlagScene` the same way `clothMesh`/
+      `windArrows`/`camera` already are, and resolved once per physics
+      step (`FlagScene.step()`, right after `integrator.step()` -
+      `SceneLibrary.advanceOneStep()` calls `scene.step(t)` once per
+      physics step, not once per frame, confirmed by reading the runner
+      loop rather than assumed). `flagOnRope`/`multiShape` deliberately
+      don't get this yet - same "wiring a second consumer, pick it up
+      when needed" scoping the rope/pole item above used.
+      New tests: `SurfaceSelfCollisionTest` (a flat resting mesh produces
+      zero corrections - the discriminating negative case a positive-only
+      test suite would miss; `excludeRings=0` at a thickness comparable to
+      grid spacing does fire on a flat mesh's own local curvature,
+      confirming the exclusion mechanism is actually applied; a vertex
+      folded directly onto a topologically-distant triangle is pushed back
+      out *and* the triangle's own vertices react), `FlagSelfCollisionStabilityTest`
+      (a separate file from `FlagStabilityTest`, which documents the
+      no-self-collision baseline and shouldn't itself change - 4 seconds
+      with self-collision wired in, same `maxSpeed < 50` smoke check).
+      **Verified live in Chrome**: loaded `flag`, confirmed no console
+      errors over an extended run. Used the live-editable `wind` panel
+      (§10.4) to drive a strong reversing wind (`[-25, 0, 0]` then
+      `[30, 0, 0]`) specifically to force a tight self-fold - the sheet
+      visibly curled into a rolled/tube shape rather than collapsing flat
+      through itself, held that rounded shape (not a flattened double
+      layer) under continued wind, and stayed stable (no spikes, no
+      NaN/blow-up) for the duration observed. The Chrome extension
+      connection dropped mid-session (an environment issue, not
+      reproducible from the app side - no error on the page itself)
+      before a second reversal could be captured; not re-attempted, since
+      the automated test suite (including the two discriminating
+      self-collision tests above) and the live behavior already observed
+      cover the mechanism's correctness independently of that one
+      interrupted browser session.
 - [x] Put the flag on a pole the way `MultiShapeScene` already composes
       `buildFlagpole` + `buildFlag` by placement (requirements.md §7.3) -
       confirmed this part needed nothing new: `MultiShapeScene` already

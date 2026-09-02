@@ -1,5 +1,7 @@
 package particlesim.debug
 
+import particlesim.collision.SurfaceSelfCollisionRule
+import particlesim.collision.SurfaceSelfCollisionSystem
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
 import particlesim.examples.FLAG_DT
@@ -51,6 +53,23 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
         groups = scenario.groups,
     )
 
+    // §12.4's "Surface self-collision" (requirements.md, new requirement) - keeps the flag's own
+    // cloth from passing through itself as it billows/folds. Built here rather than inside
+    // buildFlag/FlagScenario: buildFlag is also consumed by FlagGoldenTest/FlagYamlParityTest
+    // (byte-identical-output proofs that never call any resolve()) and FlagOnRopeScene/
+    // MultiShapeScene, none of which should carry this by default - the same "own it where it's
+    // actually used" reasoning FlagScene already applies to clothMesh/windArrows/camera below,
+    // none of which live on FlagScenario either. thickness/excludeRings tuned empirically against
+    // this exact scenario (see todo/TODO.md's entry for the scratch-benchmark method): thickness
+    // = 0.05 (~1/3 of the flag's own row spacing of 0.15) catches genuine folds without firing on
+    // the sheet's ordinary billowing curvature; excludeRings = 2 was confirmed necessary, not
+    // just a guess - rings 0-1 fired every single step even at a much larger thickness (pure
+    // local-curvature false positives), rings 2-4 converged to the same, much smaller contact
+    // count, so 2 is the minimum that actually excludes local curvature.
+    private val selfCollisions = SurfaceSelfCollisionSystem(
+        listOf(SurfaceSelfCollisionRule(surface = scenario.surface, thickness = 0.05, excludeRings = 2)),
+    )
+
     private val integrator = Integrator()
     private var activeDrag: DragConstraint? = null
     private val allIds = scenario.grid.flatten()
@@ -88,6 +107,7 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
         }
         val constraints: List<Constraint> = activeDrag?.let { scenario.constraints + it } ?: scenario.constraints
         integrator.step(scenario.store, scenario.groups, scenario.forces, constraints, t, dt)
+        selfCollisions.resolve(scenario.store)
     }
 
     override fun frame(t: Double): SceneFrame {
