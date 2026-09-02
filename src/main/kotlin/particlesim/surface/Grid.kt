@@ -32,6 +32,27 @@ object Grid {
         return result
     }
 
+    /**
+     * Per-vertex UV coordinates for a grid mesh (§10.2's texture-mapped surfaces) — `u` along
+     * columns, `v` along rows, each linearly normalized to `[0,1]` over the grid's own extent
+     * (a single-row or single-column grid, though [triangles] already rejects it, would divide
+     * by zero here too, hence the same `rows >= 2`/`cols >= 2` guard). Falls out directly from
+     * grid position with no separate authoring needed, exactly the case requirements.md §10.2
+     * calls out as the practical starting point for texture mapping.
+     */
+    fun uvs(ids: List<List<Int>>): Map<Int, UV> {
+        val rows = ids.size
+        require(rows >= 2) { "grid needs at least 2 rows, got $rows" }
+        val cols = ids[0].size
+        require(cols >= 2) { "grid needs at least 2 cols, got $cols" }
+
+        val result = HashMap<Int, UV>(rows * cols)
+        for (r in 0 until rows) for (c in 0 until cols) {
+            result[ids[r][c]] = UV(c.toDouble() / (cols - 1), r.toDouble() / (rows - 1))
+        }
+        return result
+    }
+
     /** An edge between two particle ids — direction doesn't matter, used for spring topology. */
     data class Edge(val a: Int, val b: Int)
 

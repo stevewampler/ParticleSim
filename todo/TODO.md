@@ -3183,26 +3183,86 @@ next session picks them up instead of losing them.
       through several seconds of running simulation after unpausing;
       re-verified that normal editing (a fresh time-varying expression)
       still works afterward. No console errors.
-- [ ] `[stretch]` Texture-mapped surfaces - an image (e.g. a flag graphic)
+- [x] `[stretch]` Texture-mapped surfaces - an image (e.g. a flag graphic)
       rendered onto a surface's mesh instead of/alongside its flat shaded
       color (requirements.md §10.2, marked `[stretch]` at the user's
-      request - also pointed to from the master "Deferred `[stretch]`"
-      list below). Two real gaps to close, neither trivial:
-      (1) no UV coordinates exist anywhere in this codebase today
-      (`Triangle`/`Surface` carry none; `TriangleClosestPoint`'s u/v/w
-      are barycentric closest-point coordinates, unrelated) - for a
-      grid-generated shape like the flag these fall out directly from
-      each vertex's row/col position, so generating them for that case
-      specifically is likely the practical starting point rather than
-      solving UV generation for arbitrary meshes first; (2) no mechanism
-      exists to get an image asset from the engine process to the browser
-      client - most likely a static file served once and referenced by
-      URL from a surface's renderer declaration, not pushed through the
-      binary per-frame protocol (§9.1) the way per-frame vertex positions
-      are, since the image itself doesn't change every step. Related to
-      but distinct from the `[stretch]` Lighting & materials item below -
-      that's general per-object material properties (color, shininess),
-      this is specifically an external image asset mapped onto a mesh.
+      request). Closed both gaps identified when this was deferred:
+      **UV coordinates**: new `particlesim.surface.UV(u, v)` and
+      `Surface.uvs: Map<Int, UV>?` - sparse, id-keyed the same way other
+      per-particle-but-not-every-particle data already is in this codebase
+      (`ParticleStore`'s mass/radius source maps), not a parallel array
+      indexed like `triangles`, since most surfaces will never populate it.
+      `Grid.uvs(ids)` generates them for the grid-generated case directly
+      from each vertex's row/col position (`c/(cols-1), r/(rows-1)`),
+      normalized `[0,1]` the way every texture-mapping library (including
+      three.js) expects - arbitrary-mesh UV generation was never solved
+      and still isn't needed. `buildFlag` attaches `Grid.uvs(grid)`
+      unconditionally, the same way it computes `triangles` once
+      regardless of who ends up rendering the surface - static geometry
+      metadata is cheap either way.
+      **Image asset delivery**: new `particlesim.render.TextureAssets`,
+      a static file served once and referenced by URL, not pushed through
+      the binary per-frame protocol (§9.1) - the image doesn't change
+      every step. Procedurally generated in-process (`BufferedImage` +
+      `ImageIO`, no external fetch, no checked-in binary): a 256x160
+      red/white striped pattern with a blue canton block, deliberately not
+      a reproduction of any real flag (8 stripes not 13, no stars,
+      different proportions/colors - canton-plus-stripes is a layout
+      family shared by many national flags, not one specific symbol).
+      Cached in memory after first generation. `ViewerHttpServer` gained a
+      `/textures/` route serving `TextureAssets.pngBytes(name)` with
+      `Cache-Control: public, max-age=3600`, 404 for unknown names.
+      **Wire-cost gating, the actual design decision**: `SurfaceRenderer`
+      gained `textureName: String? = null`. `BinaryFrame` only emits a
+      mesh's `textureUrl` (`/textures/<name>.png`) and per-vertex `uvs`
+      when that mesh's own `textureName` is set - gated on the *renderer's*
+      opt-in, not on `Surface.uvs` nullness, even though `buildFlag` now
+      populates `uvs` unconditionally. This distinction is load-bearing:
+      `flagOnRope`/`multiShape` both reuse `buildFlag`'s surface without
+      setting `textureName`, so without the renderer-gated check they'd
+      have silently started sending UV data over the wire for a mesh
+      nothing maps it onto - caught in review before shipping and covered
+      by a dedicated regression test (`BinaryFrameTest`: "a surface with
+      populated uvs but no textureName still sends zero uvs").
+      **Client side** (`viewer.html`): a `textureCache`/`getTexture(url)`
+      pair (`THREE.TextureLoader`, cached by URL) feeding a
+      `texturedMeshMaterial(url)` (`THREE.MeshStandardMaterial` with
+      `.map` set), selected in the mesh material logic ahead of the
+      existing solid/wireframe choice whenever a decoded mesh carries a
+      non-empty `textureUrl`. `buildMeshGeometry` attaches a `uv`
+      `BufferAttribute` only when the decoded mesh's `uvs` map is
+      non-empty (missing per-vertex entries fall back to `(0,0)`).
+      **Bug found and fixed before shipping**: the loaded texture needs
+      `texture.colorSpace = THREE.SRGBColorSpace` set explicitly (three.js
+      r152+) or it renders through the wrong gamma - dark/desaturated,
+      not an obvious error. Set immediately after `textureLoader.load(url)`
+      inside `getTexture()`.
+      Wired into `FlagScene` only (`clothMesh = SurfaceRenderer(...,
+      textureName = TextureAssets.FLAG_STRIPES)`), the same "wiring a
+      second consumer, pick it up when needed" scoping the rope/pole and
+      self-collision items above used - `flagOnRope`/`multiShape` don't
+      opt in yet.
+      New tests: `GridTest` (uvs cover every vertex, normalized `[0,1]` at
+      the grid's corners; rejects grids under 2x2 matching `triangles`'
+      own guard), `TextureAssetsTest` (known name returns a decodable PNG
+      over 100 bytes; unknown name returns null; repeated calls return
+      byte-identical cached data), `BinaryFrameTest` (untextured mesh
+      decodes to empty `textureUrl`/no uvs; populated `uvs` without
+      `textureName` still sends zero uvs - the gating regression above; a
+      textured mesh's `textureUrl` and per-vertex uvs round-trip).
+      **Verified live in Chrome**: loaded `flag`, confirmed the mesh
+      renders with the striped texture correctly mapped across the
+      billowing/folding cloth (not just at rest), matching the raw
+      `/textures/flag-stripes.png` asset's colors after the colorSpace
+      fix (compared side by side in separate tabs); toggled "show mesh
+      edges" and the wireframe override both directions via the surface's
+      right-click panel, both still working with a texture applied; no
+      console errors in a fresh tab. (An earlier same-session check in a
+      tab that had been open *before* the wire-format change showed ~1244
+      frozen `RangeError` console entries at one timestamp - the interactive
+      per-frame stream carries no version field, so a stale tab decodes new
+      frames with pre-change JS until reloaded; not a bug in the shipped
+      code, confirmed by the fresh tab being clean throughout.)
 
 ## Expression-source visibility, flag pole/rope/self-collision, and surface break-limit editing (§7.3/§10.4/§12.4, new requirements) — not yet phased
 Raised by the user directly, recorded in `requirements.md` rather than
@@ -3984,8 +4044,3 @@ wording; recorded once below, not as two separate items.
       fast-forward to the exact target frame, then hand off to live input
       (§9.4, §9.5)
 - [ ] Export Kotlin-authored scene to YAML (§4.3)
-- [ ] Texture-mapped surfaces (§10.2) - marked `[stretch]` at the user's
-      request; see the detailed write-up further up this file, in the
-      "Force-arrow selection, wind gust/direction editing, and textured
-      surfaces" section, for the two concrete gaps (UV coordinates, image
-      asset delivery) still blocking it

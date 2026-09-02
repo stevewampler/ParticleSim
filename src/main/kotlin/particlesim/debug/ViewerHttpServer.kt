@@ -1,6 +1,7 @@
 package particlesim.debug
 
 import com.sun.net.httpserver.HttpServer
+import particlesim.render.TextureAssets
 import java.net.InetSocketAddress
 
 /**
@@ -31,6 +32,22 @@ class ViewerHttpServer(port: Int) {
             exchange.responseHeaders.add("Cache-Control", "no-store")
             exchange.sendResponseHeaders(200, page.size.toLong())
             exchange.responseBody.use { it.write(page) }
+        }
+        // §10.2's texture-mapped surfaces: a name-keyed static asset, served once (cached
+        // client-side via the response's Cache-Control, not re-requested every frame the way
+        // vertex positions are) rather than pushed through the per-frame binary protocol.
+        server.createContext("/textures/") { exchange ->
+            val name = exchange.requestURI.path.removePrefix("/textures/").removeSuffix(".png")
+            val bytes = TextureAssets.pngBytes(name)
+            if (bytes == null) {
+                exchange.sendResponseHeaders(404, -1)
+                exchange.close()
+            } else {
+                exchange.responseHeaders.add("Content-Type", "image/png")
+                exchange.responseHeaders.add("Cache-Control", "public, max-age=3600")
+                exchange.sendResponseHeaders(200, bytes.size.toLong())
+                exchange.responseBody.use { it.write(bytes) }
+            }
         }
         server.executor = null
     }

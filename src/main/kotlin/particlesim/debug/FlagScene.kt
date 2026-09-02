@@ -18,6 +18,7 @@ import particlesim.render.NamedArrowSamples
 import particlesim.render.SceneQueryImpl
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
+import particlesim.render.TextureAssets
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -43,7 +44,9 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
 
     private val poleIds = scenario.groups.membersOf("pole")
     private val poleSphereRadii = poleIds.associateWith { 0.03 }
-    private val clothMesh = SurfaceRenderer(scenario.surface, wireframe = false)
+    // §10.2's texture-mapped surfaces, worked example: the flag renders with an image instead
+    // of a flat shaded color. scenario.surface already carries Grid.uvs (see buildFlag).
+    private val clothMesh = SurfaceRenderer(scenario.surface, wireframe = false, textureName = TextureAssets.FLAG_STRIPES)
     private val windArrows = ArrowRenderer(wind, regionMin = Vector3(-0.5, -2.0, -1.0), regionMax = Vector3(2.5, 0.5, 1.0), resolution = 1.0)
     private val arrowVisualScale = 0.15
     private val registry = SceneRegistry.build(

@@ -848,25 +848,30 @@ it's being built, before its real renderers exist.
 
 **Particle & surface renderers**: `dot`, `sphere` (§10, using the group's
 particles' `radius` by default), or a shaded/wireframe mesh for a surface.
-*(New requirement, `[stretch]`)* A surface mesh should also be able to render with an
-**image texture** instead of (or as) its shaded material — e.g. an actual
-flag graphic mapped onto §7.3's flag surface, rather than a flat solid
-color. This needs two things neither exists today: **UV coordinates**
-per triangle vertex (`Surface`/`Triangle` currently carry none — for a
-grid-generated shape like the flag, UVs fall out directly from each
-vertex's row/col position in the grid, so no separate authoring is
-needed for that case, but an arbitrary/non-grid surface would need them
-supplied explicitly) and a way to **reference an image asset** from a
-surface's renderer declaration (a file path or URL, alongside `kind:
-mesh` in the YAML example below) that reaches the browser client — most
-naturally served once as a static asset and referenced by URL rather than
+A surface mesh can also render with an **image texture** instead of its
+shaded material — no longer `[stretch]`: built for §7.3's flag, an actual
+striped-flag graphic mapped onto its surface rather than a flat solid
+color. The two gaps this needed closed: **UV coordinates**
+(`particlesim.surface.UV(u, v)`, sparse `Surface.uvs: Map<Int, UV>?` —
+still nothing per-`Triangle`, and still only generated for the
+grid-generated case, `Grid.uvs(ids)` falling out directly from each
+vertex's row/col position; an arbitrary/non-grid surface would still need
+them supplied explicitly, which nothing does yet) and a way to
+**reference an image asset** from a surface's renderer declaration
+(`SurfaceRenderer.textureName`, a static asset served once from
+`ViewerHttpServer`'s `/textures/` route and referenced by URL — not
 pushed through the binary per-frame protocol (§9.1) the way per-frame
 mesh/particle state is, since a texture image doesn't change every step
-the way vertex positions do. Related to, but distinct from, the
-`[stretch]` **Lighting & materials** item below: that's about general
-per-object material properties (color, shininess) with no asset
-involved, this is specifically about mapping an external image onto a
-mesh's surface.
+the way vertex positions do; `BinaryFrame` gates emitting a mesh's
+`textureUrl`/`uvs` on the *renderer's* `textureName` being set, not on
+`Surface.uvs` merely being populated, so a surface that carries UVs but
+isn't textured — e.g. §7.3's rope/pole reusing the flag's surface — sends
+none of this over the wire). See `todo/TODO.md`'s own entry for the
+wire-cost-gating regression test and the client-side colorSpace fix.
+Related to, but distinct from, the `[stretch]` **Lighting & materials**
+item below: that's about general per-object material properties (color,
+shininess) with no asset involved, this is specifically about mapping an
+external image onto a mesh's surface.
 
 **Force renderers**:
 - Directional field forces (wind, uniform gravity) render as **arrows**

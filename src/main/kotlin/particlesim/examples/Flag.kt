@@ -126,7 +126,11 @@ fun buildFlag(
         forces = listOf(gravity, wind, structural, shear, bend),
         constraints = constraints,
         grid = grid,
-        surface = Surface(triangles, name = placement.name("cloth-mesh")),
+        // UV coordinates are cheap, static, rendering-only metadata (never read by any physics
+        // computation) - attached unconditionally rather than scoped to whichever scene actually
+        // texture-maps this surface, the same way `triangles` itself is computed once here rather
+        // than per-consumer. Grid.uvs falls out directly from the grid layout already built above.
+        surface = Surface(triangles, name = placement.name("cloth-mesh"), uvs = Grid.uvs(grid)),
         meshSprings = listOf(structural, shear, bend),
     )
 }

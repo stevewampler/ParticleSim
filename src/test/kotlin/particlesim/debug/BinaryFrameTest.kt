@@ -16,8 +16,10 @@ import particlesim.render.Color
 import particlesim.render.NamedArrowSamples
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
+import particlesim.render.TextureAssets
 import particlesim.surface.Surface
 import particlesim.surface.Triangle
+import particlesim.surface.UV
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -223,6 +225,65 @@ class BinaryFrameTest {
         val decoded = BinaryFrame.decode(buffer)
 
         assertEquals("cloth-mesh", decoded.meshes.single().name)
+    }
+
+    @Test
+    fun `a mesh with no texture decodes to an empty textureUrl and no uvs`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+        val b = store.create(position = Vector3.ZERO)
+        val c = store.create(position = Vector3.ZERO)
+        val mesh = SurfaceRenderer(surface = Surface(listOf(Triangle(a, b, c))))
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = listOf(a, b, c), connections = emptyList(),
+            meshes = listOf(mesh),
+        )
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals("", decoded.meshes.single().textureUrl)
+        assertEquals(emptyMap(), decoded.meshes.single().uvs)
+    }
+
+    @Test
+    fun `a surface with populated uvs but no textureName still sends zero uvs - UV data isn't worth the wire cost for a mesh nothing maps it onto`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+        val b = store.create(position = Vector3.ZERO)
+        val c = store.create(position = Vector3.ZERO)
+        // Surface.uvs populated (e.g. buildFlag attaches it unconditionally), but this
+        // SurfaceRenderer never opts into a texture.
+        val mesh = SurfaceRenderer(surface = Surface(listOf(Triangle(a, b, c)), uvs = mapOf(a to UV(0.0, 0.0))))
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = listOf(a, b, c), connections = emptyList(),
+            meshes = listOf(mesh),
+        )
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(emptyMap(), decoded.meshes.single().uvs, "an untextured mesh shouldn't pay the per-frame cost of UV data nothing will render with it")
+    }
+
+    @Test
+    fun `a textured mesh's textureUrl and per-vertex uvs round-trip`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+        val b = store.create(position = Vector3.ZERO)
+        val c = store.create(position = Vector3.ZERO)
+        val uvs = mapOf(a to UV(0.0, 0.0), b to UV(1.0, 0.0), c to UV(0.5, 1.0))
+        val mesh = SurfaceRenderer(
+            surface = Surface(listOf(Triangle(a, b, c)), uvs = uvs),
+            textureName = TextureAssets.FLAG_STRIPES,
+        )
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = listOf(a, b, c), connections = emptyList(),
+            meshes = listOf(mesh),
+        )
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals("/textures/${TextureAssets.FLAG_STRIPES}.png", decoded.meshes.single().textureUrl)
+        assertEquals(uvs, decoded.meshes.single().uvs)
     }
 
     @Test

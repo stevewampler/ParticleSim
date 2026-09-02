@@ -17,6 +17,7 @@ import particlesim.physics.Wind
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
 import particlesim.surface.Triangle
+import particlesim.surface.UV
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
@@ -47,7 +48,15 @@ import java.nio.charset.StandardCharsets
  * sphereCount * { i32 id, f64 radius }
  * i32  meshCount
  * meshCount * { u8 wireframe, i32 nameLen, nameLen UTF-8 bytes, i32 triangleCount,
- *               triangleCount * { i32 a, i32 b, i32 c } }
+ *               triangleCount * { i32 a, i32 b, i32 c },
+ *               i32 textureUrlLen, textureUrlLen UTF-8 bytes, i32 uvCount,
+ *               uvCount * { i32 particleId, f64 u, f64 v } }
+ *               (§10.2's texture-mapped surfaces: textureUrlLen 0 = flat shaded color, the same
+ *               "0 = absent" convention every other optional string here uses; uvCount is 0
+ *               whenever the mesh's own SurfaceRenderer.textureName is unset, even if
+ *               Surface.uvs happens to be populated - UV data is exactly as static as the
+ *               texture image itself, so it isn't worth putting on the wire for a mesh nothing
+ *               will ever map it onto)
  * i32  arrowGroupCount
  * arrowGroupCount * { i32 nameLen, nameLen UTF-8 bytes, i32 sampleCount,
  *                      sampleCount * { f64 ox, oy, oz, f64 vx, vy, vz } }
@@ -204,6 +213,8 @@ object BinaryFrame {
     private const val MESH_HEADER_SIZE = 4
     private const val MESH_ENTRY_HEADER_SIZE = 1 + 4 // wireframe, triangleCount
     private const val TRIANGLE_SIZE = 4 + 4 + 4 // a, b, c
+    private const val MESH_UV_HEADER_SIZE = 4 // uvCount
+    private const val MESH_UV_ENTRY_SIZE = 4 + 8 + 8 // particleId, u, v
     private const val ARROW_GROUP_HEADER_SIZE = 4 // arrowGroupCount
     private const val ARROW_GROUP_SAMPLE_COUNT_SIZE = 4
     private const val ARROW_SIZE = 8 * 6 // origin xyz, vector xyz
@@ -259,7 +270,8 @@ object BinaryFrame {
             CAMERA_FLAG_SIZE + (if (camera != null) CAMERA_SIZE else 0) +
             SPHERE_HEADER_SIZE + sphereRadii.size * SPHERE_SIZE +
             MESH_HEADER_SIZE + meshes.sumOf {
-                MESH_ENTRY_HEADER_SIZE + stringSize(it.surface.name ?: "") + it.surface.triangles.size * TRIANGLE_SIZE
+                MESH_ENTRY_HEADER_SIZE + stringSize(it.surface.name ?: "") + it.surface.triangles.size * TRIANGLE_SIZE +
+                    stringSize(textureUrlOf(it)) + MESH_UV_HEADER_SIZE + uvsToEmit(it).size * MESH_UV_ENTRY_SIZE
             } +
             ARROW_GROUP_HEADER_SIZE + arrowGroups.sumOf {
                 stringSize(it.name) + ARROW_GROUP_SAMPLE_COUNT_SIZE + it.samples.size * ARROW_SIZE
@@ -316,6 +328,12 @@ object BinaryFrame {
             buffer.putInt(mesh.surface.triangles.size)
             for (tri in mesh.surface.triangles) {
                 buffer.putInt(tri.a); buffer.putInt(tri.b); buffer.putInt(tri.c)
+            }
+            putString(buffer, textureUrlOf(mesh))
+            val uvs = uvsToEmit(mesh)
+            buffer.putInt(uvs.size)
+            for ((particleId, uv) in uvs) {
+                buffer.putInt(particleId); buffer.putDouble(uv.u); buffer.putDouble(uv.v)
             }
         }
         buffer.putInt(arrowGroups.size)
@@ -459,7 +477,10 @@ object BinaryFrame {
             val name = getString(buf)
             val triangleCount = buf.int
             val triangles = (0 until triangleCount).map { Triangle(buf.int, buf.int, buf.int) }
-            DecodedMesh(wireframe, triangles, name)
+            val textureUrl = getString(buf)
+            val uvCount = buf.int
+            val uvs = (0 until uvCount).associate { buf.int to UV(buf.double, buf.double) }
+            DecodedMesh(wireframe, triangles, name, textureUrl, uvs)
         }
         val arrowGroupCount = buf.int
         val arrowGroups = (0 until arrowGroupCount).map {
@@ -523,6 +544,20 @@ object BinaryFrame {
     private fun getVector(buffer: ByteBuffer): Vector3 = Vector3(buffer.double, buffer.double, buffer.double)
 
     private fun stringSize(s: String) = STRING_HEADER_SIZE + s.toByteArray(StandardCharsets.UTF_8).size
+
+    /** "" (absent, same convention every other optional string here uses) unless [mesh] names a
+     * known [particlesim.render.TextureAssets] entry - deliberately not validated against the
+     * registry here (an unknown name just 404s client-side rather than failing frame encoding,
+     * the same "don't crash the sim over a rendering concern" stance colliders/meshes already
+     * take elsewhere in this file). */
+    private fun textureUrlOf(mesh: SurfaceRenderer): String = mesh.textureName?.let { "/textures/$it.png" } ?: ""
+
+    /** Empty unless [mesh] actually declares a texture - UV data is exactly as static as the
+     * texture image itself, so a mesh with no [SurfaceRenderer.textureName] (e.g. the
+     * trampoline, or `buildFlag`'s own surface reused by `flagOnRope`/`multiShape`, neither of
+     * which texture-maps it) sends none every frame, even if its [Surface.uvs] happens to be
+     * populated - matches this file's own "nothing ships unless it opts in" convention. */
+    private fun uvsToEmit(mesh: SurfaceRenderer): Map<Int, UV> = if (mesh.textureName != null) mesh.surface.uvs ?: emptyMap() else emptyMap()
 
     private fun nameListSize(names: Collection<String>) =
         REGISTRY_LIST_HEADER_SIZE + names.sumOf { stringSize(it) }
@@ -726,8 +761,16 @@ data class DecodedConnection(val a: Int, val b: Int, val color: Color, val force
 data class DecodedSphere(val id: Int, val radius: Double)
 
 /** [name] is `""` when the mesh's [particlesim.surface.Surface] is unnamed — see [BinaryFrame]'s
- * own doc comment for why that collapses with "no name" instead of using a separate flag. */
-data class DecodedMesh(val wireframe: Boolean, val triangles: List<Triangle>, val name: String = "")
+ * own doc comment for why that collapses with "no name" instead of using a separate flag.
+ * [textureUrl] is `""` for a flat-shaded mesh (§10.2); [uvs] is empty whenever the source
+ * [particlesim.surface.Surface.uvs] was null, which is every mesh that existed before texturing. */
+data class DecodedMesh(
+    val wireframe: Boolean,
+    val triangles: List<Triangle>,
+    val name: String = "",
+    val textureUrl: String = "",
+    val uvs: Map<Int, UV> = emptyMap(),
+)
 
 /** One named group and its current member ids (§10.3's group visibility toggle needs to know
  * which particles a group's checkbox actually hides). */

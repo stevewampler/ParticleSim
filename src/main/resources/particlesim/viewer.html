@@ -384,6 +384,29 @@ const solidMeshMaterial = () => new THREE.MeshStandardMaterial({
   polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
 });
 const wireframeMeshMaterial = () => new THREE.MeshBasicMaterial({ color: 0x3388ff, wireframe: true });
+
+// §10.2's texture-mapped surfaces: a mesh's own material is still rebuilt every frame (matching
+// solidMeshMaterial's own pattern above), but the underlying THREE.Texture per URL is cached and
+// loaded exactly once per session — the image itself is static (server-side, TextureAssets
+// generates it once and ViewerHttpServer serves it with a long-lived Cache-Control), so re-issuing
+// THREE.TextureLoader().load() every frame would be pure waste, not a correctness issue.
+const textureCache = new Map(); // url -> THREE.Texture
+const textureLoader = new THREE.TextureLoader();
+function getTexture(url) {
+  if (!textureCache.has(url)) {
+    const texture = textureLoader.load(url);
+    // A color map (as opposed to e.g. a normal/roughness map) needs its color space declared
+    // explicitly since three.js r152 - without this it renders through the wrong gamma (visibly
+    // dark/desaturated), not an obvious error, just wrong-looking output.
+    texture.colorSpace = THREE.SRGBColorSpace;
+    textureCache.set(url, texture);
+  }
+  return textureCache.get(url);
+}
+const texturedMeshMaterial = (url) => new THREE.MeshStandardMaterial({
+  map: getTexture(url), side: THREE.DoubleSide, roughness: 0.85,
+  polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+});
 let meshObjects = []; // THREE.Mesh[], each carrying userData.triangleVertexIds for picking
 let meshGroup = new THREE.Group();
 scene.add(meshGroup);
@@ -474,6 +497,7 @@ let latestStep = 0;
 function buildMeshGeometry(meshDecl, byId) {
   const localIndexOf = new Map();
   const positions = [];
+  const uvs = []; // parallel to positions/3 - only meaningful when meshDecl.uvs is non-empty
   const indices = [];
   const triangleVertexIds = [];
   for (const tri of meshDecl.triangles) {
@@ -483,6 +507,12 @@ function buildMeshGeometry(meshDecl, byId) {
       if (!localIndexOf.has(id)) {
         localIndexOf.set(id, positions.length / 3);
         positions.push(p.x, p.y, p.z);
+        // §10.2's texture-mapped surfaces: a vertex with no UV entry (untextured mesh, or one
+        // missing from a partial Surface.uvs) falls back to (0,0) rather than skipping the
+        // attribute - a uniform wrong corner is an obviously-broken texture, not a WebGL error
+        // from a missing/undersized attribute array.
+        const uv = meshDecl.uvs.get(id);
+        uvs.push(uv ? uv.u : 0, uv ? uv.v : 0);
       }
     }
     indices.push(localIndexOf.get(tri.a), localIndexOf.get(tri.b), localIndexOf.get(tri.c));
@@ -490,6 +520,7 @@ function buildMeshGeometry(meshDecl, byId) {
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
+  if (meshDecl.uvs.size > 0) geometry.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uvs), 2));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return { geometry, triangleVertexIds };
@@ -626,7 +657,11 @@ function applyFrame(frame) {
     obj.userData.triangleVertexIds = built.triangleVertexIds;
     obj.userData.surfaceName = meshDecl.name; // "" when unnamed - right-click resolves this to a panel
     const wireframe = surfaceWireframeOverride.has(meshDecl.name) ? surfaceWireframeOverride.get(meshDecl.name) : meshDecl.wireframe;
-    obj.material = wireframe ? wireframeMeshMaterial() : solidMeshMaterial();
+    // §10.2's texture-mapped surfaces: wireframe still wins outright (there's no such thing as
+    // a textured wireframe here) - a texture only applies to the solid-shaded case.
+    obj.material = wireframe ? wireframeMeshMaterial()
+      : meshDecl.textureUrl ? texturedMeshMaterial(meshDecl.textureUrl)
+      : solidMeshMaterial();
 
     const overlay = meshEdgeOverlays[i];
     overlay.geometry.dispose();
@@ -867,7 +902,16 @@ function decodeFrame(buffer) {
       const c = view.getInt32(offset, true); offset += 4;
       triangles[j] = { a, b, c };
     }
-    meshes[i] = { wireframe, name, triangles };
+    const textureUrl = readString(); // "" = flat shaded color (§10.2's texture-mapped surfaces)
+    const uvCount = view.getInt32(offset, true); offset += 4;
+    const uvs = new Map(); // particleId -> {u, v}
+    for (let j = 0; j < uvCount; j++) {
+      const particleId = view.getInt32(offset, true); offset += 4;
+      const u = view.getFloat64(offset, true); offset += 8;
+      const v = view.getFloat64(offset, true); offset += 8;
+      uvs.set(particleId, { u, v });
+    }
+    meshes[i] = { wireframe, name, triangles, textureUrl, uvs };
   }
 
   // Arrow samples grouped by their source force's name (§10.3's per-force visibility toggle -

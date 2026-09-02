@@ -37,8 +37,16 @@ data class ParticleRenderer(val group: String, val style: ParticleStyle = Partic
  * "is this named surface currently rendered?" by identity — a correlation that's only possible
  * if the renderer and the registry (§10.3's engine-side prerequisite) point at the same object,
  * not two independently-built triangle lists that happen to match.
+ *
+ * [textureName] is `null` by default (flat shaded color, unchanged behavior) — set to one of
+ * [TextureAssets]'s known names to map an image onto the mesh instead (§10.2, `[stretch]`).
+ * References an asset by *name*, not raw bytes: the image is served once as a static file by
+ * `particlesim.debug.ViewerHttpServer`'s `/textures/` route and cached client-side, not pushed
+ * through the per-frame binary protocol the surface's own vertex positions are (an image doesn't
+ * change every step the way positions do). Meaningful only alongside [Surface.uvs] — a textured
+ * surface with no UV data renders with a degenerate (all-zero) mapping.
  */
-data class SurfaceRenderer(val surface: Surface, val wireframe: Boolean = false)
+data class SurfaceRenderer(val surface: Surface, val wireframe: Boolean = false, val textureName: String? = null)
 
 /** What a [LineRenderer]'s color maps from (§10.2). Only [BREAK_PROXIMITY] is implemented —
  * `stretch`/`force` magnitude coloring from the spec's own list is a deferred follow-up: unlike
