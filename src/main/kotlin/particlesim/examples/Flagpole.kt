@@ -2,6 +2,7 @@ package particlesim.examples
 
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
+import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
 import particlesim.physics.Constraint
 import particlesim.physics.FixedPosition
@@ -32,6 +33,10 @@ data class FlagpoleScenario(
 fun buildFlagpole(
     height: Double = 3.0,
     segments: Int = 6,
+    // Null by default (not collidable, §12.1), matching ParticleStore.create's own convention -
+    // a scene that wants the pole to participate in particle-vs-surface collision (§12.4) passes
+    // an explicit value.
+    particleRadius: Double? = null,
     store: ParticleStore = ParticleStore(),
     groups: Groups = Groups(),
     placement: ShapePlacement = ShapePlacement(),
@@ -39,9 +44,10 @@ fun buildFlagpole(
     require(segments >= 1) { "segments must be at least 1, was $segments" }
 
     val poleGroup = placement.name("pole")
+    val radiusExpr = particleRadius?.let { ScalarExpr.of(it) }
     val poleIds = (0..segments).map { i ->
         val position = Vector3(0.0, height * i / segments, 0.0) + placement.offset
-        val id = store.create(position = position)
+        val id = store.create(position = position, radius = radiusExpr)
         groups.add(poleGroup, id)
         id
     }

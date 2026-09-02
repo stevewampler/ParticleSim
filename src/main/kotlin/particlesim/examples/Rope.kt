@@ -63,6 +63,10 @@ fun buildRope(
     // a rigid rod, so it droops between its two anchors instead of holding a straight line.
     compressionStiffness: Double = 0.0,
     damping: Double = 1.0,
+    // Null by default (not collidable, §12.1) - matches ParticleStore.create's own convention,
+    // so existing consumers (PoleRopeScene, MultiShapeScene) are unaffected; a scene that wants
+    // the rope to participate in particle-vs-surface collision (§12.4) passes an explicit value.
+    particleRadius: Double? = null,
     store: ParticleStore = ParticleStore(),
     groups: Groups = Groups(),
     placement: ShapePlacement = ShapePlacement(),
@@ -71,10 +75,11 @@ fun buildRope(
 
     val ropeGroup = placement.name("rope")
     val anchorsGroup = placement.name("rope-anchors")
+    val radiusExpr = particleRadius?.let { ScalarExpr.of(it) }
     val ropeIds = (0..segments).map { i ->
         val t = i.toDouble() / segments
         val position = topAnchor + (bottomAnchor - topAnchor) * t + placement.offset
-        val id = store.create(position = position, mass = ScalarExpr.of(massPerParticle))
+        val id = store.create(position = position, mass = ScalarExpr.of(massPerParticle), radius = radiusExpr)
         groups.add(ropeGroup, id)
         id
     }

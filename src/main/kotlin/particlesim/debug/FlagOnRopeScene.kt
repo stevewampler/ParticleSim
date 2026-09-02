@@ -1,5 +1,7 @@
 package particlesim.debug
 
+import particlesim.collision.SurfaceCollisionRule
+import particlesim.collision.SurfaceCollisionSystem
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
@@ -58,6 +60,12 @@ data class FlagOnRopeScenario(
     val groups: Groups,
     val forces: List<Force>,
     val constraints: List<Constraint>,
+    /** Particle-vs-triangulated-surface collision (§12.4) keeping the pole and rope from
+     * passing through the flag's own cloth mesh, wired to the same
+     * [particlesim.collision.SurfaceCollisionSystem]/[SurfaceCollisionRule] mechanism the
+     * trampoline worked example already proved out - see [buildFlagOnRopeScenario]'s own doc
+     * comment for why this is wiring, not new physics. */
+    val collisions: SurfaceCollisionSystem,
     val flagpole: FlagpoleScenario,
     val rope: RopeScenario,
     /** `flagGrid[row][col]` - same layout as [particlesim.examples.FlagScenario.grid]. */
@@ -75,6 +83,11 @@ fun buildFlagOnRopeScenario(
     // 13 segments * 0.15 = 1.95, i.e. the rope's bottom anchor sits 1.95m below its top anchor.
     ropeSegments: Int = 13,
     ropeBottomOffsetX: Double = 0.15,
+    // Collision radii (§12.4) - thin enough not to visibly separate the pole/rope from the
+    // flag's own attachment springs, which already hold them close, but large enough to give
+    // SurfaceCollisionSystem's narrow phase a real, non-degenerate contact volume to detect.
+    poleCollisionRadius: Double = 0.03,
+    ropeCollisionRadius: Double = 0.015,
 ): FlagOnRopeScenario {
     require(ropeSegments >= flagRows - 1) {
         "ropeSegments ($ropeSegments) must be at least flagRows - 1 (${flagRows - 1}) so the rope's per-row spacing matches the flag's"
@@ -84,13 +97,15 @@ fun buildFlagOnRopeScenario(
     val groups = Groups()
 
     val flagpole = buildFlagpole(
-        height = poleHeight, segments = 6, store = store, groups = groups, placement = ShapePlacement(instanceName = "pole"),
+        height = poleHeight, segments = 6, particleRadius = poleCollisionRadius,
+        store = store, groups = groups, placement = ShapePlacement(instanceName = "pole"),
     )
 
     val rope = buildRope(
         topAnchor = Vector3(0.0, poleHeight, 0.0),
         bottomAnchor = Vector3(ropeBottomOffsetX, poleHeight - ropeSegments * flagSpacing, 0.0),
         segments = ropeSegments,
+        particleRadius = ropeCollisionRadius,
         store = store,
         groups = groups,
         placement = ShapePlacement(instanceName = "rope"),
@@ -100,6 +115,30 @@ fun buildFlagOnRopeScenario(
         rows = flagRows, cols = flagCols, spacing = flagSpacing,
         store = store, groups = groups,
         placement = ShapePlacement(offset = Vector3(0.0, poleHeight, 0.0), instanceName = "flag"),
+    )
+
+    // A fresh group rather than reusing "pole.pole"/"rope.rope" directly - SurfaceCollisionRule
+    // targets one group per rule, and reconstructing those shapes' own internal group names here
+    // would duplicate a literal that already lives inside buildFlagpole/buildRope (§4.5's
+    // "groups as the universal selector" reuse, not a parallel targeting scheme: this is just
+    // one more group both particle sets happen to also belong to).
+    val poleRopeCollidableGroup = "poleRopeCollidable"
+    for (id in flagpole.poleIds) groups.add(poleRopeCollidableGroup, id)
+    for (id in rope.ropeIds) groups.add(poleRopeCollidableGroup, id)
+    val collisions = SurfaceCollisionSystem(
+        listOf(
+            SurfaceCollisionRule(
+                group = poleRopeCollidableGroup,
+                surface = flag.surface,
+                // Low restitution, moderate damping - this pairing exists to stop visible
+                // interpenetration (§12.4's requirement), not to make the pole/rope bounce off
+                // the cloth like a dropped ball; a near-immediate settle looks like "can't pass
+                // through," not "collided with something springy."
+                restitution = 0.1,
+                compressionDamping = 2.0,
+                extensionDamping = 0.5,
+            ),
+        ),
     )
 
     // flag.constraints (just the pole-anchor FixedPosition pin) is deliberately never forwarded
@@ -118,6 +157,7 @@ fun buildFlagOnRopeScenario(
         groups = groups,
         forces = rope.forces + flag.forces + attachmentSprings + attachmentDampers,
         constraints = flagpole.constraints + rope.constraints,
+        collisions = collisions,
         flagpole = flagpole,
         rope = rope,
         flagGrid = flag.grid,
@@ -149,6 +189,7 @@ class FlagOnRopeScene : DemoScene {
 
     override fun step(t: Double) {
         integrator.step(scenario.store, scenario.groups, scenario.forces, scenario.constraints, t, dt)
+        scenario.collisions.resolve(scenario.store, scenario.groups, t, dt)
     }
 
     override fun frame(t: Double): SceneFrame = SceneFrame(

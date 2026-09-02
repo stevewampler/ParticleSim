@@ -3436,15 +3436,63 @@ wording; recorded once below, not as two separate items.
       genuinely dynamic, not a frozen copy of the old rigid pin - and no
       NaN/blow-up. No console errors. The scene picker dropdown correctly
       lists `flagOnRope` alongside every other scene.
-- [ ] `[stretch]` Rope/pole vs. flag surface collision: neither the rope
-      nor the pole should be able to pass through the flag's surface
-      (requirements.md §12.4's "Particle vs. triangulated surface" bullet
-      - the underlying mechanism is already built, no longer `[stretch]`
-      itself, per `SurfaceCollisionSystem`/the trampoline worked example;
-      only *this pairing's wiring* is now marked `[stretch]`, per direct
-      user request, to prioritize §10.4's live-editing work below first).
-      This is *wiring* that existing mechanism to a new collision-group
-      pairing (§12.3), not new collision physics.
+- [x] Rope/pole vs. flag surface collision: neither the rope nor the pole
+      can pass through the flag's surface (requirements.md §12.4's
+      "Particle vs. triangulated surface" bullet). Confirmed wiring, not
+      new physics, per this item's own prior note - `SurfaceCollisionSystem`/
+      `SurfaceCollisionRule` (proven by the trampoline worked example) are
+      reused unchanged; the only new code is getting the pole/rope
+      particles into a collidable group with a radius and pointing a rule
+      at the flag's `Surface`.
+      **Two real gaps closed to make that possible, not just parameter
+      wiring**: (1) `buildRope`/`buildFlagpole` never gave their particles
+      a `radius` at all (`ParticleStore.create`'s default `null`, §12.1's
+      "no radius set -> skip"), so neither shape could ever be a collision
+      participant - both gained an optional `particleRadius: Double? =
+      null` parameter (mirroring `Tire.kt`'s existing `particleRadius`
+      pattern), defaulting to the prior not-collidable behavior so
+      `PoleRopeScene`/`MultiShapeScene`/every existing test is unaffected;
+      only `buildFlagOnRopeScenario` now passes an explicit radius
+      (`poleCollisionRadius = 0.03`, `ropeCollisionRadius = 0.015`).
+      (2) `SurfaceCollisionRule` targets one *group name*, but neither
+      `FlagpoleScenario` nor `RopeScenario` exposes the group name its own
+      particles were added to (only their id lists) - rather than
+      reconstructing that internal literal a second time in
+      `buildFlagOnRopeScenario` (a real duplication risk), both shapes'
+      pole/rope ids are added to one new scenario-local group,
+      `poleRopeCollidable`, reusing §4.2's "groups as the universal
+      selector" the way every other cross-cutting selector in this
+      codebase already does, rather than inventing a second targeting
+      path.
+      **`FlagOnRopeScenario` gains a `collisions: SurfaceCollisionSystem`**
+      field (one rule: `poleRopeCollidable` vs. `flag.surface`, low
+      restitution 0.1 / compressionDamping 2.0 / extensionDamping 0.5 -
+      deliberately damped-settle, not bouncy, since this pairing exists to
+      stop visible interpenetration, not to make the pole/rope bounce off
+      the cloth like a dropped ball). `FlagOnRopeScene.step()` now calls
+      `scenario.collisions.resolve(...)` right after `integrator.step(...)`,
+      the same two-call pattern every other collision-bearing scene
+      (trampoline, ball-bounce, particle-collision) already uses.
+      New test (`FlagOnRopeSceneTest`): a rope particle forced to sit
+      exactly on a flag surface triangle is measurably pushed back out on
+      the very next `resolve()` call - the discriminating proof that the
+      rule is actually wired to the right group/surface pair, not just
+      constructed and never resolved. The existing 4-second stability test
+      now calls `collisions.resolve()` every step too (previously it only
+      exercised forces/constraints), matching `TrampolineStabilityTest`'s
+      own pattern, and still passes.
+      **Verified live in Chrome**: loaded `flagOnRope`, confirmed the new
+      `poleRopeCollidable` group lists in the outliner alongside the
+      existing groups. Used the now-live-editable `flag.wind` panel
+      (§10.4) to drive the flag hard toward the pole/rope from both sides
+      (`velocity` set to `[-12, 0, 0]` then snapped to `[20, 0, 0]` to
+      sweep it back through at speed, the strongest test available without
+      pausing to script a synthetic contact) - in every frame captured,
+      the cloth's leading edge stayed clear of the pole/rope line instead
+      of crossing to its far side, then settled back to a normal billow
+      with no visible penetration, no NaN/blow-up, and no console errors
+      (aside from the same unrelated Chrome-extension "disconnected port"
+      noise this project has already flagged as unaffiliated elsewhere).
 - [x] A surface's spring/damper **breaking limits**
       (`breakThreshold`/`extensionBreakThreshold`/
       `compressionBreakThreshold`) exposed as editable alongside

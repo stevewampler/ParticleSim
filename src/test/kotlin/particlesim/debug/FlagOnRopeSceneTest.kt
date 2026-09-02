@@ -71,6 +71,7 @@ class FlagOnRopeSceneTest {
 
         repeat(steps) {
             integrator.step(scenario.store, scenario.groups, scenario.forces, scenario.constraints, t, dt)
+            scenario.collisions.resolve(scenario.store, scenario.groups, t, dt)
             t += dt
             for (id in scenario.store.liveIds()) {
                 val speed = scenario.store.velocity(id).length()
@@ -79,5 +80,26 @@ class FlagOnRopeSceneTest {
         }
 
         assertTrue(maxSpeed < 50.0, "max particle speed $maxSpeed m/s suggests the flag+rope+pole assembly is unstable")
+    }
+
+    @Test
+    fun `a rope particle pushed through the flag surface is pushed back out on the next resolve`() {
+        val scenario = buildFlagOnRopeScenario()
+        // Pick an interior rope particle (not an anchor) far enough down the rope that it isn't
+        // one of the rows already wired to the flag by an attachment spring, so this contact is
+        // purely the collision system's own doing, not confounded by spring pull.
+        val ropeId = scenario.rope.ropeIds.last()
+        val triangle = scenario.flagSurface.triangles.first()
+        val surfacePoint = (scenario.store.position(triangle.a) + scenario.store.position(triangle.b) + scenario.store.position(triangle.c)) * (1.0 / 3.0)
+
+        // Shove the rope particle to sit exactly on the surface, well inside its own collision
+        // radius - a deliberate, unambiguous penetration rather than a borderline one.
+        scenario.store.setPosition(ropeId, surfacePoint)
+        val before = scenario.store.position(ropeId)
+
+        scenario.collisions.resolve(scenario.store, scenario.groups, t = 0.0, dt = 1e-3)
+
+        val after = scenario.store.position(ropeId)
+        assertNotEquals(before, after, "resolve() should have corrected the rope particle out of the flag surface it was forced into")
     }
 }
