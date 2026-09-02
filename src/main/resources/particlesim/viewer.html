@@ -614,10 +614,37 @@ function applyFrame(frame) {
     dot.scale.setScalar(scale);
   });
 
+  // §10.3's per-surface polyline toggle: a connection whose endpoints are both vertices of a
+  // mesh's own triangulation, adjacent within one of that triangle's three edges, *is* one of
+  // that surface's polylines - derived here from frame.meshes rather than sent over the wire (no
+  // server-side tagging needed, and this is genuinely general: it works for any connection from
+  // any force, not just the ones this codebase happens to name). Ambiguous only if two surfaces
+  // literally shared a vertex id, which never happens (particle ids are globally unique per
+  // ParticleStore, and no scene's shapes overlap store ranges) - first mesh checked wins.
+  const surfaceEdgeOwner = new Map(); // "minId-maxId" -> surface name
+  for (const meshDecl of frame.meshes) {
+    if (meshDecl.name === "") continue; // unnamed surface is never reachable to toggle anyway
+    for (const tri of meshDecl.triangles) {
+      for (const [x, y] of [[tri.a, tri.b], [tri.b, tri.c], [tri.c, tri.a]]) {
+        const key = x < y ? `${x}-${y}` : `${y}-${x}`;
+        if (!surfaceEdgeOwner.has(key)) surfaceEdgeOwner.set(key, meshDecl.name);
+      }
+    }
+  }
+  latestSurfaceLineOwners = new Set(surfaceEdgeOwner.values());
+
   // Resolve+filter before allocating: a connection whose endpoint id isn't in this frame
   // (possible once Phase 6 destroys particles mid-run) must not leave a stale zeroed segment
   // in the buffer — that would draw a spurious line from the origin instead of just omitting it.
+  // A connection owned by a surface (see surfaceEdgeOwner above) additionally needs that
+  // surface checked into shownSurfaceLines - an unowned connection (e.g. a rope/pole segment,
+  // or an attachment spring between two different shapes) is never gated by this at all.
   const segments = frame.connections
+    .filter((c) => {
+      const key = c.a < c.b ? `${c.a}-${c.b}` : `${c.b}-${c.a}`;
+      const owner = surfaceEdgeOwner.get(key);
+      return !owner || shownSurfaceLines.has(owner);
+    })
     .map((c) => [byId.get(c.a), byId.get(c.b), c.color])
     .filter(([a, b]) => a && b);
   const positions = new Float32Array(segments.length * 6);
@@ -1042,6 +1069,7 @@ function resetViewerStateForSceneChange(sceneName) {
   hiddenGroups.clear();
   hiddenSurfaces.clear();
   hiddenForces.clear();
+  shownSurfaceLines.clear();
   updateSelectionHighlight();
   renderObjectPanel();
   // applyFrame only ever writes the camera when frame.camera is non-null (§10.1's scripted
@@ -1249,6 +1277,7 @@ let objectPanelInfoEl = null; // the groups panel's live "N drawable" text node,
 let latestById = new Map(); // this frame's particles by id (position/velocity/mass/radius), for §10.3/§10.4
 let latestMeshes = []; // this frame's mesh declarations, for a selected surface's inspection readout
 let latestConnections = []; // this frame's spring/damper connections (a, b, color, forceName), for a group's spring/damper tab
+let latestSurfaceLineOwners = new Set(); // names of surfaces that own at least one connection this frame (see applyFrame) - gates whether the "show polylines" toggle even appears
 let latestColliders = []; // this frame's colliders, for the outliner's remove action
 let latestArrowGroups = []; // this frame's named arrow-sample groups, for the forces panel's toggle
 let objectPanelInspectEl = null; // the groups/surfaces panel's live numeric-readout text node
@@ -1264,6 +1293,16 @@ let particleRadiusSourceRow = null; // radius's counterpart to the above
 const hiddenGroups = new Set();
 const hiddenSurfaces = new Set();
 const hiddenForces = new Set(); // names of forces whose arrow samples (see NamedArrowSamples) are unchecked
+
+// §10.3's per-surface polyline toggle: names of surfaces whose connections (structural/shear/
+// bend spring lines, or any other connection whose endpoints happen to be an edge of this
+// surface's own triangulation) a person has explicitly *checked* in the per-object panel -
+// inverted from every set above, since a surface's polylines default to hidden, not shown (redundant
+// clutter once the mesh itself renders - see applyFrame's surfaceEdgeOwner computation for how a
+// connection is matched to a surface with no server-side tagging needed). Cleared on scene switch
+// like the other sets, which for this one just means "back to the default-hidden state," not
+// "back to default-shown."
+const shownSurfaceLines = new Set();
 
 // §10.4's per-surface mesh-style toggle (shaded vs. wireframe): viewer-local, like the
 // visibility sets above, not a round trip to the engine - render style can't affect physics (the
@@ -1463,13 +1502,19 @@ function addPanelNote(text) {
   note.textContent = text;
   objectPanelBodyEl.appendChild(note);
 }
-function addPanelToggle(labelText, hiddenSet) {
+// invert=true flips the polarity: the checkbox tracks presence *in* `set` directly (checked =
+// shown = in the set), the opposite of every other caller's convention (checked = shown = NOT in
+// the set, a "hidden" set that starts empty so everything defaults visible). Used for
+// shownSurfaceLines, whose default-empty state must mean "hidden" - the one per-object toggle
+// here that starts off rather than on.
+function addPanelToggle(labelText, set, invert = false) {
   const label = document.createElement("label");
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
-  checkbox.checked = !hiddenSet.has(selectedName);
+  checkbox.checked = invert ? set.has(selectedName) : !set.has(selectedName);
   checkbox.addEventListener("change", () => {
-    if (checkbox.checked) hiddenSet.delete(selectedName); else hiddenSet.add(selectedName);
+    const shouldBeInSet = invert ? checkbox.checked : !checkbox.checked;
+    if (shouldBeInSet) set.add(selectedName); else set.delete(selectedName);
   });
   label.append(checkbox, document.createTextNode(" " + labelText));
   objectPanelBodyEl.appendChild(label);
@@ -1777,6 +1822,10 @@ registerEntityKind({
   getNames: (registry) => registry.surfaces,
   renderPanel: () => {
     addPanelToggle("show mesh", hiddenSurfaces);
+    // Only offered when this surface actually owns a connection this frame (see applyFrame's
+    // surfaceEdgeOwner) - same "don't offer a toggle that would do nothing" precedent the forces
+    // panel's "show arrows" toggle already sets for hasArrows.
+    if (latestSurfaceLineOwners.has(selectedName)) addPanelToggle("show polylines", shownSurfaceLines, true);
 
     // §10.4's mesh render-style toggle (shaded vs. wireframe) - viewer-local (see
     // surfaceWireframeOverride's own doc comment on why this never crosses the wire). Checked

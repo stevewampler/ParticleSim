@@ -3335,6 +3335,71 @@ next session picks them up instead of losing them.
       same upright texture: no grid-vertex dots on the flag while the
       rope's own dots remain visible and draggable-looking as before; no
       console errors.
+      **Third follow-up, same session - hide all of `flagOnRope`'s
+      particle dots, and a general per-surface polyline toggle**: the
+      user asked for two more things in one message - every particle
+      (not just the flag's) invisible by default in `flagOnRope`, and a
+      way to turn any surface's structural-spring lines on/off, generally,
+      not a one-off fix. `FlagOnRopeScene.frame`'s `visibleIds` changed
+      from `poleIds + ropeIds` to `emptySet()` - a real, discussed
+      trade-off, not a silent one: the pole/rope dots become unreachable
+      through the UI in this scene (the client's per-group "show
+      particles" toggle can only hide further, never restore something
+      `visibleIds` already excluded, same limitation noted in the
+      previous follow-up), matching "all of the object's dots invisible"
+      literally rather than adding a reveal path nobody asked for.
+      **The polyline toggle is entirely client-side, no wire change**: a
+      connection whose endpoints are both vertices of a mesh, adjacent
+      within one of that mesh's own triangle edges, *is* one of that
+      surface's polylines - `viewer.html`'s `applyFrame` derives this
+      itself every frame from `frame.meshes[].triangles` (three edges per
+      triangle, `"minId-maxId" -> surface name`) rather than the server
+      tagging anything new. This was deliberately **not** built by
+      repurposing `connectionNames`/`c.forceName`, even though FlagScene
+      already tags its structural connections that way: that tag is
+      load-bearing for the groups panel's spring/damper tab
+      (`containedForceNamesForGroup` looks up `renderEditableFields("force",
+      forceName, ...)` by that exact string), so retagging it with a
+      surface name instead would have silently broken editing a group's
+      spring/damper fields. Deriving the association from mesh topology
+      instead needed no new field, no `BinaryFrame`/`BinaryFrameTest`
+      changes, and works for any connection from any force, not just the
+      ones this codebase happens to name.
+      New `shownSurfaceLines` (viewer-local, alongside `hiddenGroups`/
+      `hiddenSurfaces`/`hiddenForces`) is the one visibility set with
+      **inverted polarity** on purpose - every other one defaults empty =
+      "everything shown, opt in to hide"; this one defaults empty =
+      "everything hidden, opt in to show," which is what makes "invisible
+      by default" require zero seeding logic and no per-scene server
+      signal at all. `addPanelToggle` gained an `invert` parameter (default
+      `false`, so every existing caller's behavior is unchanged) rather
+      than a second near-duplicate function. The surfaces panel's new
+      "show polylines" checkbox only appears when the selected surface
+      actually owns a connection this frame (`latestSurfaceLineOwners`),
+      the same "don't offer a toggle that would do nothing" precedent the
+      forces panel's `hasArrows`-gated "show arrows" toggle already set.
+      **A real, accepted consequence, not a bug**: since the mechanism is
+      generic and starts every surface's polylines hidden, `FlagScene`'s
+      own flag - which used to show its structural grid lines by default -
+      now starts with them hidden too, the same as `flagOnRope`. The user
+      asked for the *general* capability, not a scene-scoped exception, so
+      this is the honest result of one consistent default rather than
+      bespoke per-scene plumbing.
+      **Verified live in Chrome** (after actually confirming the reported
+      bug first: reloading `flag` right after the polyline change showed
+      no grid lines by default, and zooming on the flag with `flag.
+      cloth-mesh` selected showed lines appear when "show polylines" was
+      checked and disappear again when unchecked - toggled both directions,
+      not just "the lines are gone"). Switched to `flagOnRope` (had to
+      kill a stale demo server process still holding the WebSocket port
+      first - the viewer showed "disconnected - retrying", not a code
+      bug): confirmed zero dots anywhere (flag, pole, and rope all bare),
+      confirmed the flag's own polylines are hidden by default same as
+      `flag`, selected `flag.cloth-mesh` in the outliner, confirmed the
+      "show polylines" checkbox is present and toggling it on/off shows/
+      hides the lines there too. No console errors from the app itself
+      (one unrelated Chrome-extension-internal exception observed, not
+      from this page's own code).
 
 ## Expression-source visibility, flag pole/rope/self-collision, and surface break-limit editing (§7.3/§10.4/§12.4, new requirements) — not yet phased
 Raised by the user directly, recorded in `requirements.md` rather than

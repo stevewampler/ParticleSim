@@ -175,10 +175,6 @@ class FlagOnRopeScene : DemoScene {
     // §10.2's texture-mapped surfaces, same asset FlagScene uses. scenario.flagSurface already
     // carries Grid.uvs (buildFlag attaches it unconditionally).
     private val clothMesh = SurfaceRenderer(scenario.flagSurface, wireframe = false, textureName = TextureAssets.USA_FLAG)
-    // Pole/rope particles have no mesh of their own, so they stay in visibleIds (as plain dots,
-    // same as before); the flag grid's own dots are dropped now that the textured mesh already
-    // shows it, the same "visibleIds=poleIds" reasoning FlagScene uses for its cloth.
-    private val visibleIds = (scenario.flagpole.poleIds + scenario.rope.ropeIds).toSet()
     private val registry = SceneRegistry.build(
         forces = scenario.forces, constraints = scenario.constraints, surfaces = listOf(scenario.flagSurface), groups = scenario.groups,
     )
@@ -204,7 +200,12 @@ class FlagOnRopeScene : DemoScene {
             scenario.flagStructural.activeConnections() +
             (0 until flagRows).map { row -> scenario.flagGrid[row][0] to scenario.rope.ropeIds[row] },
         meshes = listOf(clothMesh),
-        visibleIds = visibleIds,
+        // No particle has a dot in this scene by default (§10.3's per-object toggle can't bring
+        // one back either - the client's "show particles" checkbox only ever hides *further*,
+        // never restores something the server already excluded here). The flag's own dots are
+        // covered by the textured mesh; the pole/rope's are only reachable via their connection
+        // polylines - a deliberate scope, not an oversight left for later.
+        visibleIds = emptySet(),
         registry = registry,
     )
 }
