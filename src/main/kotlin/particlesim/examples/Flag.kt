@@ -4,7 +4,7 @@ import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
-import particlesim.core.VectorExpr
+import particlesim.expr.ExpressionParser
 import particlesim.physics.Constraint
 import particlesim.physics.FixedPosition
 import particlesim.physics.Force
@@ -13,8 +13,6 @@ import particlesim.physics.UniformGravity
 import particlesim.physics.Wind
 import particlesim.surface.Grid
 import particlesim.surface.Surface
-import kotlin.math.cos
-import kotlin.math.sin
 
 /**
  * §7.3's worked example: a rectangular sheet, pinned along its left edge to a pole,
@@ -110,9 +108,15 @@ fun buildFlag(
     )
 
     val triangles = Grid.triangles(grid)
+    // Built from a parsed expression string, not a native Kotlin lambda, even though this is the
+    // Kotlin DSL - so that §10.4's live-editing panel has a real source to show for this field
+    // from the moment the scene loads, not only after the first live edit (a VectorExpr.OfTime
+    // built from a lambda has no way to recover its own formula as text). Same formula either
+    // way, and this exact string is also FlagYamlParityTest's flag.yaml wind velocity - both
+    // front-ends already prove this evaluates bit-identically to the lambda form it replaces.
     val wind = Wind(
         triangles,
-        VectorExpr.of { t -> Vector3(6.0 + 2.0 * sin(t * 0.7), 0.3 * sin(t * 1.3), 0.8 * cos(t * 0.9)) },
+        ExpressionParser.parseVector("[6.0 + 2.0*sin(t*0.7), 0.3*sin(t*1.3), 0.8*cos(t*0.9)]"),
         density = 1.2,
         name = placement.name("wind"),
     )

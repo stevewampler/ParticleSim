@@ -3565,6 +3565,47 @@ wording; recorded once below, not as two separate items.
       its snapshotted numeric literal throughout. No console errors from
       the app itself (one unrelated Chrome-extension "disconnected port"
       exception observed, as in earlier sessions).
+- [x] **Follow-up, immediately after the item above**: the user tried it
+      live and found the fallback-to-value behavior itself was the
+      problem, not just an edge case - `buildFlag`'s own `wind` (every
+      flag-family scene's only `Wind`) was built from a native Kotlin
+      lambda, so it had no source at all until the user's *own* first
+      edit, and every fresh scene load showed three ticking numbers
+      instead of the real formula. "I want to see the current expression
+      to easily edit it" doesn't hold if the default demo never has one
+      to show.
+      **Fixed at the source, not the display**: `Flag.kt`'s `wind` is now
+      built via `ExpressionParser.parseVector("[6.0 + 2.0*sin(t*0.7),
+      0.3*sin(t*1.3), 0.8*cos(t*0.9)]")` instead of
+      `VectorExpr.of { t -> Vector3(...) }` - the same formula, just
+      authored as a parsed expression string so `VectorExpr.source` is
+      populated from scene construction, not only after a live edit. This
+      is exactly `FlagYamlParityTest`'s own `flag.yaml` wind-velocity
+      string, verbatim - both front-ends already prove (via that test)
+      that a parsed `"[...]"` literal evaluates bit-identically to the
+      lambda form it replaces, so this wasn't taken on faith: confirmed
+      by running the full suite (including `FlagGoldenTest`/
+      `FlagYamlParityTest`) unchanged and green. No wire, `SceneFrame`,
+      or `BinaryFrame` change - this is a one-line authoring change in
+      one demo, using machinery (`ExpressionParser`) that already existed
+      for the YAML front-end. `sin`/`cos`/`VectorExpr` imports dropped
+      from `Flag.kt` as now-unused (only `Vector3` is still needed there,
+      for particle placement and gravity).
+      **Scoped to `buildFlag` specifically, not a sweep of every
+      native-lambda-built expression field in this codebase** - it's the
+      only one with a live-editing UI at all today (`Wind.velocity` is
+      still the sole `VectorExpr`-editable field; scalar fields like
+      emitter rate or particle mass are always either a literal or
+      already source-tracked). A future field gaining this same
+      no-source-until-edited gap should get the same fix once it actually
+      has an editing UI to matter for, not preemptively here.
+      **Verified live in Chrome**: loaded `flag` fresh (no edits at all)
+      and selected `wind` - `x`/`y`/`z` immediately showed
+      `6.0 + 2.0*sin(t*0.7)`, `0.3*sin(t*1.3)`, `0.8*cos(t*0.9)` rather
+      than ticking numbers, with `value:` below tracking the live
+      evaluated vector as before. Switched to `flagOnRope` (which reuses
+      `buildFlag`'s wind unchanged) and confirmed the identical formulas
+      appear there too, unedited. No console errors from the app itself.
 - [x] Flag surface self-collision: the flag's own particles can't pass
       through its own surface as it billows/folds (requirements.md
       §12.4's "Surface self-collision" bullet). Genuinely new physics, not
