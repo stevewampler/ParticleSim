@@ -1412,16 +1412,58 @@ function formatVec(x, y, z) { return `(${formatSigFigs(x)}, ${formatSigFigs(y)},
 // readability over exactness in these fields.
 function formatVectorExprLiteral(x, y, z) { return `[${formatSigFigs(x)}, ${formatSigFigs(y)}, ${formatSigFigs(z)}]`; }
 
-// Every §10.4 editable-value input displays the current *evaluated* value, not the original
+// §10.4's per-axis vector-expression editing: splits a "[x, y, z]" source string into its three
+// top-level comma-separated parts, respecting nested (...)/[...] so a comma inside a function
+// call or nested vector literal isn't mistaken for one of the three axis separators - not a
+// re-implementation of the expression grammar, just enough bracket-depth tracking to find the
+// three top-level commas (see Wind.velocity's own editing code for why this is safe: the grammar
+// only ever produces ValueType.VECTOR from an "[a, b, c]" literal, so any known source is
+// guaranteed to already look like this). Returns null for anything that isn't literally that
+// shape (no source yet - a native-lambda Wind that's never been edited - or, in principle, a
+// vector expression built some other way, e.g. combining two vector literals with `+`) - there's
+// no way to show "the X part" of such an expression per-axis, so callers fall back to the live
+// value instead.
+function splitVectorLiteralSource(source) {
+  if (!source) return null;
+  const trimmed = source.trim();
+  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return null;
+  const inner = trimmed.slice(1, -1);
+  const parts = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth--;
+    else if (ch === "," && depth === 0) {
+      parts.push(inner.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  parts.push(inner.slice(start).trim());
+  return parts.length === 3 ? parts : null;
+}
+
+// Shared by the initial render and every live update: each axis's own input should show its own
+// source formula when one is known, falling back to that axis's live value formatted as a plain
+// numeric literal otherwise - itself already a valid expression, so editing from there works
+// exactly like every axis did before this field had any source at all.
+function windVelocityAxisParts(windEntry) {
+  return splitVectorLiteralSource(windEntry.velocitySource) ??
+    [windEntry.velocity.x, windEntry.velocity.y, windEntry.velocity.z].map((v) => formatSigFigs(v));
+}
+
+// Most §10.4 editable-value inputs display the current *evaluated* value, not the original
 // formula (see formatVectorExprLiteral's own comment) - so partially editing that text never
 // makes sense, only replacing it wholesale does. Without this, a single click into the field
 // (not a triple-click or Tab-focus) places the caret wherever the click landed and leaves the
-// rest of the old value in place; typing then inserts into/appends to it. For a vector-expression
-// field that produces a malformed-but-still-bracket-prefixed string (e.g. clicking at the end of
-// "[7.4, 0, 2.1]" and typing "[0,0,0]" yields "[7.4, 0, 2.1][0,0,0]"), which passes the minimal
-// client-side check below (it does start with "[") but fails to parse server-side and is
-// silently dropped - leaving the *old* expression running, which is exactly what was reported
-// as "I set velocity to [0,0,0] and it kept changing anyway." A plain `focus -> input.select()`
+// rest of the old value in place; typing then inserts into/appends to it - clicking at the end of
+// a displayed value like "7.4" and typing "0" yields "7.40", parsed as a different number than
+// intended rather than an outright error, which is exactly what was reported as "I set velocity
+// to [0,0,0] and it kept changing anyway" back when a single combined box held the whole vector
+// literal. Applied to the per-axis wind-velocity inputs too even though those show a *formula*,
+// not a value (§10.4's per-axis vector-expression editing) - partially editing a formula in place
+// can be reasonable, but this project doesn't special-case that field's focus behavior against
+// every other expression input's, and nothing has asked for it to. A plain `focus -> input.select()`
 // doesn't survive this: the same click's `mouseup` (which fires right after `focus`) places the
 // caret and collapses the selection back to a point. Tracking "this mouseup belongs to the click
 // that just focused the field" and suppressing its default caret placement is what makes select-
@@ -1718,12 +1760,22 @@ registerEntityKind({
   },
 });
 
-let windVelocityInput = null; // the open forces panel's Wind.velocity text input, or null otherwise
-let windVelocitySourceRow = null; // its companion §10.4 expression-source row, or null
-// True while windVelocityInput holds text rejected by the client-side vector-literal check
-// below - suppresses updateLive's live-value overwrite so the user's bad text (and its error
-// styling) isn't stomped by the very next frame.
-let windVelocityInvalid = false;
+let windVelocityInputs = null; // [xInput, yInput, zInput] of the open forces panel's Wind.velocity, or null
+let windVelocityValueRow = null; // its companion read-only live-value row, or null
+
+// Reassembles the three axis inputs' current text into one "[x, y, z]" vector-literal string and
+// sends it through the same set_wind_velocity/ExpressionParser.parseVector path a single combined
+// box used before - each axis is independently a full scalar expression, so nothing server-side
+// needed to change for this to work. Skips sending if any axis is left blank, same as leaving a
+// plain scalar field blank elsewhere in this panel - a blank axis isn't a valid expression and
+// would just be silently rejected server-side anyway.
+function sendWindVelocityEdit() {
+  if (!windVelocityInputs) return;
+  const [x, y, z] = windVelocityInputs.map((el) => el.value.trim());
+  if (!x || !y || !z) return;
+  sendEdit({ type: "set_wind_velocity", name: selectedName, expression: `[${x}, ${y}, ${z}]` });
+}
+
 registerEntityKind({
   kind: "forces",
   getNames: (registry) => registry.forces,
@@ -1739,54 +1791,43 @@ registerEntityKind({
 
     // §10.4's Wind.velocity editing: only present when this force is actually a named Wind
     // (latestRegistry.winds has an entry for it) - density keeps going through the ordinary
-    // renderEditableFields call above, unaffected. A plain text input, not three x/y/z number
-    // boxes, since velocity is expression-capable - parsed server-side via
-    // ExpressionParser.parseVector, so "[0, 0, 5 + 2*sin(t)]" is exactly as valid an edit as
-    // "[0, 0, 5]". Shows the live evaluated vector; the companion expr row below (§10.4, new
-    // requirement) shows the formula it came from, when known.
+    // renderEditableFields call above, unaffected. Three plain text inputs, one per axis, each
+    // parsed server-side as its own scalar expression rather than one combined box holding a
+    // whole "[x, y, z]" literal - each shows *that axis's own source formula*
+    // (windVelocityAxisParts), not the live value, since the formula is what you're actually
+    // editing; the live evaluated vector moved to a read-only row below instead (unchanged
+    // formatVectorExprLiteral formatting, just relabeled from "the editable box" to "an
+    // informational readout").
     const windEntry = latestRegistry.winds.find((w) => w.name === selectedName);
     if (windEntry) {
-      const velocityRow = document.createElement("div");
-      velocityRow.className = "objectField";
-      velocityRow.appendChild(document.createTextNode("velocity: "));
-      windVelocityInput = document.createElement("input");
-      windVelocityInput.type = "text";
-      windVelocityInput.value = formatVectorExprLiteral(windEntry.velocity.x, windEntry.velocity.y, windEntry.velocity.z);
-      selectAllOnFocus(windVelocityInput);
-      windVelocityInvalid = false;
-      // Minimal client-side check for the one structural rule the grammar guarantees: a vector
-      // expression can only be produced by a "[x, y, z]" literal (see Parser.parsePrimary -
-      // LBRACKET is the only production with ValueType.VECTOR), so anything not starting with
-      // "[" is certain to be rejected server-side. This is NOT a re-implementation of the
-      // expression grammar - malformed syntax or a bad arity/identifier inside the brackets
-      // still parses server-side and still fails silently, same as every other expression field
-      // (mass, radius, emitter rate). It only catches the specific "typed a bare scalar into a
-      // vector field" mistake that prompted this.
-      windVelocityInput.addEventListener("input", () => {
-        if (windVelocityInvalid) {
-          windVelocityInvalid = false;
-          windVelocityInput.style.outline = "";
-          windVelocityInput.title = "";
-        }
+      const velocityLabel = document.createElement("div");
+      velocityLabel.className = "objectField";
+      velocityLabel.appendChild(document.createTextNode("velocity:"));
+      objectPanelBodyEl.appendChild(velocityLabel);
+
+      const parts = windVelocityAxisParts(windEntry);
+      windVelocityInputs = ["x", "y", "z"].map((axis, i) => {
+        const row = document.createElement("div");
+        row.className = "objectField";
+        row.appendChild(document.createTextNode("  " + axis + ": "));
+        const input = document.createElement("input");
+        input.type = "text";
+        input.style.width = "11em";
+        input.value = parts[i];
+        selectAllOnFocus(input);
+        input.addEventListener("change", sendWindVelocityEdit);
+        row.appendChild(input);
+        objectPanelBodyEl.appendChild(row);
+        return input;
       });
-      windVelocityInput.addEventListener("change", () => {
-        const expression = windVelocityInput.value.trim();
-        if (!expression.startsWith("[")) {
-          windVelocityInvalid = true;
-          windVelocityInput.style.outline = "2px solid #d33";
-          windVelocityInput.title = "expected a vector expression like [0, 0, sin(t)], not a bare scalar";
-          return;
-        }
-        windVelocityInvalid = false;
-        windVelocityInput.style.outline = "";
-        windVelocityInput.title = "";
-        sendEdit({ type: "set_wind_velocity", name: selectedName, expression });
-      });
-      velocityRow.appendChild(windVelocityInput);
-      objectPanelBodyEl.appendChild(velocityRow);
-      windVelocitySourceRow = renderExpressionSourceRow(windEntry.velocitySource);
+
+      windVelocityValueRow = document.createElement("div");
+      windVelocityValueRow.className = "objectInfo";
+      windVelocityValueRow.textContent = "value: " + formatVectorExprLiteral(windEntry.velocity.x, windEntry.velocity.y, windEntry.velocity.z);
+      objectPanelBodyEl.appendChild(windVelocityValueRow);
     } else {
-      windVelocitySourceRow = null;
+      windVelocityInputs = null;
+      windVelocityValueRow = null;
     }
 
     if (!hasArrows && !windEntry && latestRegistry.fields.every((f) => !(f.kind === "force" && f.name === selectedName))) {
@@ -1796,10 +1837,18 @@ registerEntityKind({
   updateLive: () => {
     updateEditableFieldsLive("force", selectedName, currentFieldInputs);
     const windEntry = latestRegistry.winds.find((w) => w.name === selectedName);
-    if (windEntry && windVelocityInput && document.activeElement !== windVelocityInput && !windVelocityInvalid) {
-      windVelocityInput.value = formatVectorExprLiteral(windEntry.velocity.x, windEntry.velocity.y, windEntry.velocity.z);
+    if (windEntry && windVelocityInputs) {
+      const parts = windVelocityAxisParts(windEntry);
+      // Per-axis, not "any of the three active" - editing x shouldn't freeze a still-live y/z,
+      // the same granularity the generic vector-field live-update (updateEditableFieldsLive)
+      // already uses for its own x/y/z inputs.
+      windVelocityInputs.forEach((el, i) => {
+        if (document.activeElement !== el) el.value = parts[i];
+      });
     }
-    updateExpressionSourceRow(windVelocitySourceRow, windEntry?.velocitySource);
+    if (windVelocityValueRow && windEntry) {
+      windVelocityValueRow.textContent = "value: " + formatVectorExprLiteral(windEntry.velocity.x, windEntry.velocity.y, windEntry.velocity.z);
+    }
   },
 });
 
@@ -2097,9 +2146,8 @@ function renderObjectPanel() {
   particleRadiusSourceRow = null;
   emitterFieldInputs = null;
   emitterRateSourceRow = null;
-  windVelocityInput = null;
-  windVelocitySourceRow = null;
-  windVelocityInvalid = false;
+  windVelocityInputs = null;
+  windVelocityValueRow = null;
   if (selectedKind === null) {
     objectPanelEl.style.display = "none";
     return;

@@ -3496,6 +3496,75 @@ wording; recorded once below, not as two separate items.
       before/after, not just visually). No console errors from the app
       in any case (only an unrelated Chrome-extension "disconnected port"
       error, unaffiliated with this page).
+- [x] **Follow-up, later session**: turn `Wind.velocity`'s single
+      combined-vector edit box into three per-axis boxes (x/y/z), each
+      showing *that axis's own expression source* rather than the live
+      value, with the live evaluated vector moved to a new read-only
+      `value: [x, y, z]` row underneath - the mirror image of the
+      previous item's layout for this one field specifically (there,
+      the input held the value and a companion row held the source;
+      here, the three inputs hold the source(s) and a companion row
+      holds the value). User-requested directly, not derived from
+      requirements.md.
+      **No server-side change at all.** `Wind.velocity` is still one
+      `VectorExpr` with one combined source string
+      (`ExpressionParser.parseVector` still parses a whole `"[x, y, z]"`
+      literal) - `SceneControlMessage.SetWindVelocity`,
+      `BinaryFrame`/`BinaryFrameTest`, and `Wind.kt` are all untouched.
+      The three-box UI is client-side sugar over the exact same wire
+      message: `viewer.html`'s new `splitVectorLiteralSource` parses a
+      known `"[a, b, c]"` source into its three top-level comma-separated
+      parts for display (bracket/paren-depth-aware, so a comma nested
+      inside a function call isn't mistaken for an axis separator - not a
+      re-implementation of the grammar, just enough structure-tracking to
+      find the three top-level commas), and editing any axis reassembles
+      all three boxes' current text into one `"[x, y, z]"` string sent
+      through the unchanged `set_wind_velocity` message.
+      **Deliberately not done by retagging `connectionNames`-style
+      per-component sources onto `VectorExpr` itself** - the model change
+      would have been sizeable (`VectorExpr`/`ScalarExpr` are used far
+      beyond Wind: `Camera`, `Collider`, emitters, YAML loading) for a
+      UI-scoped ask, and would only even be *possible* when the top-level
+      parsed expression really is a 3-element bracket literal in the
+      first place - `"[1,0,0] + [0,1,0]*sin(t)"` is legal vector-typed
+      grammar too (§10.4's earlier "kept changing" bug fix already
+      established this), and there's no way to isolate "the X part" of
+      an expression like that without symbolic differentiation, which
+      §12.5 already rejected adding to this parser for an unrelated
+      reason. `splitVectorLiteralSource` returns `null` for anything that
+      isn't literally an `[a, b, c]` literal, and every axis box falls
+      back to that axis's own live value formatted as a plain numeric
+      literal instead - itself already a valid expression, so editing
+      from there works exactly like the field did before any source was
+      known at all (true for every demo's own default `Wind`, which is
+      built from a native Kotlin lambda with no source until first
+      edited).
+      **Per-axis live-update granularity, not "any box focused blocks all
+      three"**: matches `updateEditableFieldsLive`'s own existing x/y/z
+      vector-field pattern - editing x doesn't freeze a still-time-varying
+      y or z from refreshing underneath it.
+      **The old "must start with `[`" client-side check was removed
+      entirely, not adapted** - it existed only to catch "typed a bare
+      scalar into the one combined vector box," a mistake class that
+      can't happen anymore now that each box is independently already a
+      scalar expression. A malformed formula in one axis now fails
+      silently server-side, same as every other expression field (mass,
+      radius, emitter rate) already does with no client-side detection -
+      not a new gap, just no longer a special case for this one field.
+      **Verified live in Chrome**: opened `flag`'s `wind` panel - with no
+      known source yet, all three boxes showed the live value as a plain
+      number and visibly ticked every frame (expected: nothing to hold
+      steady without a known formula). Edited `x` to
+      `"10.0 + 2.0*sin(t*2.0)"` - the wind visibly changed, the `x` box
+      kept showing that exact formula text (not a number) on every
+      subsequent live update, and `value:` below tracked its live
+      evaluated number changing over time. Edited `y` to `"0.5*cos(t)"`
+      immediately after - `x`'s box was untouched by the `y` edit,
+      confirming per-axis independence, and `value:` reflected both
+      axes' live numbers simultaneously. `z` (never edited) stayed at
+      its snapshotted numeric literal throughout. No console errors from
+      the app itself (one unrelated Chrome-extension "disconnected port"
+      exception observed, as in earlier sessions).
 - [x] Flag surface self-collision: the flag's own particles can't pass
       through its own surface as it billows/folds (requirements.md
       §12.4's "Surface self-collision" bullet). Genuinely new physics, not
