@@ -35,11 +35,18 @@ class SceneLibrary(
 
     /** Returns `false` (and changes nothing) for an unrecognized name - a client asking for a
      * scene that doesn't exist is a malformed request, the same "ignore it" stance
-     * [SceneControlMessage.parse] already takes for anything it can't make sense of. */
+     * [SceneControlMessage.parse] already takes for anything it can't make sense of.
+     *
+     * `factory()` runs *before* [activeName]/[scene] are touched - if it throws, this class is
+     * left exactly as it was (still on the previous scene, consistently), not half-switched with
+     * [activeName] naming a scene [scene] was never actually rebuilt to match. That inconsistency
+     * was real and reachable: a caller broadcasting a frame after a failed [load] would read
+     * [activeName] and [scene] from two different scenes at once, with nothing to say so. */
     fun load(name: String): Boolean {
         val factory = factories[name] ?: return false
+        val newScene = factory()
         activeName = name
-        scene = factory()
+        scene = newScene
         t = 0.0
         step = 0L
         return true

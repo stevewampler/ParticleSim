@@ -54,28 +54,45 @@ fun main(args: Array<String>) {
     val frameNanos = 1_000_000_000L / framesPerSecond
     while (true) {
         val frameStart = System.nanoTime()
-        for (message in viewerInput.sceneControlQueue.drainAll()) library.handle(message)
-        // §9.1's pacing policy, per active scene: stepsPerFrame is recomputed every frame from
-        // whichever scene is currently loaded, since a scene switch can change dt (FLAG_DT and
-        // TRAMPOLINE_DT differ by more than 10x).
-        val stepsPerFrame = maxOf(1, ((1.0 / framesPerSecond) / library.scene.dt).toInt())
-        repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) { library.advanceOneStep() }
-        val frame = library.scene.frame(library.t)
-        renderer.broadcast(
-            library.t, library.step, library.scene.store, library.scene.ids(), frame.connections,
-            camera = frame.camera,
-            lineColors = frame.lineColors,
-            connectionNames = frame.connectionNames,
-            sphereRadii = frame.sphereRadii,
-            meshes = frame.meshes,
-            arrowGroups = frame.arrowGroups,
-            visibleIds = frame.visibleIds,
-            registry = frame.registry,
-            colliders = frame.colliders,
-            events = frame.events,
-            availableScenes = library.sceneNames,
-            activeScene = library.activeName,
-        )
+        // This whole body used to run unguarded: any exception here - a scene's own step()/
+        // frame() throwing, a malformed control message somehow surviving parsing - would kill
+        // this single always-on loop thread outright. Nothing else in the process would notice
+        // or restart it, so the interactive session would go permanently inert: no more physics
+        // steps, no more broadcasts, every future control message (including "switch scenes")
+        // silently doing nothing forever, indistinguishable from a client-side bug. Catching and
+        // logging here instead means one bad frame is lost, not the whole session - the loop
+        // reaches the sleep below regardless (kept outside the try) so a repeatedly-erroring
+        // scene still paces at ~60fps rather than spinning a CPU core at 100%. `Exception`, not
+        // `Throwable` - a genuine `Error` (OutOfMemoryError, StackOverflowError) means the JVM
+        // itself may be in an unrecoverable state, where "log and keep looping" is the wrong
+        // instinct.
+        try {
+            for (message in viewerInput.sceneControlQueue.drainAll()) library.handle(message)
+            // §9.1's pacing policy, per active scene: stepsPerFrame is recomputed every frame from
+            // whichever scene is currently loaded, since a scene switch can change dt (FLAG_DT and
+            // TRAMPOLINE_DT differ by more than 10x).
+            val stepsPerFrame = maxOf(1, ((1.0 / framesPerSecond) / library.scene.dt).toInt())
+            repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) { library.advanceOneStep() }
+            val frame = library.scene.frame(library.t)
+            renderer.broadcast(
+                library.t, library.step, library.scene.store, library.scene.ids(), frame.connections,
+                camera = frame.camera,
+                lineColors = frame.lineColors,
+                connectionNames = frame.connectionNames,
+                sphereRadii = frame.sphereRadii,
+                meshes = frame.meshes,
+                arrowGroups = frame.arrowGroups,
+                visibleIds = frame.visibleIds,
+                registry = frame.registry,
+                colliders = frame.colliders,
+                events = frame.events,
+                availableScenes = library.sceneNames,
+                activeScene = library.activeName,
+            )
+        } catch (e: Exception) {
+            System.err.println("scene loop error on '${library.activeName}': $e")
+            e.printStackTrace()
+        }
         val elapsed = System.nanoTime() - frameStart
         if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)
     }

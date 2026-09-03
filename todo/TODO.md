@@ -4097,6 +4097,104 @@ wording; recorded once below, not as two separate items.
       resumed animating on its own); switching to another scene and back
       to `flag` re-entered manual mode as expected.
 
+## Scene-switch reliability: crash-safe main loop, consistent library state, reconnect-safe switching, camera-target reset (bug fix, follow-up) — not yet phased
+User-reported directly: "after running the flagOnRope scene for a while,
+when I pick a new scene, the view resets, but the scene stays the same"
+- "not very consistent," no specific reproduction steps. Investigated by
+reading the actual switch path end to end (client `<select>` handler
+through the server's `SceneLibrary`/main loop) rather than guessing from
+the symptom alone - an initial repro attempt (heavy manual orbiting on
+`flagOnRope`, then switching to `flag` via a real `change` event) did
+*not* reproduce a dramatic failure, so this landed as four independent,
+individually-justified fixes rather than one confirmed root cause. Only
+one (the main-loop crash guard) plausibly matches "not very consistent"
+on its own - the others are real, code-verified bugs regardless.
+- [x] **Main loop had zero error handling.** `SceneLibraryDebugDemo.kt`'s
+      `while (true)` body (drain control messages, step, build frame,
+      broadcast) ran unguarded - any exception anywhere in there (a
+      scene's own `step()`/`frame()` throwing, or anything else) would
+      kill the single always-on loop thread outright, with nothing to
+      restart it. The interactive session would go permanently inert:
+      no more physics steps, no more broadcasts, every future control
+      message (including "switch scenes") silently doing nothing for the
+      rest of that server process's life - exactly the "sometimes I just
+      can't switch scenes" shape, and "not very consistent" in the sense
+      that it depends entirely on whether *some* exception has already
+      fired once this session, not on which scene or button is involved.
+      Fixed by wrapping the per-iteration body in a `try`/`catch
+      (e: Exception)` that logs (`scene loop error on '<activeName>':
+      ...` plus a stack trace) and lets the loop continue - deliberately
+      catching `Exception`, not `Throwable`: a real `Error`
+      (`OutOfMemoryError`, `StackOverflowError`) means the JVM itself may
+      be unrecoverable, where "log and keep looping" is the wrong
+      instinct. The pacing `Thread.sleep` stayed *outside* the `try` so a
+      repeatedly-erroring scene still paces at ~60fps instead of spinning
+      a CPU core at 100%.
+- [x] **`SceneLibrary.load` could leave `activeName`/`scene` naming two
+      different scenes.** `activeName = name` ran *before* `scene =
+      factory()` - if the factory threw, `activeName` already pointed at
+      the new scene while `scene` (and `t`/`step`) stayed on the old one,
+      permanently disagreeing with each other for the rest of the
+      process (nothing ever reconciles them). Fixed by building the new
+      scene first and only publishing `activeName`/`scene` together once
+      that succeeds - a failed `load` now leaves the library exactly as
+      it was, the same guarantee the existing "unknown name" case already
+      had. New regression test (`SceneLibraryTest`, a factory that always
+      throws) - this **only** passes because of this fix; against the
+      old ordering it fails on the `activeName` assertion, proving it's
+      a real discriminating test, not just a re-statement of the change.
+- [x] **A `load_scene`/`restart` sent while the socket wasn't `OPEN`
+      vanished silently.** `send()` checked `readyState === OPEN` before
+      writing, dropping the message with no log, no queue, no retry, no
+      user-visible signal beyond the easy-to-miss "disconnected -
+      retrying..." status text - and the client's own optimistic
+      `resetViewerStateForSceneChange()` ran regardless in the same event
+      handler, so a scene-switch click during a sub-second reconnect
+      window looked like it worked (camera reset, panel cleared) while
+      the server never heard about it and kept broadcasting the old
+      scene forever - the literal "camera resets, but the new scene is
+      not displayed" the user described. Fixed two ways: `send()` now
+      `console.warn`s on every dropped message (previously fully silent),
+      and specifically remembers a dropped `load_scene`/`restart` in a
+      new `pendingSceneMessage`, resent once by `connect()`'s own
+      `onopen` handler. Scoped to just those two message types - queuing
+      drags/§10.4 field edits/time control too would mean replaying stale
+      input against whatever scene/state exists by the time the
+      connection actually comes back, a worse failure mode than dropping
+      them.
+      **Verified live in Chrome**: killed the demo server (forcing
+      "disconnected - retrying..."), switched the scene picker to `flag`
+      while disconnected - console showed the new warning
+      (`send() dropped a message - socket not open: ...`) instead of
+      silence. Restarted the server on `flagOnRope` (deliberately a
+      *different* scene than what was picked, so success is unambiguous)
+      - once reconnected, the client correctly showed `flag` (112
+      particles, `flag`'s own force list), not the `flagOnRope` the
+      server actually started on, proving the pending message was
+      retried and applied. No console errors from the app itself.
+- [x] **Camera reset didn't reset `OrbitControls`' own `target`.**
+      `resetViewerStateForSceneChange` set `camera.position`/`up` and
+      called `camera.lookAt(0,0,0)`, but `controls.target` (a separate
+      Vector3 `OrbitControls` maintains itself) was untouched - the
+      render loop's `if (cameraMode === "manual") controls.update()`,
+      which runs every frame in manual mode, re-derives the camera's actual
+      position/orientation from *its own* target and the camera's current
+      position on every call, not from whatever `camera.lookAt` was last
+      told. A stale target (wherever the user last orbited to, on this
+      scene or an earlier one) meant the very next manual-mode
+      `update()` recomputed the camera relative to that stale point
+      instead of the fresh reset just made - usually just a mis-aimed
+      view in casual testing, but the more the user had panned/zoomed
+      away from the origin, the worse it gets, up to the new scene's
+      content landing off-screen. Fixed by also calling
+      `controls.target.set(0, 0, 0)` and `controls.update()` at the end
+      of the reset.
+      **Verified live in Chrome**: on `flagOnRope`, dragged+scrolled the
+      camera aggressively (deep zoom, steep tilt, clearly off the
+      flag's own default framing), then switched to `flag` - camera
+      landed back at the clean default framing every time, not the
+      previous scene's stale orbit point.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

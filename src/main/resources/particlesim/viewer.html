@@ -1091,6 +1091,16 @@ function resetViewerStateForSceneChange(sceneName) {
   camera.position.set(6, 4, 8);
   camera.up.set(0, 1, 0);
   camera.lookAt(0, 0, 0);
+  // OrbitControls keeps its own `target` independent of camera.lookAt above - controls.update()
+  // (called every frame while cameraMode is "manual", see applyFrame) re-derives the camera's
+  // actual position/orientation from *its own* target and the camera's current position, not
+  // from whatever camera.lookAt was last told. Leaving a stale target here (wherever the user
+  // last orbited to, on this scene or an earlier one) means the very next manual-mode update()
+  // recomputes the camera relative to that stale point instead of the fresh reset just made
+  // above - usually just a mis-aimed view, but the more the user had panned/zoomed away from the
+  // origin, the worse it gets, up to the new scene's content landing off-screen entirely.
+  controls.target.set(0, 0, 0);
+  controls.update();
 }
 
 // §10.3's restart: a SceneControlMessage (not TimeControlMessage - this replaces the scene
@@ -2190,7 +2200,19 @@ function connect() {
   const ws = new WebSocket(`ws://${location.hostname}:8887`);
   ws.binaryType = "arraybuffer";
   socket = ws;
-  ws.onopen = () => { statusEl.textContent = "connected"; resetStats(); resetEventLog(); lastRegistrySignature = null; };
+  ws.onopen = () => {
+    statusEl.textContent = "connected";
+    resetStats();
+    resetEventLog();
+    lastRegistrySignature = null;
+    // A load_scene/restart that missed the socket while it was reconnecting (see send()'s own
+    // comment) gets one retry here, now that there's actually a connection to carry it.
+    if (pendingSceneMessage) {
+      const message = pendingSceneMessage;
+      pendingSceneMessage = null;
+      send(message);
+    }
+  };
   ws.onclose = () => { statusEl.textContent = "disconnected — retrying…"; setTimeout(connect, 1000); };
   ws.onerror = () => ws.close();
   ws.onmessage = (event) => {
@@ -2223,8 +2245,27 @@ const dragPlane = new THREE.Plane();
 const dragPlaneHit = new THREE.Vector3();
 let draggedParticleId = null;
 
+// Set by send() below when a load_scene/restart misses a not-yet-open socket - resent once by
+// connect()'s own onopen handler.
+let pendingSceneMessage = null;
+
 function send(message) {
-  if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(message));
+    return;
+  }
+  // The socket can be mid-reconnect for well under a second without the "disconnected -
+  // retrying…" status text ever catching a user's eye - previously every message sent during
+  // that window (including a scene-switch or restart click) was just silently dropped, with the
+  // client's own optimistic reset (resetViewerStateForSceneChange) still running regardless, so
+  // it looked like the switch worked while the server never heard about it at all. load_scene/
+  // restart are exactly the messages a user expects to "stick" even across a momentary
+  // disconnect, so those are remembered and retried on reconnect; every other message type
+  // (drags, §10.4 field edits, time control) still just drops as before - queuing those too
+  // would mean replaying stale input against whatever scene/state exists by the time the
+  // connection actually comes back, a worse failure mode than dropping it.
+  console.warn("send() dropped a message - socket not open:", message);
+  if (message.type === "load_scene" || message.type === "restart") pendingSceneMessage = message;
 }
 
 // §10.4's "pause on edit" toggle - purely client-side: pausing is just sending the existing

@@ -66,6 +66,25 @@ class SceneLibraryTest {
     }
 
     @Test
+    fun `load leaves activeName and scene consistent even when the factory throws`() {
+        // Regression guard: activeName used to be assigned before calling the factory, so a
+        // throwing factory left activeName naming the *new* scene while scene (and t/step)
+        // stayed on the old one - two different scenes' identities disagreeing with each other
+        // for as long as the process ran, since nothing else ever reconciles them.
+        val library = SceneLibrary(
+            factories = mapOf("a" to { StubScene() }, "broken" to { error("factory boom") }),
+            defaultSceneName = "a",
+        )
+        val scene = library.scene
+        library.advanceOneStep()
+
+        assertTrue(runCatching { library.load("broken") }.isFailure)
+        assertEquals("a", library.activeName)
+        assertSame(scene, library.scene)
+        assertEquals(1.0, library.t)
+    }
+
+    @Test
     fun `restart discards the current instance for a fresh one of the same name`() {
         val library = library()
         val original = library.scene as StubScene
