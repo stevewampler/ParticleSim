@@ -11,6 +11,7 @@ import particlesim.physics.Force
 import particlesim.physics.Wind
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.Light
 import particlesim.render.NamedArrowSamples
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
@@ -32,6 +33,10 @@ data class SceneFrame(
     val sphereRadii: Map<Int, Double> = emptyMap(),
     val meshes: List<SurfaceRenderer> = emptyList(),
     val arrowGroups: List<NamedArrowSamples> = emptyList(),
+    /** §10.2's `[stretch]` "Lighting & materials" — empty (the default) means the viewer keeps
+     * using its own hardcoded lighting, unchanged from before this field existed; see
+     * [particlesim.render.Light]'s own doc comment. */
+    val lights: List<Light> = emptyList(),
     val visibleIds: Set<Int>? = null,
     val registry: SceneRegistry = SceneRegistry.build(),
     val colliders: List<Collider> = emptyList(),

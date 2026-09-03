@@ -10,6 +10,8 @@ import particlesim.lifecycle.EmitterCapPolicy
 import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.Light
+import particlesim.render.Material
 import particlesim.render.NamedArrowSamples
 import particlesim.physics.EditableFields
 import particlesim.physics.FieldValue
@@ -50,13 +52,17 @@ import java.nio.charset.StandardCharsets
  * meshCount * { u8 wireframe, i32 nameLen, nameLen UTF-8 bytes, i32 triangleCount,
  *               triangleCount * { i32 a, i32 b, i32 c },
  *               i32 textureUrlLen, textureUrlLen UTF-8 bytes, i32 uvCount,
- *               uvCount * { i32 particleId, f64 u, f64 v } }
+ *               uvCount * { i32 particleId, f64 u, f64 v },
+ *               f64 matR, matG, matB, f64 matRoughness, f64 matOpacity }
  *               (§10.2's texture-mapped surfaces: textureUrlLen 0 = flat shaded color, the same
  *               "0 = absent" convention every other optional string here uses; uvCount is 0
  *               whenever the mesh's own SurfaceRenderer.textureName is unset, even if
  *               Surface.uvs happens to be populated - UV data is exactly as static as the
  *               texture image itself, so it isn't worth putting on the wire for a mesh nothing
- *               will ever map it onto)
+ *               will ever map it onto. The trailing material fields are §10.2's `[stretch]`
+ *               "Lighting & materials" - always sent, resolved server-side from
+ *               SurfaceRenderer.effectiveMaterial, so every mesh (customized or not) carries a
+ *               concrete color/roughness/opacity rather than a "was one declared" flag)
  * i32  arrowGroupCount
  * arrowGroupCount * { i32 nameLen, nameLen UTF-8 bytes, i32 sampleCount,
  *                      sampleCount * { f64 ox, oy, oz, f64 vx, vy, vz } }
@@ -107,6 +113,14 @@ import java.nio.charset.StandardCharsets
  *                           demo that isn't a `SceneLibrary`-backed runner, the same "absent
  *                           means empty" convention the rest of this format already uses rather
  *                           than a new sentinel)
+ * i32  lightCount
+ * lightCount * { u8 kind (0=ambient, 1=directional, 2=point), f64 r, g, b, f64 intensity,
+ *                f64 px, py, pz }
+ *                (§10.2's `[stretch]` "Lighting & materials" — px/py/pz is unused (still sent,
+ *                always zero) for an ambient light, which has no position; an empty list is
+ *                every scene built before this field existed, and the viewer falls back to its
+ *                own hardcoded default lighting rather than going dark, see Light's own doc
+ *                comment)
  * ```
  *
  * The event section is §9.1's discrete-event channel ([SimEvent]) — everything above it in this
@@ -215,6 +229,12 @@ object BinaryFrame {
     private const val TRIANGLE_SIZE = 4 + 4 + 4 // a, b, c
     private const val MESH_UV_HEADER_SIZE = 4 // uvCount
     private const val MESH_UV_ENTRY_SIZE = 4 + 8 + 8 // particleId, u, v
+    private const val MESH_MATERIAL_SIZE = 8 + 8 + 8 + 8 + 8 // r, g, b, roughness, opacity
+    private const val LIGHT_HEADER_SIZE = 4 // lightCount
+    private const val LIGHT_ENTRY_SIZE = 1 + 8 + 8 + 8 + 8 + 8 + 8 + 8 // kind, r, g, b, intensity, px, py, pz
+    private const val AMBIENT_LIGHT_KIND: Byte = 0
+    private const val DIRECTIONAL_LIGHT_KIND: Byte = 1
+    private const val POINT_LIGHT_KIND: Byte = 2
     private const val ARROW_GROUP_HEADER_SIZE = 4 // arrowGroupCount
     private const val ARROW_GROUP_SAMPLE_COUNT_SIZE = 4
     private const val ARROW_SIZE = 8 * 6 // origin xyz, vector xyz
@@ -260,6 +280,7 @@ object BinaryFrame {
         events: List<SimEvent> = emptyList(),
         availableScenes: List<String> = emptyList(),
         activeScene: String = "",
+        lights: List<Light> = emptyList(),
     ): ByteBuffer {
         val fieldEntries = collectEditableFields(registry)
         val emitterEntries = collectEmitterEntries(registry, t)
@@ -271,7 +292,8 @@ object BinaryFrame {
             SPHERE_HEADER_SIZE + sphereRadii.size * SPHERE_SIZE +
             MESH_HEADER_SIZE + meshes.sumOf {
                 MESH_ENTRY_HEADER_SIZE + stringSize(it.surface.name ?: "") + it.surface.triangles.size * TRIANGLE_SIZE +
-                    stringSize(textureUrlOf(it)) + MESH_UV_HEADER_SIZE + uvsToEmit(it).size * MESH_UV_ENTRY_SIZE
+                    stringSize(textureUrlOf(it)) + MESH_UV_HEADER_SIZE + uvsToEmit(it).size * MESH_UV_ENTRY_SIZE +
+                    MESH_MATERIAL_SIZE
             } +
             ARROW_GROUP_HEADER_SIZE + arrowGroups.sumOf {
                 stringSize(it.name) + ARROW_GROUP_SAMPLE_COUNT_SIZE + it.samples.size * ARROW_SIZE
@@ -286,7 +308,8 @@ object BinaryFrame {
             particleExpressionEntryListSize(particleExpressionEntries) +
             COLLIDER_HEADER_SIZE + colliders.sumOf { colliderEntrySize(it) } +
             EVENT_HEADER_SIZE + events.sumOf { eventEntrySize(it) } +
-            nameListSize(availableScenes) + stringSize(activeScene)
+            nameListSize(availableScenes) + stringSize(activeScene) +
+            LIGHT_HEADER_SIZE + lights.size * LIGHT_ENTRY_SIZE
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
         buffer.putDouble(t)
@@ -335,6 +358,9 @@ object BinaryFrame {
             for ((particleId, uv) in uvs) {
                 buffer.putInt(particleId); buffer.putDouble(uv.u); buffer.putDouble(uv.v)
             }
+            val material = mesh.effectiveMaterial
+            buffer.putDouble(material.color.r); buffer.putDouble(material.color.g); buffer.putDouble(material.color.b)
+            buffer.putDouble(material.roughness); buffer.putDouble(material.opacity)
         }
         buffer.putInt(arrowGroups.size)
         for (group in arrowGroups) {
@@ -426,6 +452,24 @@ object BinaryFrame {
         }
         putNameList(buffer, availableScenes)
         putString(buffer, activeScene)
+        buffer.putInt(lights.size)
+        for (light in lights) {
+            val position = when (light) {
+                is Light.Ambient -> Vector3(0.0, 0.0, 0.0)
+                is Light.Directional -> light.position
+                is Light.Point -> light.position
+            }
+            buffer.put(
+                when (light) {
+                    is Light.Ambient -> AMBIENT_LIGHT_KIND
+                    is Light.Directional -> DIRECTIONAL_LIGHT_KIND
+                    is Light.Point -> POINT_LIGHT_KIND
+                },
+            )
+            buffer.putDouble(light.color.r); buffer.putDouble(light.color.g); buffer.putDouble(light.color.b)
+            buffer.putDouble(light.intensity)
+            putVector(buffer, position)
+        }
 
         buffer.flip()
         return buffer
@@ -480,7 +524,8 @@ object BinaryFrame {
             val textureUrl = getString(buf)
             val uvCount = buf.int
             val uvs = (0 until uvCount).associate { buf.int to UV(buf.double, buf.double) }
-            DecodedMesh(wireframe, triangles, name, textureUrl, uvs)
+            val material = Material(color = Color(buf.double, buf.double, buf.double), roughness = buf.double, opacity = buf.double)
+            DecodedMesh(wireframe, triangles, name, textureUrl, uvs, material)
         }
         val arrowGroupCount = buf.int
         val arrowGroups = (0 until arrowGroupCount).map {
@@ -531,9 +576,22 @@ object BinaryFrame {
         }
         val availableScenes = getNameList(buf)
         val activeScene = getString(buf)
+        val lightCount = buf.int
+        val lights = (0 until lightCount).map {
+            val kind = buf.get()
+            val color = Color(buf.double, buf.double, buf.double)
+            val intensity = buf.double
+            val position = getVector(buf)
+            when (kind) {
+                AMBIENT_LIGHT_KIND -> Light.Ambient(color, intensity)
+                DIRECTIONAL_LIGHT_KIND -> Light.Directional(position, color, intensity)
+                POINT_LIGHT_KIND -> Light.Point(position, color, intensity)
+                else -> error("unknown light kind byte: $kind")
+            }
+        }
         return DecodedFrame(
             t, step, particles, connections, camera, spheres, meshes, arrowGroups, visibleIds, registry, colliders, events,
-            availableScenes, activeScene,
+            availableScenes, activeScene, lights,
         )
     }
 
@@ -763,13 +821,16 @@ data class DecodedSphere(val id: Int, val radius: Double)
 /** [name] is `""` when the mesh's [particlesim.surface.Surface] is unnamed — see [BinaryFrame]'s
  * own doc comment for why that collapses with "no name" instead of using a separate flag.
  * [textureUrl] is `""` for a flat-shaded mesh (§10.2); [uvs] is empty whenever the source
- * [particlesim.surface.Surface.uvs] was null, which is every mesh that existed before texturing. */
+ * [particlesim.surface.Surface.uvs] was null, which is every mesh that existed before texturing.
+ * [material] is always a concrete, resolved value (never absent) — see
+ * [particlesim.render.SurfaceRenderer.effectiveMaterial]. */
 data class DecodedMesh(
     val wireframe: Boolean,
     val triangles: List<Triangle>,
     val name: String = "",
     val textureUrl: String = "",
     val uvs: Map<Int, UV> = emptyMap(),
+    val material: Material = Material(),
 )
 
 /** One named group and its current member ids (§10.3's group visibility toggle needs to know
@@ -871,4 +932,5 @@ data class DecodedFrame(
     val events: List<SimEvent> = emptyList(),
     val availableScenes: List<String> = emptyList(),
     val activeScene: String = "",
+    val lights: List<Light> = emptyList(),
 )

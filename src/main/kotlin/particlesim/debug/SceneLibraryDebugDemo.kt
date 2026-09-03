@@ -88,6 +88,7 @@ fun main(args: Array<String>) {
                 events = frame.events,
                 availableScenes = library.sceneNames,
                 activeScene = library.activeName,
+                lights = frame.lights,
             )
         } catch (e: Exception) {
             System.err.println("scene loop error on '${library.activeName}': $e")

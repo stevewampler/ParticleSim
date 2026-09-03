@@ -4207,14 +4207,112 @@ on its own - the others are real, code-verified bugs regardless.
       sole first-class target (§9.1, §10); reuses the same WebSocket
       protocol if ever built
 - [ ] Implicit integration (§13.1)
-- [ ] Lighting & materials (§10.2, new requirement) — configurable light
+- [x] Lighting & materials (§10.2, new requirement) — configurable light
       sources (ambient/directional/point) and per-object/per-group
-      material properties; today's renderer is flat/unlit with one fixed
-      appearance. Requested directly by the user, alongside the next two
-      items below, as "better control over the rendering of the scene."
-      No concrete scene has needed this yet — same "wait for a real
-      consumer" stance as every other stretch item here — but noted as a
-      real, user-requested direction rather than a hypothetical one.
+      material properties; previously the renderer was flat/unlit with
+      one fixed appearance. Requested directly by the user, alongside the
+      next two items below, as "better control over the rendering of the
+      scene." Built directly for §12.8's trampoline worked example -
+      replacing its flat default blue-grey mat with a dark, slightly
+      glossy fabric surface under a deliberately non-default lighting rig
+      - the first concrete consumer, the same "wait for a real consumer"
+      pattern every other stretch item here follows.
+      **Model types**: new `particlesim.render.Light`, a sealed interface
+      with `Ambient(color, intensity)`, `Directional(position, color,
+      intensity)`, and `Point(position, color, intensity)` - the standard
+      three.js light set, since §9.1/§10 already commit to that as the
+      sole first-class viewer; no spot lights or shadows. New
+      `particlesim.render.Material(color, roughness, opacity)`, with
+      `roughness`/`opacity` validated to `[0,1]` at construction rather
+      than left to silently clamp or misrender client-side.
+      **Always-resolved-server-side, no absence flag**: `SurfaceRenderer`
+      gained `material: Material?` plus a computed `effectiveMaterial`
+      that resolves a `null` material to the historical default blue-grey
+      when untextured, or to untinted white when textured (so an image
+      texture isn't double-tinted by the old default blue-grey). The wire
+      protocol (`BinaryFrame`) always emits a mesh's `effectiveMaterial` -
+      concrete `matR/matG/matB/matRoughness/matOpacity` fields, never a
+      "was material declared" flag - the same "resolve fully server-side"
+      choice already used for sphere radii and line colors, so the client
+      never has to know or care whether a scene author declared a material
+      explicitly.
+      **Lights are a new trailing wire section**, gated the same way as
+      everything else optional in this protocol: `i32 lightCount` then
+      `lightCount * {u8 kind, f64 r,g,b, f64 intensity, f64 px,py,pz}` (a
+      zero `Vector3` for `Ambient`, which has no position) - `lightCount =
+      0` for every scene that predates this feature, so old scenes are
+      byte-identical modulo the new trailing zero. `SceneFrame` gained
+      `lights: List<Light> = emptyList()`, threaded through
+      `DebugRenderer.broadcast()` and `SceneLibraryDebugDemo`'s loop the
+      same way `meshes`/`colliders`/etc. already are.
+      **Client side** (`viewer.html`): the viewer's own original lighting
+      (a dim hemisphere + one flat directional sun) was wrapped in a
+      `defaultLights` group instead of removed, toggled `visible = frame.
+      lights.length === 0` every frame - so a scene that never declares
+      lights (every scene but `trampoline` today) looks exactly as it
+      always has, with zero-length `frame.lights` costing nothing beyond
+      the check. Custom lights live in a separate pooled `customLights`
+      array/`customLightsGroup`, grown/shrunk to match `frame.lights.
+      length` each frame and reusing existing `THREE.Light` objects when a
+      slot's kind hasn't changed (only rebuilding the specific slot whose
+      `kind` differs) - the same "grow/shrink a pool, don't rebuild it
+      whole" approach the mesh pool already uses, needed here because a
+      scene switch (§9.6) can go from zero lights to three and back
+      repeatedly. Both material factories (`solidMeshMaterial`,
+      `texturedMeshMaterial`) now take the mesh's resolved material,
+      setting `roughness` directly and `transparent: true` only when
+      `opacity < 1` (three.js treats `transparent` as a real cost, not a
+      free flag, so it's opt-in per mesh rather than always on).
+      **Real bug caught by review before this was closed out**: the
+      `TrampolineScene` worked example declared its `lights` list but the
+      actual `frame(t)` method never passed it into the returned
+      `SceneFrame(...)` - meaning the scene would have silently rendered
+      under the viewer's default lighting despite the custom rig existing
+      in code, undetected by any test (the round-trip tests all pass an
+      explicit `lights` argument directly to `BinaryFrame`/`Renderer`,
+      never through a full scene's `frame()`). Fixed by adding the missing
+      `lights = lights` argument; re-verified live afterward.
+      **Point light intensity units, worth a comment in the code itself**:
+      three.js r155+ dropped `useLegacyLights`, giving `PointLight.
+      intensity` physically-correct candela units with inverse-square
+      distance falloff, while `AmbientLight`/`DirectionalLight` stay on
+      the old unitless scalar - a point light needs roughly a `4*pi x`
+      multiplier over what the old scale would suggest before falloff eats
+      it, which is why `TrampolineScene`'s point light is `intensity =
+      45.0` next to its neighbors' `0.35`/`0.7`. Tuned empirically (started
+      at `12.0`, visually too subtle in a live screenshot, raised to
+      `45.0` and reconfirmed) at that light's actual ~3m distance from the
+      mat - the code comments this so a future reader doesn't "fix" the
+      apparent inconsistency down to match the other two and lose the
+      highlight.
+      New tests: `RendererTest` (`effectiveMaterial` resolves to the
+      historical default when untextured with no material declared, to
+      untinted white when textured with none declared, and to an explicit
+      material regardless of texturing; `Material` rejects out-of-range
+      roughness/opacity). `BinaryFrameTest` (a mesh's effective material
+      round-trips exactly in all three resolution cases; no lights passed
+      round-trips to an empty list unchanged from every scene built before
+      this existed; ambient/directional/point lights round-trip kind,
+      color, intensity, and position).
+      **Verified live in Chrome**: on `trampoline`, confirmed the dark
+      glossy mat renders with a clearly visible bright highlight from the
+      point light positioned above the mat's center; switched to `flag`
+      and confirmed the viewer falls back to its original default
+      lighting (`defaultLights` becomes visible again since `frame.lights`
+      is empty there); switched back to `trampoline` and confirmed the
+      custom lighting/material are correctly restored via the pooled
+      `customLights` mechanism, not left stale from the flag scene. Also
+      temporarily set the mat's `opacity` to `0.4` with a bright red color
+      (reverted after) to directly confirm the `transparent: opacity < 1`
+      path actually blends against what's behind the mesh, rather than
+      relying only on the round-trip unit test for that branch - the
+      brightened color rendered as a muted, darker blend rather than a
+      saturated red, as expected. No console errors in a fresh tab
+      throughout. Full `./gradlew test -q` suite green.
+      **Not built**: no YAML `lights:`/`material:` blocks yet (only the
+      Kotlin DSL can declare either) - joins the other post-Phase-7 YAML
+      gaps tracked elsewhere in this file; no per-particle/per-dot
+      materials, spot lights, or shadows.
 - [x] Friction — static/kinetic (§12.5) — promoted out of `[stretch]` the
       same way particle-vs-surface collision was: `ParticleCollisionDebugDemo`
       (Phase 5) turned up a concrete need. Without friction, a ball pile's

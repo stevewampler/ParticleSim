@@ -5,6 +5,7 @@ import particlesim.core.Vector3
 import particlesim.physics.Spring
 import particlesim.physics.UniformFieldForce
 import particlesim.physics.UniformGravity
+import particlesim.surface.Surface
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -77,5 +78,40 @@ class RendererTest {
 
         assertEquals(1, samples.size)
         assertEquals(Vector3(4.0, 0.0, 0.0), samples[0].vector)
+    }
+
+    // §10.2's `[stretch]` "Lighting & materials" -----------------------------------------------
+
+    @Test
+    fun `an untextured surface with no declared material resolves to the historical default blue-grey`() {
+        val surface = Surface(emptyList())
+        val renderer = SurfaceRenderer(surface)
+
+        assertEquals(Material.DEFAULT_COLOR, renderer.effectiveMaterial.color)
+    }
+
+    @Test
+    fun `a textured surface with no declared material resolves to untinted white, not the untextured default`() {
+        val surface = Surface(emptyList())
+        val renderer = SurfaceRenderer(surface, textureName = "flag-stripes")
+
+        assertEquals(Material.UNTINTED, renderer.effectiveMaterial.color)
+    }
+
+    @Test
+    fun `an explicitly declared material wins regardless of whether the surface is textured`() {
+        val surface = Surface(emptyList())
+        val custom = Material(color = Color(1.0, 0.0, 0.0), roughness = 0.2, opacity = 0.5)
+
+        assertEquals(custom, SurfaceRenderer(surface, material = custom).effectiveMaterial)
+        assertEquals(custom, SurfaceRenderer(surface, textureName = "flag-stripes", material = custom).effectiveMaterial)
+    }
+
+    @Test
+    fun `material rejects roughness or opacity outside 0,1`() {
+        assertFailsWith<IllegalArgumentException> { Material(roughness = 1.5) }
+        assertFailsWith<IllegalArgumentException> { Material(roughness = -0.1) }
+        assertFailsWith<IllegalArgumentException> { Material(opacity = 1.1) }
+        assertFailsWith<IllegalArgumentException> { Material(opacity = -0.1) }
     }
 }

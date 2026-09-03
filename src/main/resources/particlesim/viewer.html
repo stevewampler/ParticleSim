@@ -242,11 +242,27 @@ document.getElementById("collidersToggle").addEventListener("change", (e) => { c
 document.getElementById("pauseOnEditToggle").addEventListener("change", (e) => { pauseOnEdit = e.target.checked; });
 
 // Lighting for §10.2's shaded surface meshes — MeshBasicMaterial (dots, wireframe meshes)
-// doesn't need this, but a solid MeshStandardMaterial surface would render pure black without it.
-scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+// doesn't need this, but a solid MeshStandardMaterial surface would render pure black without
+// it. §10.2's `[stretch]` "Lighting & materials": kept as the permanent *fallback*, not replaced
+// outright — every scene built before that feature existed sends an empty frame.lights (see
+// Light's own doc comment), so this exact original two-light setup has to keep lighting them
+// unchanged forever. Hidden (not removed) whenever a scene does declare lights - see applyFrame.
+const defaultLights = new THREE.Group();
+defaultLights.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
 const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
 sunLight.position.set(5, 10, 7);
-scene.add(sunLight);
+defaultLights.add(sunLight);
+scene.add(defaultLights);
+
+// A scene-declared light (§10.2's `[stretch]`), pooled by index like dots/meshes/arrows -
+// grown/shrunk to frame.lights.length each frame rather than rebuilt from scratch. A pooled
+// slot's THREE.Light *type* is swapped only when the kind at that index actually changes (see
+// applyFrame) - normally never, since a scene's own light list is static for its whole lifetime,
+// this only matters right after a scene switch reuses the pool at an index whose previous
+// occupant was a different kind.
+const customLights = [];
+const customLightsGroup = new THREE.Group();
+scene.add(customLightsGroup);
 
 // --- Camera: scripted (engine-evaluated, §10.1) vs. manual (viewer-local orbit) -----------
 // Both drive the *same* camera object; only one writes to it on any given frame, decided by
@@ -379,11 +395,22 @@ scene.add(lines);
 // cleanly on top instead of z-fighting — without it, a solid mesh sharing exact vertex
 // positions with a LineSegments object flickers unpredictably as the camera or the mesh's own
 // shape changes, which got a lot more visible once dragging could deform the surface unevenly.
-const solidMeshMaterial = () => new THREE.MeshStandardMaterial({
-  color: 0x3388ff, side: THREE.DoubleSide, roughness: 0.85,
+//
+// `material` is meshDecl.material (§10.2's `[stretch]` "Lighting & materials") - always present
+// on the wire, already resolved server-side to a concrete color/roughness/opacity (never "was
+// one declared" undefined), so every caller just applies it verbatim. opacity < 1 needs
+// `transparent: true` or three.js ignores it outright - only set when actually needed, since an
+// always-transparent material costs an extra sort/blend pass every frame for every mesh.
+const solidMeshMaterial = (material) => new THREE.MeshStandardMaterial({
+  color: new THREE.Color(material.color.r, material.color.g, material.color.b),
+  side: THREE.DoubleSide, roughness: material.roughness,
+  opacity: material.opacity, transparent: material.opacity < 1,
   polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
 });
-const wireframeMeshMaterial = () => new THREE.MeshBasicMaterial({ color: 0x3388ff, wireframe: true });
+const wireframeMeshMaterial = (material) => new THREE.MeshBasicMaterial({
+  color: new THREE.Color(material.color.r, material.color.g, material.color.b), wireframe: true,
+  opacity: material.opacity, transparent: material.opacity < 1,
+});
 
 // §10.2's texture-mapped surfaces: a mesh's own material is still rebuilt every frame (matching
 // solidMeshMaterial's own pattern above), but the underlying THREE.Texture per URL is cached and
@@ -403,8 +430,11 @@ function getTexture(url) {
   }
   return textureCache.get(url);
 }
-const texturedMeshMaterial = (url) => new THREE.MeshStandardMaterial({
-  map: getTexture(url), side: THREE.DoubleSide, roughness: 0.85,
+const texturedMeshMaterial = (url, material) => new THREE.MeshStandardMaterial({
+  map: getTexture(url),
+  color: new THREE.Color(material.color.r, material.color.g, material.color.b), // untinted (white) by default - see SurfaceRenderer.effectiveMaterial
+  side: THREE.DoubleSide, roughness: material.roughness,
+  opacity: material.opacity, transparent: material.opacity < 1,
   polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
 });
 let meshObjects = []; // THREE.Mesh[], each carrying userData.triangleVertexIds for picking
@@ -663,7 +693,9 @@ function applyFrame(frame) {
   // Surface meshes (§10.2): rebuilt every frame (positions move every step) but the pool of
   // THREE.Mesh objects itself is grown/shrunk, not recreated, matching the dots/lines pattern.
   while (meshObjects.length < frame.meshes.length) {
-    const obj = new THREE.Mesh(new THREE.BufferGeometry(), solidMeshMaterial());
+    // A placeholder material - the real one (from this frame's own meshDecl.material) gets
+    // applied a few lines below, every frame, so what's passed here is never actually seen.
+    const obj = new THREE.Mesh(new THREE.BufferGeometry(), solidMeshMaterial({ color: { r: 0.2, g: 0.53, b: 1.0 }, roughness: 0.85, opacity: 1.0 }));
     meshGroup.add(obj);
     meshObjects.push(obj);
     const overlay = new THREE.LineSegments(new THREE.BufferGeometry(), edgeOverlayMaterial);
@@ -686,9 +718,9 @@ function applyFrame(frame) {
     const wireframe = surfaceWireframeOverride.has(meshDecl.name) ? surfaceWireframeOverride.get(meshDecl.name) : meshDecl.wireframe;
     // §10.2's texture-mapped surfaces: wireframe still wins outright (there's no such thing as
     // a textured wireframe here) - a texture only applies to the solid-shaded case.
-    obj.material = wireframe ? wireframeMeshMaterial()
-      : meshDecl.textureUrl ? texturedMeshMaterial(meshDecl.textureUrl)
-      : solidMeshMaterial();
+    obj.material = wireframe ? wireframeMeshMaterial(meshDecl.material)
+      : meshDecl.textureUrl ? texturedMeshMaterial(meshDecl.textureUrl, meshDecl.material)
+      : solidMeshMaterial(meshDecl.material);
 
     const overlay = meshEdgeOverlays[i];
     overlay.geometry.dispose();
@@ -700,6 +732,40 @@ function applyFrame(frame) {
     const hiddenByToggle = meshDecl.name !== "" && hiddenSurfaces.has(meshDecl.name);
     obj.visible = !hiddenByToggle;
     overlay.visible = !hiddenByToggle && showMeshEdges;
+  });
+
+  // §10.2's `[stretch]` "Lighting & materials": an empty frame.lights (every scene built before
+  // this field existed) keeps defaultLights visible unchanged; a scene that declares any lights
+  // hides that fallback and drives the pooled customLights instead - grown/shrunk to match, same
+  // pattern as meshes/dots.
+  defaultLights.visible = frame.lights.length === 0;
+  while (customLights.length < frame.lights.length) {
+    const light = new THREE.PointLight();
+    light.userData.kind = "point";
+    customLightsGroup.add(light);
+    customLights.push(light);
+  }
+  while (customLights.length > frame.lights.length) {
+    customLightsGroup.remove(customLights.pop());
+  }
+  frame.lights.forEach((decl, i) => {
+    let light = customLights[i];
+    // A pooled slot's THREE.Light type can't be changed in place - swap the object itself when
+    // this index's kind differs from what's currently there. Normally never (a scene's own light
+    // list is static for its whole lifetime); only matters right after a scene switch reuses the
+    // pool at an index whose previous occupant was a different kind.
+    if (light.userData.kind !== decl.kind) {
+      customLightsGroup.remove(light);
+      light = decl.kind === "ambient" ? new THREE.AmbientLight()
+        : decl.kind === "directional" ? new THREE.DirectionalLight()
+        : new THREE.PointLight();
+      light.userData.kind = decl.kind;
+      customLightsGroup.add(light);
+      customLights[i] = light;
+    }
+    light.color.setRGB(decl.color.r, decl.color.g, decl.color.b);
+    light.intensity = decl.intensity;
+    if (decl.kind !== "ambient") light.position.set(decl.position.x, decl.position.y, decl.position.z);
   });
 
   // Arrow-sampled field forces (§10.2), grouped by source force. §10.3's per-force visibility
@@ -938,7 +1004,15 @@ function decodeFrame(buffer) {
       const v = view.getFloat64(offset, true); offset += 8;
       uvs.set(particleId, { u, v });
     }
-    meshes[i] = { wireframe, name, triangles, textureUrl, uvs };
+    // §10.2's `[stretch]` "Lighting & materials" - always present (SurfaceRenderer.
+    // effectiveMaterial resolves a concrete value server-side even when nothing was declared),
+    // so unlike textureUrl/uvs there's no "0 = absent" case to handle here.
+    const matR = view.getFloat64(offset, true); offset += 8;
+    const matG = view.getFloat64(offset, true); offset += 8;
+    const matB = view.getFloat64(offset, true); offset += 8;
+    const roughness = view.getFloat64(offset, true); offset += 8;
+    const opacity = view.getFloat64(offset, true); offset += 8;
+    meshes[i] = { wireframe, name, triangles, textureUrl, uvs, material: { color: { r: matR, g: matG, b: matB }, roughness, opacity } };
   }
 
   // Arrow samples grouped by their source force's name (§10.3's per-force visibility toggle -
@@ -1023,9 +1097,25 @@ function decodeFrame(buffer) {
   const availableScenes = readNameList();
   const activeScene = readString();
 
+  // §10.2's `[stretch]` "Lighting & materials" - empty is every scene built before this field
+  // existed, and the viewer falls back to its own hardcoded default lighting rather than going
+  // dark (see the defaultLights/customLights setup near the scene's own lighting comment).
+  const lightCount = view.getInt32(offset, true); offset += 4;
+  const lights = new Array(lightCount);
+  for (let i = 0; i < lightCount; i++) {
+    const kindByte = view.getUint8(offset); offset += 1;
+    const r = view.getFloat64(offset, true); offset += 8;
+    const g = view.getFloat64(offset, true); offset += 8;
+    const b = view.getFloat64(offset, true); offset += 8;
+    const intensity = view.getFloat64(offset, true); offset += 8;
+    const position = readVec();
+    const kind = kindByte === 0 ? "ambient" : kindByte === 1 ? "directional" : "point";
+    lights[i] = { kind, color: { r, g, b }, intensity, position };
+  }
+
   return {
     t, step, particles, connections, camera: cam, spheres, meshes, arrowGroups, visibleIds, registry, colliders, events,
-    availableScenes, activeScene,
+    availableScenes, activeScene, lights,
   };
 }
 

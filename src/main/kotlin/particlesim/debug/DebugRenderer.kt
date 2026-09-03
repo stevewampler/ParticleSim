@@ -4,6 +4,7 @@ import particlesim.collision.Collider
 import particlesim.core.ParticleStore
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.Light
 import particlesim.render.NamedArrowSamples
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
@@ -54,11 +55,12 @@ class DebugRenderer(
         events: List<SimEvent> = emptyList(),
         availableScenes: List<String> = emptyList(),
         activeScene: String = "",
+        lights: List<Light> = emptyList(),
     ) {
         wsServer.broadcastFrame(
             BinaryFrame.encode(
                 t, step, store, ids, connections, camera, lineColors, connectionNames, sphereRadii, meshes, arrowGroups,
-                visibleIds, registry, colliders.filter { it.active }, events, availableScenes, activeScene,
+                visibleIds, registry, colliders.filter { it.active }, events, availableScenes, activeScene, lights,
             ),
         )
     }

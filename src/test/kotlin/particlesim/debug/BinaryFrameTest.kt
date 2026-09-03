@@ -13,6 +13,8 @@ import particlesim.physics.UniformGravity
 import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.Light
+import particlesim.render.Material
 import particlesim.render.NamedArrowSamples
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
@@ -284,6 +286,54 @@ class BinaryFrameTest {
 
         assertEquals("/textures/${TextureAssets.FLAG_STRIPES}.png", decoded.meshes.single().textureUrl)
         assertEquals(uvs, decoded.meshes.single().uvs)
+    }
+
+    // §10.2's `[stretch]` "Lighting & materials" -----------------------------------------------
+
+    @Test
+    fun `a mesh's effective material round-trips exactly, default or explicit`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+        val b = store.create(position = Vector3.ZERO)
+        val c = store.create(position = Vector3.ZERO)
+        val triangle = Triangle(a, b, c)
+        val custom = Material(color = Color(1.0, 0.5, 0.0), roughness = 0.1, opacity = 0.75)
+        val meshes = listOf(
+            SurfaceRenderer(surface = Surface(listOf(triangle))), // default, untextured
+            SurfaceRenderer(surface = Surface(listOf(triangle)), textureName = TextureAssets.FLAG_STRIPES), // default, textured
+            SurfaceRenderer(surface = Surface(listOf(triangle)), material = custom), // explicit
+        )
+
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(a, b, c), connections = emptyList(), meshes = meshes)
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(Material.DEFAULT_COLOR, decoded.meshes[0].material.color)
+        assertEquals(Material.UNTINTED, decoded.meshes[1].material.color, "a textured mesh's default shouldn't tint the texture")
+        assertEquals(custom, decoded.meshes[2].material)
+    }
+
+    @Test
+    fun `no lights passed round-trips to an empty list, unchanged from every scene built before this field existed`() {
+        val store = ParticleStore()
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList())
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(emptyList(), decoded.lights)
+    }
+
+    @Test
+    fun `ambient, directional, and point lights round-trip their kind, color, intensity, and position`() {
+        val store = ParticleStore()
+        val lights = listOf(
+            Light.Ambient(color = Color(0.2, 0.2, 0.3), intensity = 0.6),
+            Light.Directional(position = Vector3(5.0, 10.0, 7.0), color = Color(1.0, 1.0, 0.9), intensity = 0.8),
+            Light.Point(position = Vector3(-1.0, 2.0, 0.0), color = Color(1.0, 0.6, 0.3), intensity = 1.2),
+        )
+
+        val buffer = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), lights = lights)
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(lights, decoded.lights)
     }
 
     @Test

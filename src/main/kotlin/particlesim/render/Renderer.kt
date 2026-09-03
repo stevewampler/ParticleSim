@@ -45,8 +45,26 @@ data class ParticleRenderer(val group: String, val style: ParticleStyle = Partic
  * through the per-frame binary protocol the surface's own vertex positions are (an image doesn't
  * change every step the way positions do). Meaningful only alongside [Surface.uvs] — a textured
  * surface with no UV data renders with a degenerate (all-zero) mapping.
+ *
+ * [material] is `null` by default — see [effectiveMaterial] for what that resolves to and why.
  */
-data class SurfaceRenderer(val surface: Surface, val wireframe: Boolean = false, val textureName: String? = null)
+data class SurfaceRenderer(
+    val surface: Surface,
+    val wireframe: Boolean = false,
+    val textureName: String? = null,
+    val material: Material? = null,
+) {
+    /** §10.2's `[stretch]` "Lighting & materials": [material] verbatim when this renderer
+     * declared one, otherwise the exact hardcoded appearance this class rendered with before
+     * material customization existed — opaque blue-grey for a flat-shaded mesh, or untinted
+     * white so a [textureName]'d mesh's own colors show through rather than getting multiplied
+     * by a default that was only ever meant for the untextured case. Always resolved to a
+     * concrete [Material] here (not left for the wire format or the client to guess at), the
+     * same "server computes, client just draws" split every other renderer-declaration field in
+     * this codebase already follows. */
+    val effectiveMaterial: Material
+        get() = material ?: Material(color = if (textureName != null) Material.UNTINTED else Material.DEFAULT_COLOR)
+}
 
 /** What a [LineRenderer]'s color maps from (§10.2). Only [BREAK_PROXIMITY] is implemented —
  * `stretch`/`force` magnitude coloring from the spec's own list is a deferred follow-up: unlike

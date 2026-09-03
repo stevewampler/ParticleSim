@@ -903,21 +903,22 @@ external image onto a mesh's surface.
 - N-body gravity and custom forces (§5.3) are lower priority / `[stretch]`
   — N-body isn't localized to a renderable pair (force exists between
   every pair), and custom forces don't have a defined shape yet.
-- `[stretch]` **Lighting & materials**: today's renderer draws flat/unlit
-  dots, spheres, and meshes with one fixed appearance. Configurable light
-  sources (ambient, directional, point — the standard three.js set, since
-  §9.1/§10 already commits to that as the sole first-class viewer) and
-  per-object/per-group material properties (base color, shininess/
-  opacity, or eventually a plugged-in shader) would let a scene actually
-  look considered rather than uniformly flat-shaded. These would be
-  additional renderer-adjacent declarations once built — e.g. a
-  scene-level `lights:` list, and a `material:` block alongside a
-  renderer's existing `kind`/`colorBy` — not a special case bolted on
-  outside the renderer system. Deferred the same way §5.2's spatially-
-  varying wind and §12.4's particle-vs-surface collision were: no scene
-  built so far has needed it, and designing a lighting/material system
-  ahead of a concrete visual target would be guessing at its shape rather
-  than responding to one.
+- **Lighting & materials** — no longer `[stretch]`: built for §12.8's
+  trampoline worked example, replacing its flat default blue-grey mat with
+  a dark glossy surface lit by a deliberately non-default rig (see
+  `todo/TODO.md`'s own entry for the full retrospective). `particlesim.
+  render.Light` (`Ambient`/`Directional`/`Point`, the standard three.js
+  set per §9.1/§10's viewer commitment) and `Material` (color, roughness,
+  opacity) are Kotlin model types; `SceneFrame.lights: List<Light>` and
+  `SurfaceRenderer.material: Material?` carry them into a scene, resolved
+  server-side to an always-concrete `effectiveMaterial` (untextured falls
+  back to the historical default blue-grey, textured falls back to
+  untinted white so the texture's own color isn't double-tinted) so the
+  wire format never needs a "was declared" flag. What's still unbuilt: the
+  YAML front-end has no `lights:`/`material:` blocks yet (only the Kotlin
+  DSL can declare either — the example below doesn't show them), so this
+  joins TODO.md's other tracked post-Phase-7 YAML gaps; and per-particle/
+  per-dot materials, spot lights, and shadows were never in scope.
 
 ```yaml
 renderers:
