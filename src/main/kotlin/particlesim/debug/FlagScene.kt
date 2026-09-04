@@ -14,6 +14,7 @@ import particlesim.render.ArrowRenderer
 import particlesim.render.ArrowSampling
 import particlesim.render.CameraFunction
 import particlesim.render.CameraPose
+import particlesim.render.Light
 import particlesim.render.NamedArrowSamples
 import particlesim.render.SceneQueryImpl
 import particlesim.render.SceneRegistry
@@ -49,11 +50,20 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
     private val clothMesh = SurfaceRenderer(scenario.surface, wireframe = false, textureName = TextureAssets.USA_FLAG)
     private val windArrows = ArrowRenderer(wind, regionMin = Vector3(-0.5, -2.0, -1.0), regionMax = Vector3(2.5, 0.5, 1.0), resolution = 1.0)
     private val arrowVisualScale = 0.15
+    // Named (§10.3's outliner) so it's reachable/editable, not just present - same reasoning as
+    // TrampolineScene's own named rig. Position/color/intensity mirror the viewer's own hardcoded
+    // default sun (viewer.html's defaultLights) rather than something new: this scene's mesh is
+    // textured (clothMesh below has no declared material, so it resolves to Material.UNTINTED,
+    // §10.2's "don't double-tint a texture" rule), so a plain white light at the same angle keeps
+    // the flag looking the way it already did under the default-lighting fallback, while still
+    // being a real, editable light instead of an invisible default.
+    private val lights = listOf(Light.Directional(position = Vector3(5.0, 10.0, 7.0), intensity = 0.8, name = "sun"))
     private val registry = SceneRegistry.build(
         forces = scenario.forces,
         constraints = scenario.constraints,
         surfaces = listOf(scenario.surface),
         groups = scenario.groups,
+        lights = lights,
     )
 
     // §12.4's "Surface self-collision" (requirements.md, new requirement) - keeps the flag's own
@@ -86,7 +96,7 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
     override fun ids(): List<Int> = allIds
 
     override fun handleControl(message: SceneControlMessage, t: Double) {
-        if (applyEditableFieldMessage(message, scenario.forces, scenario.constraints, scenario.store, t)) return
+        if (applyEditableFieldMessage(message, scenario.forces, scenario.constraints, scenario.store, t, lights)) return
         when (message) {
             is SceneControlMessage.SetGroupEnabled -> scenario.groups.setEnabled(message.name, message.enabled)
             else -> {} // colliders/delete-particle/restart-scene aren't features of this scene
@@ -128,6 +138,7 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
             arrowGroups = listOf(NamedArrowSamples(wind.name ?: "", arrowSamples)),
             visibleIds = poleIds,
             registry = registry,
+            lights = lights,
         )
     }
 }

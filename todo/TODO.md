@@ -4321,6 +4321,34 @@ on its own - the others are real, code-verified bugs regardless.
       three lights and the custom rig recovered correctly. No console
       errors (only the known-benign Chrome-extension noise) throughout.
       Full `./gradlew test -q` suite green.
+      **Follow-up, same session**: `FlagScene` gained its own named light,
+      `sun` (`Light.Directional`, position `(5, 10, 7)`, white, intensity
+      `0.8`) — a second real consumer of the outliner/editing work above,
+      and the first to combine a named light with a *textured* mesh
+      (`clothMesh` has no declared `Material`, so it resolves to
+      `Material.UNTINTED` per §10.2's "don't double-tint a texture" rule,
+      meaning the light's own color multiplies directly against the flag
+      texture). Position/color/intensity were chosen to match the
+      viewer's own hardcoded default sun (`viewer.html`'s `defaultLights`)
+      as closely as possible, specifically so switching this scene from
+      "no lights, default fallback" to "one named, editable light" doesn't
+      change how the flag looks by default — confirmed by comparing
+      before/after screenshots, not just by matching the numbers. Wired
+      into `SceneRegistry.build(..., lights = lights)`,
+      `applyEditableFieldMessage(..., lights)`, and `SceneFrame(...,
+      lights = lights)`, the same three points `TrampolineScene` needed.
+      `buildFlag`/`FlagScenario` remain untouched — the light lives on
+      `FlagScene` itself, same "own it where it's actually used" reasoning
+      already applied there to `clothMesh`/`windArrows`/`camera`, so
+      `FlagGoldenTest`/`FlagYamlParityTest` (which call `buildFlag`
+      directly, never `FlagScene`) are unaffected.
+      **Verified live in Chrome**: `sun` appears in `flag`'s outliner;
+      selecting it shows `color`/`intensity`/`position` all correct; the
+      flag renders with the same vivid, correctly-shaded look it had
+      under the default-lighting fallback (checked at the same camera
+      angle/zoom as an earlier session's flag screenshot); switching to
+      `trampoline` and back to `flag` recovered `sun` and the flag's
+      lighting correctly. No console errors. Full test suite green.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
