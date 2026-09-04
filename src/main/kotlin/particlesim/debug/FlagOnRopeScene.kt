@@ -18,6 +18,7 @@ import particlesim.physics.Force
 import particlesim.physics.Integrator
 import particlesim.physics.MeshSprings
 import particlesim.physics.Spring
+import particlesim.render.Light
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
 import particlesim.render.TextureAssets
@@ -175,8 +176,14 @@ class FlagOnRopeScene : DemoScene {
     // §10.2's texture-mapped surfaces, same asset FlagScene uses. scenario.flagSurface already
     // carries Grid.uvs (buildFlag attaches it unconditionally).
     private val clothMesh = SurfaceRenderer(scenario.flagSurface, wireframe = false, textureName = TextureAssets.USA_FLAG)
+    // Same named "sun" as FlagScene, same reasoning: clothMesh is textured with no declared
+    // Material (resolves to Material.UNTINTED), so a plain white light at the viewer's own
+    // default-sun position/intensity keeps this scene looking the way it already did under the
+    // default-lighting fallback, while making it reachable/editable from the outliner.
+    private val lights = listOf(Light.Directional(position = Vector3(5.0, 10.0, 7.0), intensity = 0.8, name = "sun"))
     private val registry = SceneRegistry.build(
         forces = scenario.forces, constraints = scenario.constraints, surfaces = listOf(scenario.flagSurface), groups = scenario.groups,
+        lights = lights,
     )
     private val integrator = Integrator()
     private val allIds = scenario.flagpole.poleIds + scenario.rope.ropeIds + scenario.flagGrid.flatten()
@@ -187,7 +194,7 @@ class FlagOnRopeScene : DemoScene {
     override fun ids(): List<Int> = allIds
 
     override fun handleControl(message: SceneControlMessage, t: Double) {
-        applyEditableFieldMessage(message, scenario.forces, scenario.constraints, scenario.store, t)
+        applyEditableFieldMessage(message, scenario.forces, scenario.constraints, scenario.store, t, lights)
     }
 
     override fun step(t: Double) {
@@ -207,5 +214,6 @@ class FlagOnRopeScene : DemoScene {
         // polylines - a deliberate scope, not an oversight left for later.
         visibleIds = emptySet(),
         registry = registry,
+        lights = lights,
     )
 }

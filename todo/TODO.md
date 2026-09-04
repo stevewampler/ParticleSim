@@ -4349,6 +4349,18 @@ on its own - the others are real, code-verified bugs regardless.
       angle/zoom as an earlier session's flag screenshot); switching to
       `trampoline` and back to `flag` recovered `sun` and the flag's
       lighting correctly. No console errors. Full test suite green.
+      **Follow-up, same session**: `FlagOnRopeScene` (the flag hung from a
+      rope rather than pinned to the pole — see `FlagOnRopeScenario`'s own
+      doc comment) got the identical named `sun` light, same position/
+      color/intensity, same reasoning (its `clothMesh` is likewise
+      textured with no declared `Material`). Wired at the same three
+      points, and `buildFlagOnRopeScenario` (this scene's own build
+      function, consumed directly by `FlagOnRopeSceneTest`) stayed
+      untouched — the light lives on `FlagOnRopeScene` itself. Verified
+      live in Chrome: `sun` lists in the outliner with the correct
+      color/intensity/position, the flag renders vividly under it, and it
+      survives a `flag` → `flagOnRope` round-trip switch. No console
+      errors. Full test suite green.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
