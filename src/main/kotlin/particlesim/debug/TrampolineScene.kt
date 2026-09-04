@@ -37,22 +37,33 @@ class TrampolineScene : DemoScene {
     // scene an overall direction; a warm point light positioned above the mat's center - roughly
     // where the ball actually bounces - puts a bright highlight exactly where the eye is drawn,
     // strengthening (not fighting) the mat's own low roughness sheen.
+    // Named (unlike most demos' forces/constraints, naming is optional there too, but every
+    // light here is named deliberately) so all three reach §10.3's outliner and are individually
+    // selectable/editable - the point this scene makes ("lights are actually configurable") isn't
+    // fully real until they're reachable from the UI, not just visible in the render.
     private val lights = listOf(
-        Light.Ambient(color = Color(0.6, 0.65, 0.78), intensity = 0.35),
-        Light.Directional(position = Vector3(4.0, 8.0, 3.0), color = Color(1.0, 0.96, 0.9), intensity = 0.7),
+        Light.Ambient(color = Color(0.6, 0.65, 0.78), intensity = 0.35, name = "ambient-fill"),
+        Light.Directional(
+            position = Vector3(4.0, 8.0, 3.0), color = Color(1.0, 0.96, 0.9), intensity = 0.7,
+            name = "sun",
+        ),
         // 45.0, not something in the ~0.7 range like its neighbors above: three.js (>=r155, no
         // useLegacyLights) gives PointLight physically-correct candela units with inverse-square
         // distance falloff, while Ambient/Directional keep the old unitless scalar - a point light
         // needs roughly a 4pi x multiplier over the legacy-equivalent value before falloff eats it,
         // hence tens instead of fractions. Tuned live at this mat's ~3m light-to-surface distance;
         // don't "fix" it down to match the other two without re-verifying the highlight is still visible.
-        Light.Point(position = Vector3(0.0, 3.0, 0.0), color = Color(1.0, 0.85, 0.6), intensity = 45.0),
+        Light.Point(
+            position = Vector3(0.0, 3.0, 0.0), color = Color(1.0, 0.85, 0.6), intensity = 45.0,
+            name = "bounce-highlight",
+        ),
     )
     private val registry = SceneRegistry.build(
         forces = scenario.forces,
         constraints = scenario.constraints,
         surfaces = listOf(scenario.surface),
         groups = scenario.groups,
+        lights = lights,
     )
     private val allIds = scenario.grid.flatten() + scenario.ballId
     private val rimIds = scenario.groups.membersOf("rim")
@@ -75,7 +86,7 @@ class TrampolineScene : DemoScene {
     }
 
     override fun handleControl(message: SceneControlMessage, t: Double) {
-        if (applyEditableFieldMessage(message, scenario.forces, scenario.constraints, scenario.store, t)) return
+        if (applyEditableFieldMessage(message, scenario.forces, scenario.constraints, scenario.store, t, lights)) return
         if (message is SceneControlMessage.SetGroupEnabled) scenario.groups.setEnabled(message.name, message.enabled)
     }
 

@@ -18,23 +18,27 @@ class SceneRegistryTest {
     private fun namedConstraint(name: String?): Constraint = FixedPosition("g", Vector3.ZERO, name = name)
 
     @Test
-    fun `only named forces, constraints, and surfaces are registered`() {
+    fun `only named forces, constraints, surfaces, and lights are registered`() {
         val namedF = namedForce("gravity")
         val unnamedF = namedForce(null)
         val namedC = namedConstraint("anchor")
         val unnamedC = namedConstraint(null)
         val namedSurface = Surface(emptyList(), name = "mesh")
         val unnamedSurface = Surface(emptyList())
+        val namedLight = Light.Ambient(name = "fill")
+        val unnamedLight = Light.Ambient()
 
         val registry = SceneRegistry.build(
             forces = listOf(namedF, unnamedF),
             constraints = listOf(namedC, unnamedC),
             surfaces = listOf(namedSurface, unnamedSurface),
+            lights = listOf(namedLight, unnamedLight),
         )
 
         assertEquals(mapOf("gravity" to namedF), registry.forces)
         assertEquals(mapOf("anchor" to namedC), registry.constraints)
         assertEquals(mapOf("mesh" to namedSurface), registry.surfaces)
+        assertEquals(mapOf("fill" to namedLight), registry.lights)
     }
 
     @Test

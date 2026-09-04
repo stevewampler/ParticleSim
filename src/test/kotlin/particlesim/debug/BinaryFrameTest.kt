@@ -528,6 +528,48 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `a named light's name reaches the outliner and its live values round-trip as kind=light field entries`() {
+        val store = ParticleStore()
+        val ambient = Light.Ambient(color = Color(0.2, 0.2, 0.3), intensity = 0.6, name = "fill")
+        val point = Light.Point(position = Vector3(1.0, 2.0, 3.0), color = Color(1.0, 0.5, 0.0), intensity = 4.0, name = "highlight")
+        val registry = SceneRegistry.build(lights = listOf(ambient, point))
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), registry = registry,
+        )
+        val decoded = BinaryFrame.decode(buffer).registry
+
+        assertEquals(listOf("fill", "highlight"), decoded.lights)
+        assertEquals(
+            setOf(
+                DecodedFieldEntry("light", "fill", "color", particlesim.physics.FieldValue.Vector(Vector3(0.2, 0.2, 0.3))),
+                DecodedFieldEntry("light", "fill", "intensity", particlesim.physics.FieldValue.Scalar(0.6)),
+                DecodedFieldEntry("light", "highlight", "color", particlesim.physics.FieldValue.Vector(Vector3(1.0, 0.5, 0.0))),
+                DecodedFieldEntry("light", "highlight", "intensity", particlesim.physics.FieldValue.Scalar(4.0)),
+                DecodedFieldEntry("light", "highlight", "position", particlesim.physics.FieldValue.Vector(Vector3(1.0, 2.0, 3.0))),
+            ),
+            decoded.fields.toSet(),
+        )
+    }
+
+    @Test
+    fun `an unnamed light reaches the render-only lights section but not the outliner or field-entry list`() {
+        val store = ParticleStore()
+        val unnamed = Light.Ambient()
+        val registry = SceneRegistry.build(lights = listOf(unnamed))
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), registry = registry,
+            lights = listOf(unnamed),
+        )
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(emptyList(), decoded.registry.lights)
+        assertEquals(emptyList(), decoded.registry.fields)
+        assertEquals(listOf(unnamed), decoded.lights)
+    }
+
+    @Test
     fun `a named emitter's current rate, maxAlive, and capPolicy round-trip in the registry`() {
         val store = ParticleStore()
         val emitter = particlesim.lifecycle.Emitter(

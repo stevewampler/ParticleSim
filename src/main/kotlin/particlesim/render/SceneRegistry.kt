@@ -8,16 +8,16 @@ import particlesim.physics.Force
 import particlesim.surface.Surface
 
 /**
- * §10.3's outliner needs "every group, named force, constraint, ... and surface" reachable
+ * §10.3's outliner needs "every group, named force, constraint, surface, ... and light" reachable
  * regardless of what's currently rendered — this is the read-only projection that answers that,
- * built from the same `forces`/`constraints`/`surfaces` lists and `Groups` instance a scene
- * already assembles (e.g. `FlagScenario.forces`) rather than requiring a second, separate
+ * built from the same `forces`/`constraints`/`surfaces`/`lights` lists and `Groups` instance a
+ * scene already assembles (e.g. `FlagScenario.forces`) rather than requiring a second, separate
  * registration call threaded through every builder function.
  *
- * **Groups are the one kind collected differently.** A [Force]/[Constraint]/[Surface] is
- * *optionally* named — an unnamed one still works physically (it's still stepped/drawn), it's
+ * **Groups are the one kind collected differently.** A [Force]/[Constraint]/[Surface]/[Light] is
+ * *optionally* named — an unnamed one still works physically (it's still stepped/drawn/lit), it's
  * just not individually reachable by someone browsing the scene, the same "nothing shows up
- * unless it opts in" policy §10.2 already applies to renderers themselves — so those three kinds
+ * unless it opts in" policy §10.2 already applies to renderers themselves — so those four kinds
  * are filtered to named entries and exposed as `Map<String, T>`. A group has no such thing as
  * "unnamed": its name *is* its identity ([Groups] is keyed by name from the moment a member is
  * first added, per [Groups.names]), so every group it holds is collected, exposed as
@@ -25,7 +25,7 @@ import particlesim.surface.Surface
  * [Groups.membersOf] rather than retaining the whole mutable [Groups] object, keeping this class
  * a genuine read-only snapshot. This is what makes a group's per-object visibility toggle
  * (§10.3) possible client-side: the viewer needs to know *which particles* a group's checkbox
- * actually hides, not just that the group exists. **Cost note**: unlike the other three kinds
+ * actually hides, not just that the group exists. **Cost note**: unlike the other four kinds
  * (a handful of short strings), a group's member list is O(members) ints — cheap for the small
  * named groups every current demo has, but worth remembering if a future large-N scenario names
  * a group with thousands of members and rebroadcasts this every frame (§9.1's per-frame
@@ -47,8 +47,8 @@ import particlesim.surface.Surface
  * mechanism if that's ever wanted; this registry deliberately doesn't attempt that finer
  * addressing.
  *
- * Names are unique **within their own kind** (forces, constraints, surfaces), not globally — a
- * force and a surface may share a name with no ambiguity, since the outliner lists them in
+ * Names are unique **within their own kind** (forces, constraints, surfaces, lights), not
+ * globally — a force and a surface may share a name with no ambiguity, since the outliner lists them in
  * separate sections. A duplicate name within the same kind is an authoring mistake (an ambiguous
  * outliner entry with no way to tell which object it actually refers to) and fails eagerly at
  * construction, the same "validates eagerly" stance [LineRenderer] already takes. Groups need no
@@ -65,6 +65,7 @@ class SceneRegistry private constructor(
     val colliders: Map<String, Collider>,
     val groupEnabled: Map<String, Boolean>,
     val emitters: Map<String, Emitter>,
+    val lights: Map<String, Light>,
 ) {
     companion object {
         fun build(
@@ -74,6 +75,7 @@ class SceneRegistry private constructor(
             groups: Groups = Groups(),
             colliders: List<Collider> = emptyList(),
             emitters: List<Emitter> = emptyList(),
+            lights: List<Light> = emptyList(),
         ): SceneRegistry =
             SceneRegistry(
                 forces = uniqueByName(forces.filter { it.name != null }) { it.name!! },
@@ -89,10 +91,15 @@ class SceneRegistry private constructor(
                 // Groups.isEnabled is itself a live read, not something this class retains a
                 // reference to.
                 groupEnabled = groups.names().associateWith { name -> groups.isEnabled(name) },
-                // Unlike forces/constraints/surfaces, Emitter.name is never null - every emitter
+                // Unlike forces/constraints/surfaces/lights, Emitter.name is never null - every emitter
                 // is scene-authored identity from construction, so this is unique-by-name over
                 // the whole list, no null-filtering needed.
                 emitters = uniqueByName(emitters) { it.name },
+                // Same opt-in-by-naming convention as forces/constraints/surfaces - an unnamed
+                // Light still lights the scene (it's still in SceneFrame.lights, still reaches
+                // BinaryFrame's per-frame render section), it's just not individually reachable
+                // in the outliner or editable via §10.4's field mechanism.
+                lights = uniqueByName(lights.filter { it.name != null }) { it.name!! },
             )
 
         private fun <T> uniqueByName(items: List<T>, nameOf: (T) -> String): Map<String, T> {

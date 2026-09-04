@@ -132,6 +132,8 @@
       <div id="outlinerColliders"></div>
       <h4>emitters</h4>
       <div id="outlinerEmitters"></div>
+      <h4>lights</h4>
+      <div id="outlinerLights"></div>
     </div>
     <div id="objectPanel">
       <div id="objectPanelTitle"></div>
@@ -881,7 +883,8 @@ function decodeFrame(buffer) {
     const count = view.getInt32(offset, true); offset += 4;
     const entries = new Array(count);
     for (let i = 0; i < count; i++) {
-      const kind = view.getUint8(offset) === 0 ? "force" : "constraint"; offset += 1;
+      const kindByte = view.getUint8(offset); offset += 1;
+      const kind = kindByte === 0 ? "force" : kindByte === 1 ? "constraint" : "light";
       const name = readString();
       const field = readString();
       const valueKind = view.getUint8(offset); offset += 1;
@@ -1053,6 +1056,10 @@ function decodeFrame(buffer) {
     emitters: readEmitterEntryList(),
     winds: readWindEntryList(),
     particleExpressions: readParticleExpressionEntryList(),
+    // §10.3's outliner reaching named lights - a plain name list, same shape as
+    // forces/constraints/surfaces above; a light's live color/intensity/position travel through
+    // `fields` above instead (kind "light"), not duplicated here.
+    lights: readNameList(),
   };
 
   // §10.2's "debug/--render-all mode... draws every collider as wireframe" - unconditional,
@@ -1369,7 +1376,7 @@ const objectPanelTitleEl = document.getElementById("objectPanelTitle");
 const objectPanelBodyEl = document.getElementById("objectPanelBody");
 
 let lastRegistrySignature = null;
-let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [], colliders: [], groupEnabled: {}, fields: [], emitters: [], winds: [], particleExpressions: [] };
+let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [], colliders: [], groupEnabled: {}, fields: [], emitters: [], winds: [], particleExpressions: [], lights: [] };
 let selectedKind = null; // "groups" | "forces" | "constraints" | "surfaces" | "colliders"
 let selectedName = null;
 let latestVisibleIds = null; // this frame's server-side dot filter, updated every frame in applyFrame
@@ -1429,6 +1436,12 @@ function registrySignature(registry) {
     // values that refresh via the emitters module's updateLive hook (skipping a focused input),
     // not signature-driven rebuilds; only the *set* of emitters belongs here.
     emitters: registry.emitters.map((e) => e.name),
+    // Names only, same reasoning as emitters above - a light's color/intensity/position are live
+    // values read through latestRegistry.fields (updateEditableFieldsLive), refreshed every
+    // frame without a panel rebuild; putting them here would rebuild (and clobber an in-progress
+    // edit on) the panel every single frame a named light exists, since at least one of its
+    // fields changes essentially continuously once anything is editing it.
+    lights: registry.lights,
   });
 }
 
@@ -1615,13 +1628,14 @@ function renderNameList(container, kind, names) {
 // its own container from scratch), so registering is purely additive to what's already on the
 // page - section order and header text stay exactly where the page put them.
 //
-// All six kinds are registered here - "groups" (a toggle, live info text, *and* live inspection),
+// Every kind is registered here - "groups" (a toggle, live info text, *and* live inspection),
 // "forces" (a per-force arrow-visibility toggle, real only when that force has arrow samples this
 // frame, plus editable fields), "constraints" (editable fields only - §10.2 defines no constraint
 // renderer), "surfaces" (a mesh-visibility toggle plus live triangle/vertex-speed inspection),
-// "colliders" (an active toggle, a remove button, and the collider's shape when active), and
-// "particles" (§10.3's one kind with no outliner presence at all - see its own registration
-// below for why).
+// "colliders" (an active toggle, a remove button, and the collider's shape when active),
+// "emitters" (editable rate/maxAlive/capPolicy) and "lights" (editable fields only, same shape as
+// "constraints" - color/intensity/position, no renderer of its own) - plus "particles" (§10.3's
+// one kind with no outliner presence at all - see its own registration below for why).
 const entityKindModules = new Map(); // kind -> { getNames(registry)?, renderPanel(), updateLive()? }
 
 // getNames is the one optional hook: a kind that omits it (particles - there are potentially
@@ -1964,6 +1978,22 @@ registerEntityKind({
     }
   },
   updateLive: () => updateEditableFieldsLive("constraint", selectedName, currentFieldInputs),
+});
+
+// A named Light is always EditableFields (Light.editableFields is a default interface method, no
+// per-instance opt-in check needed, unlike forces/constraints above) - every named light has
+// color/intensity, and a Directional/Point also has position, so unlike constraints there's no
+// "no editable fields" fallback note to show. "color" reuses the generic x/y/z vector-field
+// input (renderEditableFields already renders FieldValue.Vector that way) rather than a color
+// picker - see Light.editableFields's own doc comment for why.
+registerEntityKind({
+  kind: "lights",
+  getNames: (registry) => registry.lights,
+  renderPanel: () => {
+    currentFieldInputs = {};
+    renderEditableFields("light", selectedName, currentFieldInputs);
+  },
+  updateLive: () => updateEditableFieldsLive("light", selectedName, currentFieldInputs),
 });
 
 registerEntityKind({

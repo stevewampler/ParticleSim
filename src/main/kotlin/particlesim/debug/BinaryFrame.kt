@@ -74,7 +74,7 @@ import java.nio.charset.StandardCharsets
  *                                                            i32 memberCount, memberCount * i32 id }
  * i32  registryColliderCount;   registryColliderCount   * { i32 nameLen, nameLen UTF-8 bytes, u8 active }
  * i32  registryGroupEnabledCount; registryGroupEnabledCount * { i32 nameLen, nameLen UTF-8 bytes, u8 enabled }
- * i32  registryFieldCount;      registryFieldCount      * { u8 kind (0=force, 1=constraint),
+ * i32  registryFieldCount;      registryFieldCount      * { u8 kind (0=force, 1=constraint, 2=light),
  *                                                            i32 nameLen, nameLen UTF-8 bytes,
  *                                                            i32 fieldNameLen, fieldNameLen UTF-8 bytes,
  *                                                            u8 valueKind (0=scalar, 1=vector),
@@ -97,6 +97,14 @@ import java.nio.charset.StandardCharsets
  *                                  emitter/wind that never had one either, same "empty means
  *                                  absent" convention every other optional string in this
  *                                  format already uses)
+ * i32  registryLightCount;      registryLightCount      * { i32 nameLen, nameLen UTF-8 bytes }
+ *                                  (§10.3's outliner reaching named lights, same name-list shape
+ *                                  as registryForceCount/registryConstraintCount/
+ *                                  registrySurfaceCount above — an unnamed Light still lights the
+ *                                  scene via the unconditional lights section below, it's just
+ *                                  not individually reachable here; its live color/intensity/
+ *                                  position travel through the registryFieldCount section above
+ *                                  like any other EditableFields entity, not duplicated here)
  * i32  colliderCount
  * colliderCount * { u8 kind (0=plane, 1=sphere, 2=box), i32 nameLen, nameLen UTF-8 bytes,
  *                    f64 px, py, pz,
@@ -255,6 +263,7 @@ object BinaryFrame {
     private const val PARTICLE_SPAWNED_KIND: Byte = 2
     private const val FORCE_KIND: Byte = 0
     private const val CONSTRAINT_KIND: Byte = 1
+    private const val LIGHT_FIELD_KIND: Byte = 2
     private const val SCALAR_KIND: Byte = 0
     private const val VECTOR_KIND: Byte = 1
 
@@ -306,6 +315,7 @@ object BinaryFrame {
             emitterEntryListSize(emitterEntries) +
             windEntryListSize(windEntries) +
             particleExpressionEntryListSize(particleExpressionEntries) +
+            nameListSize(registry.lights.keys) +
             COLLIDER_HEADER_SIZE + colliders.sumOf { colliderEntrySize(it) } +
             EVENT_HEADER_SIZE + events.sumOf { eventEntrySize(it) } +
             nameListSize(availableScenes) + stringSize(activeScene) +
@@ -399,7 +409,13 @@ object BinaryFrame {
         }
         buffer.putInt(fieldEntries.size)
         for (entry in fieldEntries) {
-            buffer.put(if (entry.kind == "force") FORCE_KIND else CONSTRAINT_KIND)
+            buffer.put(
+                when (entry.kind) {
+                    "force" -> FORCE_KIND
+                    "constraint" -> CONSTRAINT_KIND
+                    else -> LIGHT_FIELD_KIND
+                },
+            )
             putString(buffer, entry.name)
             putString(buffer, entry.field)
             when (val value = entry.value) {
@@ -427,6 +443,7 @@ object BinaryFrame {
             putString(buffer, entry.field)
             putString(buffer, entry.source)
         }
+        putNameList(buffer, registry.lights.keys)
         buffer.putInt(colliders.size)
         for (collider in colliders) {
             when (collider) {
@@ -454,11 +471,7 @@ object BinaryFrame {
         putString(buffer, activeScene)
         buffer.putInt(lights.size)
         for (light in lights) {
-            val position = when (light) {
-                is Light.Ambient -> Vector3(0.0, 0.0, 0.0)
-                is Light.Directional -> light.position
-                is Light.Point -> light.position
-            }
+            val position = if (light is Light.Positioned) light.position else Vector3(0.0, 0.0, 0.0)
             buffer.put(
                 when (light) {
                     is Light.Ambient -> AMBIENT_LIGHT_KIND
@@ -552,6 +565,7 @@ object BinaryFrame {
             emitters = getEmitterEntryList(buf),
             winds = getWindEntryList(buf),
             particleExpressions = getParticleExpressionEntryList(buf),
+            lights = getNameList(buf),
         )
         val colliderCount = buf.int
         val colliders = (0 until colliderCount).map {
@@ -641,6 +655,12 @@ object BinaryFrame {
         for ((name, constraint) in registry.constraints) {
             if (constraint !is EditableFields) continue
             for ((field, value) in constraint.editableFields()) entries += RegistryFieldEntry("constraint", name, field, value)
+        }
+        // Every named Light is EditableFields (see Light's own doc comment) - no per-entity
+        // instanceof check needed, unlike forces/constraints above where most implementations
+        // don't opt in.
+        for ((name, light) in registry.lights) {
+            for ((field, value) in light.editableFields()) entries += RegistryFieldEntry("light", name, field, value)
         }
         return entries
     }
@@ -760,7 +780,13 @@ object BinaryFrame {
     private fun getFieldEntryList(buffer: ByteBuffer): List<DecodedFieldEntry> {
         val count = buffer.int
         return (0 until count).map {
-            val kind = if (buffer.get() == FORCE_KIND) "force" else "constraint"
+            val kindByte = buffer.get()
+            val kind = when (kindByte) {
+                FORCE_KIND -> "force"
+                CONSTRAINT_KIND -> "constraint"
+                LIGHT_FIELD_KIND -> "light"
+                else -> error("unknown field-entry kind byte: $kindByte")
+            }
             val name = getString(buffer)
             val field = getString(buffer)
             val value = if (buffer.get() == SCALAR_KIND) FieldValue.Scalar(buffer.double) else FieldValue.Vector(getVector(buffer))
@@ -915,6 +941,7 @@ data class DecodedRegistry(
     val emitters: List<DecodedEmitterEntry> = emptyList(),
     val winds: List<DecodedWindEntry> = emptyList(),
     val particleExpressions: List<DecodedParticleExpressionEntry> = emptyList(),
+    val lights: List<String> = emptyList(),
 )
 
 data class DecodedFrame(

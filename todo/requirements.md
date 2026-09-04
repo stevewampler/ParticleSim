@@ -958,9 +958,10 @@ readout to debug a scene without a separate tool.
   the ground grid and axes (§10) — can be switched on/off independent of
   everything else.
 - **An outliner**: a persistent, always-available list of every group,
-  named force, constraint, collider, and surface in the scene, regardless
-  of whether anything currently renders it. This is the answer to "how do
-  I reach an object's UI when it isn't visible" — right-click-in-3D (below)
+  named force, constraint, collider, surface, emitter, and light in the
+  scene, regardless of whether anything currently renders it. This is the
+  answer to "how do I reach an object's UI when it isn't visible" —
+  right-click-in-3D (below)
   only works on something already on screen, so a parallel list is what
   makes an *invisible* force or an unrendered group's settings reachable
   at all. Selecting an entry opens the same per-object panel a right-click
@@ -1027,12 +1028,15 @@ readout to debug a scene without a separate tool.
   **forces** (a per-force arrow-visibility toggle, real only when that
   force has arrow samples in the current frame — see §10.2's arrow-sample
   wire format, now grouped by source-force name for exactly this reason),
-  and **constraints/surfaces/colliders** (migrated onto this same module
+  **constraints/surfaces/colliders** (migrated onto this same module
   system from an older hardcoded dispatch path that predated it — see
-  `todo/TODO.md`). Each kind's own module is also where kind-specific
-  rendering settings would live (e.g. a future lighting/materials control
-  panel, once that `[stretch]` item is built) instead of one more
-  hardcoded case.
+  `todo/TODO.md`), and **emitters/lights** (editable fields only, same
+  minimal shape as constraints — a light has no renderer of its own to
+  toggle, just `color`/`intensity`/`position` to edit, see `todo/TODO.md`'s
+  own entry). Each kind's own module is where kind-specific rendering
+  settings live, this generalization's whole point — a new visualizable
+  kind's control panel, not one more hardcoded case in shared dispatch
+  code.
 
 ### 10.4 Live editing (viewer writes back into the running simulation)
 

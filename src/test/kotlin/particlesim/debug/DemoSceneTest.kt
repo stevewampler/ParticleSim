@@ -89,6 +89,30 @@ class DemoSceneTest {
     }
 
     @Test
+    fun `applies a scalar and vector field edit to the matching named light`() {
+        val light = particlesim.render.Light.Point(position = Vector3.ZERO, name = "sun")
+        applyEditableFieldMessage(
+            SceneControlMessage.SetScalarField("light", "sun", "intensity", 3.0),
+            forces = emptyList(),
+            constraints = emptyList(),
+            store = ParticleStore(),
+            t = 0.0,
+            lights = listOf(light),
+        )
+        val handled = applyEditableFieldMessage(
+            SceneControlMessage.SetVectorField("light", "sun", "position", Vector3(1.0, 2.0, 3.0)),
+            forces = emptyList(),
+            constraints = emptyList(),
+            store = ParticleStore(),
+            t = 0.0,
+            lights = listOf(light),
+        )
+        assertTrue(handled)
+        assertEquals(3.0, light.intensity)
+        assertEquals(Vector3(1.0, 2.0, 3.0), light.position)
+    }
+
+    @Test
     fun `a field edit for a name that doesn't match anything is silently ignored, not an error`() {
         val gravity = UniformGravity("g", Vector3(0.0, -9.8, 0.0), name = "gravity")
         val handled = applyEditableFieldMessage(

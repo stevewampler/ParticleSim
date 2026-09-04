@@ -4195,6 +4195,133 @@ on its own - the others are real, code-verified bugs regardless.
       landed back at the clean default framing every time, not the
       previous scene's stale orbit point.
 
+## Lights reach the outliner and become live-editable (§10.2/§10.3/§10.4, follow-up) — not yet phased
+- [x] Named lights are now a seventh outliner kind, alongside groups/
+      forces/constraints/surfaces/colliders/emitters, and are individually
+      selectable/editable the same way a force or constraint is — closing
+      the one gap the earlier "Lighting & materials" `[stretch]` item left
+      behind: lights rendered correctly, but there was no way to *see*
+      that a scene had them or change one without editing Kotlin source
+      and restarting. Directly requested by the user after using the
+      trampoline scene's custom lighting: "How can I tell if the lighting
+      and materials are working? Can you list the lights along with all
+      of the other entities... I'd also like to see and edit a light's
+      properties after selecting one."
+      **`Light` gained a name and became mutable/`EditableFields`** —
+      `particlesim.render.Light`'s three variants (`Ambient`/
+      `Directional`/`Point`) went from immutable `val`-only data classes
+      to `var color`/`var intensity` (and `var position` on the two that
+      have one), plus `name: String?`, following the exact same "named
+      like a Force/Constraint, opt-in to the outliner by naming it"
+      convention `SceneRegistry` already applies to those three kinds —
+      an unnamed light still lights the scene (still reaches
+      `SceneFrame.lights`/`BinaryFrame`'s unconditional render section),
+      it's just not individually reachable. Data-class-ness (with `var`
+      properties, which Kotlin allows) was kept specifically so
+      `equals`/`hashCode`/`copy` still work for tests and logging, despite
+      the mutability that makes `EditableFields.setField` possible —
+      documented directly on `Light` as a "never use one as a `Map` key or
+      `Set` member" caveat, since its hash code now changes on every edit.
+      A new `Light.Positioned` sealed interface (implemented by
+      `Directional`/`Point`, not `Ambient`) lets `editableFields()`/
+      `setField()` live once on the `Light` interface itself (as default
+      methods, dispatching via `is Positioned`) instead of duplicated per
+      subtype, and collapses `BinaryFrame`'s existing light-encoding
+      `when` (which extracted `position` per-kind) down to one branch.
+      `color` deliberately reuses `FieldValue.Vector` (three doubles) —
+      zero new wire shape, and the existing generic x/y/z numeric-input UI
+      (`renderEditableFields` client-side) already renders it — accepting
+      that the panel shows a color as three boxes labeled by position
+      semantics (x/y/z), not a dedicated color picker; documented as a
+      deliberate tradeoff on `Light.editableFields`'s own doc comment.
+      **Wire protocol**: `SceneRegistry.build` gained a `lights: List<Light>
+      = emptyList()` parameter, filtered to named entries into
+      `Map<String, Light>` exactly like forces/constraints/surfaces.
+      `BinaryFrame` gained a `registryLightCount` name-list section
+      (same shape as the force/constraint/surface ones) right after the
+      existing particle-expression-source section, and
+      `collectEditableFields` now also walks `registry.lights` unconditionally
+      (every `Light` is `EditableFields` — no per-entity `is EditableFields`
+      check needed, unlike forces/constraints where most don't opt in),
+      tagging entries `kind = "light"`. The existing `(kind, name, field)`
+      field-entry wire section's `kind` byte grew a third value
+      (`LIGHT_FIELD_KIND`, named to avoid confusion with the unrelated
+      ambient/directional/point light-*type* byte already in this same
+      file) — its decoder now matches every neighboring kind-byte decoder
+      in this file's own convention of `error("unknown ... kind byte")` on
+      anything unrecognized, rather than silently defaulting to "light"
+      the way an earlier draft of this change did (caught by review before
+      shipping, not by a test — no test exercises byte 3+ deliberately).
+      This is a genuinely new wire section threaded through four parse
+      sites that all have to agree byte-for-byte (Kotlin `encode`,
+      Kotlin `decode`, this file's own layout doc comment, and
+      `viewer.html`'s hand-written `decodeFrame`) — a mismatch anywhere
+      shows up as garbage in an unrelated section (exactly the class of
+      bug the flag-texture `RangeError` storm from an earlier session
+      was), which is why the four were updated together in one pass and
+      why the live Chrome check (below) specifically exercised the panel,
+      not just the Kotlin-side round-trip test.
+      **`applyEditableFieldMessage` gained a third, defaulted `lights:
+      List<Light> = emptyList()` parameter** alongside `forces`/
+      `constraints`, so the nine existing call sites across every
+      `DemoScene` needed zero changes — only `TrampolineScene` (the one
+      scene with any named lights so far) passes a real list.
+      **Client side** (`viewer.html`): a new `<h4>lights</h4>`/
+      `#outlinerLights` section in the page's own HTML, and a `"lights"`
+      entity-kind module registered the same minimal way `"constraints"`
+      already is (editable fields only, no renderer of its own) —
+      `renderPanel`/`updateLive` both just call the existing
+      `renderEditableFields`/`updateEditableFieldsLive("light", ...)`
+      helpers, no new UI-building code needed since a light's fields are
+      plain scalar/vector `EditableFields` entries like any other.
+      `registrySignature` includes `registry.lights` as a **name list
+      only** — explicitly not color/intensity/position, matching the
+      `emitters` entry directly above it in the same function and for the
+      same reason: those values change on essentially every frame once
+      anything is editing a light, and putting them in the signature would
+      rebuild (and clobber an in-progress edit in) the panel every single
+      frame instead of only when the *set* of lights changes.
+      **`TrampolineScene`'s three lights were named** (`ambient-fill`,
+      `sun`, `bounce-highlight`) specifically so the scene's own point
+      ("lights are actually configurable") is real from the UI, not just
+      from reading the source, and threaded into both
+      `SceneRegistry.build(..., lights = lights)` and
+      `applyEditableFieldMessage(..., lights)` — two separate wiring
+      points in the same file that a review pass had to fix once already
+      earlier this session (the missing `lights = lights` argument to
+      `SceneFrame(...)` itself, from the "Lighting & materials" item
+      above) — a reminder that "compiles" doesn't mean "wired," so this
+      time the wiring was verified by behavior (outliner listing, a live
+      edit, and the edit surviving the next frame) rather than by reading
+      the code.
+      New tests: `LightTest` (an ambient light's field set excludes
+      `position`; a directional/point light's includes it; `setField`
+      mutates `color`/`intensity`/`position` in place; rejects a position
+      edit on an ambient light and any unrecognized field or wrong-kind
+      value). `SceneRegistryTest` (only named lights register, alongside
+      the existing forces/constraints/surfaces case). `DemoSceneTest`
+      (a scalar and vector field edit routes to a matching named light).
+      `BinaryFrameTest` (a named light's name reaches the registry list
+      and its live color/intensity/(position) round-trip as `kind="light"`
+      field entries; an unnamed light reaches the unconditional render
+      section but neither the outliner name list nor the field-entry
+      list).
+      **Verified live in Chrome** on `trampoline`: all three named lights
+      appear under a new "LIGHTS" outliner section; selecting
+      `ambient-fill` (no position row) vs. `bounce-highlight` (has one)
+      confirmed the per-kind field set is correct; set
+      `bounce-highlight`'s `intensity` to `0` and watched the mat's
+      highlight visibly flatten, confirmed the panel's own field still
+      read `0` several frames later (not clobbered back to `45` — proof
+      the edit landed on the live object, not a copy), then restored it
+      and watched the highlight return; separately set its `color` to a
+      strong blue and watched the highlight visibly tint blue, then
+      reverted it. Switched to `flag` (no named lights) and confirmed
+      "LIGHTS (none)"; switched back to `trampoline` and confirmed all
+      three lights and the custom rig recovered correctly. No console
+      errors (only the known-benign Chrome-extension noise) throughout.
+      Full `./gradlew test -q` suite green.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created
