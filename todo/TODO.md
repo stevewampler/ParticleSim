@@ -4361,6 +4361,23 @@ on its own - the others are real, code-verified bugs regardless.
       color/intensity/position, the flag renders vividly under it, and it
       survives a `flag` → `flagOnRope` round-trip switch. No console
       errors. Full test suite green.
+      **Follow-up, same session**: `FlagOnRopeScene` also gained a named
+      `Light.Ambient` (`ambient-fill`, white, intensity `0.4`) alongside
+      `sun` — the viewer's own default-lighting fallback this scene's
+      lights replace was a hemisphere-plus-directional pair, not a bare
+      directional; a lone `sun` (added just above) has nothing filling in
+      its shadowed side/underside the way the hemisphere light's sky/
+      ground split used to. A plain `Ambient` can't reproduce a
+      hemisphere's sky/ground split, but a modest flat fill covers the
+      same "shadows aren't pitch black" purpose without a second key
+      light competing with `sun`. `flag` (the pole-pinned scene) wasn't
+      given the same treatment - not an oversight, just not asked for.
+      Verified live in Chrome: `ambient-fill` lists alongside `sun` in the
+      outliner; its panel correctly shows only `color`/`intensity` (no
+      `position` row, matching `TrampolineScene`'s own `ambient-fill`);
+      the flag's shadowed folds read with visible detail rather than
+      crushing to black; both lights survive a `flag` → `flagOnRope`
+      round-trip switch. No console errors. Full test suite green.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

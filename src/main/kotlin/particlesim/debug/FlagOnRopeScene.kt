@@ -179,8 +179,18 @@ class FlagOnRopeScene : DemoScene {
     // Same named "sun" as FlagScene, same reasoning: clothMesh is textured with no declared
     // Material (resolves to Material.UNTINTED), so a plain white light at the viewer's own
     // default-sun position/intensity keeps this scene looking the way it already did under the
-    // default-lighting fallback, while making it reachable/editable from the outliner.
-    private val lights = listOf(Light.Directional(position = Vector3(5.0, 10.0, 7.0), intensity = 0.8, name = "sun"))
+    // default-lighting fallback, while making it reachable/editable from the outliner. A modest
+    // white "ambient-fill" alongside it (TrampolineScene's naming convention) keeps the flag's
+    // shadowed side/underside from crushing to pure black now that this scene's own lights
+    // replace the viewer's hemisphere-plus-sun fallback, which had a soft sky/ground fill built
+    // in - a plain Ambient can't reproduce that sky/ground split, but a modest flat fill covers
+    // the same "shadows aren't pitch black" purpose. 0.4, not something brighter: it's a fill,
+    // not a second key light - washing it out would defeat the point of having sun/ambient as two
+    // separately editable lights.
+    private val lights = listOf(
+        Light.Directional(position = Vector3(5.0, 10.0, 7.0), intensity = 0.8, name = "sun"),
+        Light.Ambient(intensity = 0.4, name = "ambient-fill"),
+    )
     private val registry = SceneRegistry.build(
         forces = scenario.forces, constraints = scenario.constraints, surfaces = listOf(scenario.flagSurface), groups = scenario.groups,
         lights = lights,
