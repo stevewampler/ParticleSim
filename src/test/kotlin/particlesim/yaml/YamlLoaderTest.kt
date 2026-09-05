@@ -734,4 +734,98 @@ class YamlLoaderTest {
         val ex = assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
         assertTrue(ex.message!!.contains("stiffness"))
     }
+
+    // --- Phase 4 of the YAML second pass: fixed_velocity constraint, colliders -----------------
+
+    @Test
+    fun `fixed_velocity constraint carries the given velocity and optional name`() {
+        val yaml = minimalGrid(
+            """
+            constraints:
+              - fixed_velocity:
+                  group: g
+                  velocity: [1.0, 0.0, 0.0]
+                  name: conveyor
+            """.trimIndent(),
+        )
+        val scenario = YamlLoader().load(yaml)
+        val constraint = scenario.constraints.single() as particlesim.physics.FixedVelocity
+        assertEquals("conveyor", constraint.name)
+        assertEquals(FieldValue.Vector(Vector3(1.0, 0.0, 0.0)), constraint.editableFields()["velocity"])
+    }
+
+    @Test
+    fun `a plane collider is declared with a literal position and normal`() {
+        val yaml = minimalGrid(
+            """
+            colliders:
+              - plane:
+                  name: floor
+                  position: [0.0, 0.0, 0.0]
+                  normal: [0.0, 1.0, 0.0]
+            """.trimIndent(),
+        )
+        val scenario = YamlLoader().load(yaml)
+        val floor = scenario.colliders.getValue("floor")
+        assertTrue(floor is particlesim.collision.PlaneCollider)
+        assertEquals(Vector3.ZERO, floor.position)
+    }
+
+    @Test
+    fun `a sphere collider's position accepts an expression string for moving colliders`() {
+        val yaml = minimalGrid(
+            """
+            colliders:
+              - sphere:
+                  name: obstacle
+                  position: "[0.0, 2.0 + t, 0.0]"
+                  radius: 0.5
+            """.trimIndent(),
+        )
+        val scenario = YamlLoader().load(yaml)
+        val obstacle = scenario.colliders.getValue("obstacle") as particlesim.collision.SphereCollider
+        assertEquals(0.5, obstacle.radius)
+        obstacle.advance(3.0, 1e-3)
+        assertEquals(Vector3(0.0, 5.0, 0.0), obstacle.position)
+    }
+
+    @Test
+    fun `a box collider carries its half-extents`() {
+        val yaml = minimalGrid(
+            """
+            colliders:
+              - box:
+                  name: wall
+                  position: [5.0, 0.0, 0.0]
+                  half_extents: [0.1, 2.0, 2.0]
+            """.trimIndent(),
+        )
+        val scenario = YamlLoader().load(yaml)
+        val wall = scenario.colliders.getValue("wall") as particlesim.collision.BoxCollider
+        assertEquals(Vector3(0.1, 2.0, 2.0), wall.halfExtents)
+    }
+
+    @Test
+    fun `duplicate collider names are a load-time error`() {
+        val yaml = minimalGrid(
+            """
+            colliders:
+              - plane: { name: floor, position: [0.0, 0.0, 0.0], normal: [0.0, 1.0, 0.0] }
+              - plane: { name: floor, position: [0.0, 1.0, 0.0], normal: [0.0, 1.0, 0.0] }
+            """.trimIndent(),
+        )
+        val ex = assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+        assertTrue(ex.message!!.contains("floor"))
+    }
+
+    @Test
+    fun `an unknown collider type is a load-time error`() {
+        val yaml = minimalGrid(
+            """
+            colliders:
+              - not_a_real_collider: {}
+            """.trimIndent(),
+        )
+        assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+    }
 }

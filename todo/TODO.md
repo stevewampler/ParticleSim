@@ -4549,6 +4549,26 @@ declarations (nothing needs one).
       path (flag.yaml gives no extension/compression overrides, so its
       three `mesh_springs` blocks exercise exactly the "falls back to the
       base value" branch every existing golden sample already depends on).
+- [x] **Phase 4 — constraints and colliders.** `fixed_velocity` joins
+      `fixed_position` in `constraints:` (plain `Vector3`, `EditableFields`,
+      matching `FixedVelocity`'s own constructor exactly); `fixed_position`
+      also gained `name:` support in the same pass (it, like the forces in
+      Phase 3, had none before). New top-level `colliders:` section —
+      `plane`/`sphere`/`box`, each **requiring** `name:` (unlike a force's
+      optional one — an unnamed collider could never be referenced by
+      anything that needs to target it) and an expression-capable
+      `position` (`VectorExpr`, so a moving collider — §12.2/§12.5 — is
+      expressible directly: `position: "[0.0, 2.0 + t, 0.0]"`). A duplicate
+      collider name is a load-time error, same tier as every other
+      duplicate-name check in this codebase. `YamlScenario` gained a
+      `colliders: Map<String, Collider>` field for Phase 5 to reference.
+      New `YamlLoaderTest` cases (6): `fixed_velocity`'s field/name,
+      plane/sphere/box each with their own shape-specific field
+      (`SphereCollider.radius`, `BoxCollider.halfExtents`, both public
+      `val`s), a sphere's expression-string position actually advancing
+      correctly over time (`advance(t, dt)` then checking `position`),
+      duplicate-name error, unknown-collider-type error.
+      Full `./gradlew test -q` suite green.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

@@ -1,6 +1,10 @@
 package particlesim.yaml
 
 import org.yaml.snakeyaml.Yaml
+import particlesim.collision.BoxCollider
+import particlesim.collision.Collider
+import particlesim.collision.PlaneCollider
+import particlesim.collision.SphereCollider
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.ScalarExpr
@@ -10,6 +14,7 @@ import particlesim.physics.ConstantForce
 import particlesim.physics.Constraint
 import particlesim.physics.Drag
 import particlesim.physics.FixedPosition
+import particlesim.physics.FixedVelocity
 import particlesim.physics.Force
 import particlesim.physics.MeshSprings
 import particlesim.physics.NBodyGravity
@@ -27,6 +32,9 @@ data class YamlScenario(
      * caller (e.g. a golden-file test) sample specific `grid[row][col]` vertices the same way
      * [particlesim.examples.FlagScenario.grid] does, without hardcoding id arithmetic. */
     val grids: Map<String, List<List<Int>>>,
+    /** Phase 4 of the YAML front-end's second pass: every top-level `colliders:` declaration,
+     * keyed by its (required) name — referenced by Phase 5's `collisions:`/`destroy:` sections. */
+    val colliders: Map<String, Collider> = emptyMap(),
 )
 
 /**
@@ -84,12 +92,13 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
 
         val forces = loadForces(root, store, grids, ::requireKnownGroup)
         val constraints = loadConstraints(root, store, groups, ::requireKnownGroup)
+        val colliders = loadColliders(root)
 
         for (name in groupNames) {
             if (groups.membersOf(name).isEmpty()) onWarning("group '$name' matches zero particles")
         }
 
-        return YamlScenario(store, groups, forces, constraints, grids)
+        return YamlScenario(store, groups, forces, constraints, grids, colliders)
     }
 
     /** §4.2's group selector language (tags/ids/range), Phase 2 of the YAML front-end's second
@@ -517,16 +526,65 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
                     val f = map.requireMap("fixed_position", context)
                     val group = f.requireString("group", "$context.fixed_position")
                     requireKnownGroup(group, "$context.fixed_position.group")
+                    val name = f.optionalString("name")
                     constraints += if (f.optionalBoolean("at_current_positions", false)) {
-                        FixedPosition.atCurrentPositions(group, store, groups)
+                        FixedPosition.atCurrentPositions(group, store, groups, name = name)
                     } else {
-                        FixedPosition(group, f.requireVectorLiteral("position", "$context.fixed_position"))
+                        FixedPosition(group, f.requireVectorLiteral("position", "$context.fixed_position"), name = name)
                     }
                 }
-                else -> throw YamlLoadException("$context: unknown constraint type (expected: fixed_position)")
+                map.containsKey("fixed_velocity") -> {
+                    val f = map.requireMap("fixed_velocity", context)
+                    val group = f.requireString("group", "$context.fixed_velocity")
+                    requireKnownGroup(group, "$context.fixed_velocity.group")
+                    val velocity = f.requireVectorLiteral("velocity", "$context.fixed_velocity")
+                    constraints += FixedVelocity(group, velocity, name = f.optionalString("name"))
+                }
+                else -> throw YamlLoadException("$context: unknown constraint type (expected one of: fixed_position, fixed_velocity)")
             }
         }
         return constraints
+    }
+
+    /** Phase 4's top-level `colliders:` section (§12.2) — named, infinite-mass geometry,
+     * referenced by name from Phase 5's `collisions:`/`destroy:` sections rather than declared
+     * inline there, the same "declare once, reference by name" shape `groups:` already uses.
+     * `position` is [particlesim.core.VectorExpr] (moving colliders, §12.2/§12.5); every other
+     * shape parameter (a plane's `normal`, a sphere's `radius`, a box's `half_extents`) is fixed
+     * at construction, matching what [particlesim.collision.Collider] itself marks
+     * expression-capable. `name` is required here (unlike a force's optional `name`) since a
+     * collider with no name could never be referenced by the sections that need to target it. */
+    private fun loadColliders(root: Map<*, *>): Map<String, Collider> {
+        val colliders = LinkedHashMap<String, Collider>()
+        for ((index, entry) in root.requireListOrEmpty("colliders", "root").withIndex()) {
+            val map = entry as? Map<*, *> ?: throw YamlLoadException("colliders[$index]: expected a mapping")
+            val context = "colliders[$index]"
+            val collider: Collider = when {
+                map.containsKey("plane") -> {
+                    val f = map.requireMap("plane", context)
+                    val position = f.requireVectorExpr("position", "$context.plane")
+                    val normal = f.requireVectorLiteral("normal", "$context.plane")
+                    PlaneCollider(position, normal, name = f.requireString("name", "$context.plane"))
+                }
+                map.containsKey("sphere") -> {
+                    val f = map.requireMap("sphere", context)
+                    val position = f.requireVectorExpr("position", "$context.sphere")
+                    val radius = f.requireDouble("radius", "$context.sphere")
+                    SphereCollider(position, radius, name = f.requireString("name", "$context.sphere"))
+                }
+                map.containsKey("box") -> {
+                    val f = map.requireMap("box", context)
+                    val position = f.requireVectorExpr("position", "$context.box")
+                    val halfExtents = f.requireVectorLiteral("half_extents", "$context.box")
+                    BoxCollider(position, halfExtents, name = f.requireString("name", "$context.box"))
+                }
+                else -> throw YamlLoadException("$context: unknown collider type (expected one of: plane, sphere, box)")
+            }
+            if (colliders.put(collider.name!!, collider) != null) {
+                throw YamlLoadException("$context: duplicate collider name '${collider.name}'")
+            }
+        }
+        return colliders
     }
 
     private fun resolveGrid(f: Map<*, *>, grids: Map<String, List<List<Int>>>, context: String): List<List<Int>> {
