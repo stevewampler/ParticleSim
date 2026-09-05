@@ -4477,6 +4477,43 @@ declarations (nothing needs one).
       Full `./gradlew test -q` suite green, including the pre-existing
       `FlagYamlParityTest` (unaffected — `flag.yaml` still uses the legacy
       map shorthand, which this phase left byte-for-byte unchanged).
+- [x] **Phase 2 — the tag/id/range selector language.** `groups:` entries
+      are now either the original plain string (no membership of its own,
+      just the zero-match-warning marker, unchanged) or
+      `{name, select: {tags: [...] | ids: [...] | range: {...}}}`, which
+      *does* populate real membership by resolving against Phase 1's
+      `tagIndex`/`authorIds`/`grids`. Required reordering `load()` so
+      `groups:` resolution now runs *after* `loadParticles` instead of
+      before it — a selector needs particle data to resolve against; a
+      plain string never did, so this is purely additive to the ordering,
+      not a behavior change for the pre-Phase-2 form. `tags` is AND across
+      every listed tag (a particle must carry all of them); an
+      unrecognized tag contributes zero matches rather than erroring,
+      consistent with §4.2's own "zero-match is a warning, not an error"
+      framing — contrast `ids`, where an author id no `list`/`single`
+      particle ever declared *is* a load-time error (the "unknown name"
+      tier, not "zero match"). `range: {grid, rows?, cols?}` is an
+      inclusive `[lo, hi]` block against a named Phase-1 grid, defaulting
+      to the grid's full extent when `rows`/`cols` is omitted;
+      out-of-bounds or an inverted `lo > hi` is a load-time error, not a
+      warning — a real authoring mistake, unlike an empty selector.
+      Multiple selector kinds in one `select:` block are **unioned**
+      (matches any) — the simplest additive rule, revisable later if a
+      scenario needs intersection instead. **Zero changes to `Groups.kt`
+      or `ParticleStore.kt`** — the whole selector mechanism resolves
+      entirely inside `YamlLoader.load()` and touches nothing else, exactly
+      the plan's scope-reduction decision (tags/author-ids are a load-time
+      addressing convenience, never a runtime concept).
+      New `YamlLoaderTest` cases (11): `tags` AND semantics, `ids`
+      resolution and its unknown-id error, `range` matching a grid
+      sub-block and defaulting to the whole grid, out-of-bounds range
+      error, zero-match selector warning (same path a stale plain-string
+      entry already used), mixed plain-string + selector entries in one
+      list, empty `select: {}` error, and a selector-defined group actually
+      resolving correctly when referenced later by a force's `group:`.
+      Full `./gradlew test -q` suite green, including `FlagYamlParityTest`
+      — `flag.yaml` uses no selectors, so the reordered `groups:` pass
+      resolves it identically to before.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

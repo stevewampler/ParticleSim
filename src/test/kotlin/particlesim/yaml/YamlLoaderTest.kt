@@ -413,4 +413,190 @@ class YamlLoaderTest {
         assertEquals(2, scenario.groups.membersOf("g").size)
         assertEquals(1, scenario.groups.membersOf("anchor").size)
     }
+
+    // --- Phase 2 of the YAML second pass: the tag/id/range selector language ------------------
+
+    @Test
+    fun `a tags selector matches every particle carrying all listed tags, AND not OR`() {
+        val yaml = """
+            version: 1
+            particles:
+              - list:
+                  name: debris
+                  particles:
+                    - position: [0.0, 0.0, 0.0]
+                      tags: [big, hot]
+                    - position: [1.0, 0.0, 0.0]
+                      tags: [big]
+                    - position: [2.0, 0.0, 0.0]
+                      tags: [hot]
+            groups:
+              - name: hot_big
+                select:
+                  tags: [big, hot]
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val debris = scenario.groups.membersOf("debris").sorted()
+        assertEquals(setOf(debris[0]), scenario.groups.membersOf("hot_big"))
+    }
+
+    @Test
+    fun `an ids selector matches particles by their declared author id`() {
+        val yaml = """
+            version: 1
+            particles:
+              - list:
+                  name: debris
+                  particles:
+                    - id: p1
+                      position: [0.0, 0.0, 0.0]
+                    - id: p2
+                      position: [1.0, 0.0, 0.0]
+            groups:
+              - name: picked
+                select:
+                  ids: [p2]
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val debris = scenario.groups.membersOf("debris").sorted()
+        assertEquals(setOf(debris[1]), scenario.groups.membersOf("picked"))
+    }
+
+    @Test
+    fun `an ids selector referencing an unknown author id is a load-time error`() {
+        val yaml = """
+            version: 1
+            particles:
+              - single: { name: anchor, position: [0.0, 0.0, 0.0] }
+            groups:
+              - name: picked
+                select:
+                  ids: [nonexistent]
+        """.trimIndent()
+        val ex = assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+        assertTrue(ex.message!!.contains("nonexistent"))
+    }
+
+    @Test
+    fun `a range selector matches an inclusive rectangular block of a named grid`() {
+        val yaml = """
+            version: 1
+            particles:
+              grid:
+                name: g
+                rows: 3
+                cols: 3
+                mass: 1.0
+            groups:
+              - name: leading_col
+                select:
+                  range: { grid: g, cols: [0, 0] }
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val grid = scenario.grids.getValue("g")
+        val expected = grid.map { it[0] }.toSet()
+        assertEquals(expected, scenario.groups.membersOf("leading_col"))
+    }
+
+    @Test
+    fun `a range selector with no rows or cols given selects the whole grid`() {
+        val yaml = """
+            version: 1
+            particles:
+              grid:
+                name: g
+                rows: 2
+                cols: 2
+                mass: 1.0
+            groups:
+              - name: whole
+                select:
+                  range: { grid: g }
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertEquals(4, scenario.groups.membersOf("whole").size)
+    }
+
+    @Test
+    fun `a range selector out of bounds is a load-time error`() {
+        val yaml = """
+            version: 1
+            particles:
+              grid:
+                name: g
+                rows: 2
+                cols: 2
+                mass: 1.0
+            groups:
+              - name: bad
+                select:
+                  range: { grid: g, rows: [0, 5] }
+        """.trimIndent()
+        assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+    }
+
+    @Test
+    fun `a selector matching zero particles warns but still loads, same as a stale plain-string entry`() {
+        val warnings = mutableListOf<String>()
+        val yaml = """
+            version: 1
+            particles:
+              - single: { name: anchor, position: [0.0, 0.0, 0.0], tags: [known] }
+            groups:
+              - name: empty_selector
+                select:
+                  tags: [nonexistent_tag]
+        """.trimIndent()
+        val scenario = YamlLoader(onWarning = { warnings.add(it) }).load(yaml)
+        assertEquals(1, scenario.store.size) // still loaded successfully
+        assertTrue(warnings.any { it.contains("empty_selector") })
+    }
+
+    @Test
+    fun `mixing plain-string and selector entries in one groups list works`() {
+        val yaml = """
+            version: 1
+            particles:
+              - single: { name: anchor, position: [0.0, 0.0, 0.0], tags: [known] }
+            groups:
+              - anchor
+              - name: by_tag
+                select:
+                  tags: [known]
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertEquals(scenario.groups.membersOf("anchor"), scenario.groups.membersOf("by_tag"))
+    }
+
+    @Test
+    fun `a select block with none of tags, ids, range is a load-time error`() {
+        val yaml = """
+            version: 1
+            particles:
+              - single: { name: anchor, position: [0.0, 0.0, 0.0] }
+            groups:
+              - name: bad
+                select: {}
+        """.trimIndent()
+        assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+    }
+
+    @Test
+    fun `a group reference elsewhere by a selector-defined name resolves correctly`() {
+        val yaml = """
+            version: 1
+            particles:
+              - single: { name: anchor, position: [0.0, 0.0, 0.0], tags: [known] }
+            groups:
+              - name: by_tag
+                select:
+                  tags: [known]
+            forces:
+              - gravity:
+                  group: by_tag
+                  acceleration: [0.0, -9.8, 0.0]
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertEquals(1, scenario.forces.size)
+    }
 }

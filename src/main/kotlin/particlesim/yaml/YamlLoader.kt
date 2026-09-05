@@ -38,14 +38,13 @@ data class YamlScenario(
  * real §4.2 scope but not covered here — noted in TODO.md as a deliberate second pass, the
  * same framing used for every other phase's worked-example-first scoping.
  *
- * **Group model, simplified for this schema**: there's no tag/id/range selector language yet
- * (§4.2's "selector"), just direct named-group assignment from a particle grid's own `name`/
- * `edge_groups`, plus an optional top-level `groups:` list purely to make a group's "declared
- * but currently unmatched" state distinguishable from "never declared" (§4.2's two required
- * semantic checks): a name in `groups:` with zero members after loading is a **warning**; a
- * `group:` reference anywhere else to a name that was never produced by *any* declaration is a
- * load-time **error**. A real selector system would give the zero-match warning a more natural
- * home; this is the narrowest thing that demonstrates both checks precisely as specified.
+ * **Group model**: a group's membership comes from a particle generator's own `name`/
+ * `edge_groups` (direct assignment), or from a top-level `groups:` entry — either a plain string
+ * (§4.2's "declared but currently unmatched" marker, no membership of its own) or
+ * `{name, select: {tags/ids/range}}`, §4.2's real selector language (Phase 2 of the second pass —
+ * see [resolveGroupsSection]). Both `groups:` forms share one required semantic check: a name
+ * with zero members after loading is a **warning**, not a silent no-op; a `group:` reference
+ * anywhere else to a name no declaration ever produced is a load-time **error**.
  */
 class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(it) }) {
 
@@ -63,17 +62,18 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         // Phase 1 of the YAML front-end's second pass (todo/TODO.md): a tag -> store-ids index
         // and an author-facing id -> store-id map, both loader-local and discarded once load()
         // returns - neither ParticleStore nor Groups gains a tags concept, keeping this entirely
-        // a load-time addressing convenience. Populated by loadParticles, consumed by Phase 2's
-        // groups: selector resolution (tags/ids/range) once that lands.
+        // a load-time addressing convenience. Populated by loadParticles, consumed below by
+        // Phase 2's groups: selector resolution (tags/ids/range).
         val tagIndex = HashMap<String, MutableSet<Int>>()
         val authorIds = HashMap<String, Int>()
 
-        val explicitGroups = root.requireListOrEmpty("groups", "root").map {
-            it as? String ?: throw YamlLoadException("groups: each entry must be a string")
-        }
-        declaredGroups += explicitGroups
-
+        // groups: resolution runs after loadParticles (not before, as the pre-Phase-2 version of
+        // this method did) since a selector entry needs tagIndex/authorIds/grids to already be
+        // populated - a plain-string entry doesn't strictly need this ordering, but there's no
+        // reason to special-case it separately from the selector form it now shares one list with.
         loadParticles(root, store, groups, grids, declaredGroups, tagIndex, authorIds)
+
+        val groupNames = resolveGroupsSection(root.requireListOrEmpty("groups", "root"), groups, grids, tagIndex, authorIds, declaredGroups)
 
         fun requireKnownGroup(name: String, context: String) {
             if (name !in declaredGroups) throw YamlLoadException("$context: unknown group '$name'")
@@ -82,11 +82,108 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         val forces = loadForces(root, store, grids, ::requireKnownGroup)
         val constraints = loadConstraints(root, store, groups, ::requireKnownGroup)
 
-        for (name in explicitGroups) {
+        for (name in groupNames) {
             if (groups.membersOf(name).isEmpty()) onWarning("group '$name' matches zero particles")
         }
 
         return YamlScenario(store, groups, forces, constraints, grids)
+    }
+
+    /** §4.2's group selector language (tags/ids/range), Phase 2 of the YAML front-end's second
+     * pass. Each `groups:` entry is either the original plain string (§4.2's "declared but
+     * currently unmatched" check — a real group's membership never comes from this form, only
+     * from a particle generator's own `name`/`edge_groups`) or `{name, select: {tags: [...],
+     * ids: [...], range: {...}}}`, which *does* populate real membership by resolving the
+     * selector against Phase 1's [tagIndex]/[authorIds]/`grids`. Both forms return their name for
+     * the shared zero-match warning check in [load] — a selector matching nothing is exactly as
+     * much a real authoring mistake as a stale `groups:` string, the "more natural home" this
+     * class's own doc comment already anticipated before this phase existed. Multiple selector
+     * kinds combined in one `select:` block are **unioned** (matches any) — the simplest additive
+     * rule, revisable if a scenario ever needs intersection instead. */
+    private fun resolveGroupsSection(
+        entries: List<*>, groups: Groups, grids: Map<String, List<List<Int>>>,
+        tagIndex: Map<String, Set<Int>>, authorIds: Map<String, Int>, declaredGroups: MutableSet<String>,
+    ): List<String> {
+        val names = ArrayList<String>()
+        for ((index, entry) in entries.withIndex()) {
+            val context = "groups[$index]"
+            when (entry) {
+                is String -> {
+                    declaredGroups += entry
+                    names += entry
+                }
+                is Map<*, *> -> {
+                    val name = entry.requireString("name", context)
+                    val select = entry.requireMap("select", context)
+                    val matched = LinkedHashSet<Int>()
+                    var sawKnownKind = false
+                    if (select.containsKey("tags")) {
+                        sawKnownKind = true
+                        matched += resolveTagSelector(select.requireStringList("tags", "$context.select"), tagIndex)
+                    }
+                    if (select.containsKey("ids")) {
+                        sawKnownKind = true
+                        matched += resolveIdSelector(select.requireStringList("ids", "$context.select"), authorIds, "$context.select")
+                    }
+                    if (select.containsKey("range")) {
+                        sawKnownKind = true
+                        matched += resolveRangeSelector(select.requireMap("range", "$context.select"), grids, "$context.select")
+                    }
+                    if (!sawKnownKind) throw YamlLoadException("$context.select: expected at least one of tags, ids, range")
+                    matched.forEach { groups.add(name, it) }
+                    declaredGroups += name
+                    names += name
+                }
+                else -> throw YamlLoadException("$context: expected a string or a mapping")
+            }
+        }
+        return names
+    }
+
+    /** AND across every listed tag — a particle must carry all of them, not just one. Reading
+     * an unrecognized tag as "matches nothing" rather than an error keeps this consistent with
+     * §4.2's own "zero-match is a warning, not an error" semantics for the group as a whole. */
+    private fun resolveTagSelector(tags: List<String>, tagIndex: Map<String, Set<Int>>): Set<Int> {
+        if (tags.isEmpty()) return emptySet()
+        var result: Set<Int>? = null
+        for (tag in tags) {
+            val matches = tagIndex[tag] ?: emptySet()
+            result = result?.intersect(matches) ?: matches
+        }
+        return result ?: emptySet()
+    }
+
+    /** Unlike an unrecognized tag, an author id that was never declared by a `list`/`single`
+     * particle is a load-time **error** — §4.2's "unknown name" tier, not "zero match." */
+    private fun resolveIdSelector(ids: List<String>, authorIds: Map<String, Int>, context: String): Set<Int> =
+        ids.map { authorIds[it] ?: throw YamlLoadException("$context.ids: unknown id '$it'") }.toSet()
+
+    private fun resolveRangeSelector(range: Map<*, *>, grids: Map<String, List<List<Int>>>, context: String): Set<Int> {
+        val gridName = range.requireString("grid", context)
+        val grid = grids[gridName] ?: throw YamlLoadException("$context.grid: unknown grid '$gridName'")
+        val rowCount = grid.size
+        val colCount = if (rowCount == 0) 0 else grid[0].size
+        val rowRange = readInclusiveIntRange(range, "rows", 0, rowCount - 1, context)
+        val colRange = readInclusiveIntRange(range, "cols", 0, colCount - 1, context)
+        val ids = LinkedHashSet<Int>()
+        for (r in rowRange) for (c in colRange) ids += grid[r][c]
+        return ids
+    }
+
+    /** `[lo, hi]`, inclusive both ends, defaulting to the grid's own full extent when [key] is
+     * absent (so `range: {grid: wing}` with neither `rows` nor `cols` given selects the whole
+     * grid). Out-of-bounds or an inverted `lo > hi` is a load-time error — a genuine authoring
+     * mistake, not a "zero match" case, so it doesn't get the warning-only treatment. */
+    private fun readInclusiveIntRange(map: Map<*, *>, key: String, fullLo: Int, fullHi: Int, context: String): IntRange {
+        val v = map[key] ?: return fullLo..fullHi
+        val list = v as? List<*> ?: throw YamlLoadException("$context.$key: expected a [lo, hi] list")
+        if (list.size != 2) throw YamlLoadException("$context.$key: expected exactly 2 components, got ${list.size}")
+        val lo = (list[0] as? Number)?.toInt() ?: throw YamlLoadException("$context.$key: components must be integers")
+        val hi = (list[1] as? Number)?.toInt() ?: throw YamlLoadException("$context.$key: components must be integers")
+        if (lo < fullLo || hi > fullHi || lo > hi) {
+            throw YamlLoadException("$context.$key: [$lo, $hi] out of bounds for [$fullLo, $fullHi]")
+        }
+        return lo..hi
     }
 
     /** §4.2's "particles can be defined individually or generated in bulk" - dispatches on
