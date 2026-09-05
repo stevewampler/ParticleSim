@@ -4421,6 +4421,62 @@ declarations (nothing needs one).
       Full `./gradlew test -q` suite green. No scenario-visible effect yet
       (Phase 0 adds no new YAML schema surface) — verification is the unit
       tests alone.
+- [x] **Phase 1 — bulk generation beyond a grid, plus tags/ids.** `particles:`
+      now dispatches on whether the value is a `Map` (the original
+      single-`grid:` shorthand, byte-for-byte unchanged — `loadGrid` is the
+      exact same logic, just parameterized by a `context` string instead of
+      the literal `"particles.grid"`) or a `List` of generator blocks
+      discriminated by key, the same convention `forces:`/`constraints:`
+      already use. Three new generator kinds: `random_volume`
+      (`shape: {box: {center, half_extents}}` or `{sphere: {center,
+      radius}}`, uniform-by-volume — sphere sampling is rejection sampling
+      in the enclosing cube, not a naive random-direction-times-uniform-
+      radius, which would bias samples toward the center; `seed:` is
+      required, not defaulted, since an implicit system-RNG fallback would
+      silently break §11's determinism the first time anyone needed to
+      reproduce a run), `list` (explicit per-particle declarations, each
+      with its own position/mass/radius/lifetime/tags/optional `id`), and
+      `single` (one particle). Every kind accepts `tags:`, indexed into a
+      new loader-local `tagIndex: Map<String, Set<Int>>`; `list`/`single`
+      entries also accept an author-facing `id:` string (a duplicate is a
+      load-time error), indexed into a loader-local
+      `authorIds: Map<String, Int>`. Both maps are populated now but not
+      yet consumed anywhere — Phase 2's `groups:` selector resolution
+      (tags/ids/range) is their first real reader; **neither `ParticleStore`
+      nor `Groups` gained a tags concept** — both maps live and die inside
+      one `load()` call, exactly the plan's "entirely a load-time
+      addressing convenience" decision.
+      `list`/`single`/`random_volume` default `mass` to `1.0` (via Phase 0's
+      `optionalScalarExpr`) rather than requiring it — matching
+      `ParticleStore.create`'s own default — unlike `grid`, whose `mass`
+      stays mandatory for backward compatibility with every existing
+      `grid:` document. `velocity` on all three new kinds is a literal
+      `[x,y,z]` evaluated once at load time (via `optionalVectorExpr(...).
+      evaluate(0.0)`), matching `ParticleStore.create`'s own `velocity:
+      Vector3` parameter, which isn't itself expression-capable on the
+      Kotlin side either.
+      **A real Kotlin-parser gotcha caught by the compiler, not review**:
+      an early draft stored a per-shape sampling closure
+      (`val positionOf: () -> Vector3 = when { ... }`) with each `when`
+      branch ending in a bare `{ uniformInBox(...) }` lambda literal.
+      Kotlin's trailing-lambda grammar parsed that `{ ... }` as a trailing
+      lambda argument onto the *previous* line's `requireVectorLiteral(...)`
+      call instead of a new expression — "too many arguments for
+      requireVectorLiteral" was the actual compiler error, not an
+      "unresolved reference" one, which is what made it non-obvious at
+      first glance. Fixed by resolving the shape's params once into local
+      `val`s outside the loop and picking box-vs-sphere per particle with a
+      plain `if`, rather than storing a closure at all — simpler code, not
+      just a workaround.
+      New `YamlLoaderTest` cases (15): the list-form single-grid-entry
+      regression check, unknown-generator-kind error, `random_volume`
+      box/sphere bounds checks, seed-reproducibility (two loads → identical
+      sorted positions), missing-seed error, unknown-shape error, `list`
+      per-entry fields, duplicate-author-id error, mass-defaulting check,
+      `single` fields, and multiple generator kinds combined in one scene.
+      Full `./gradlew test -q` suite green, including the pre-existing
+      `FlagYamlParityTest` (unaffected — `flag.yaml` still uses the legacy
+      map shorthand, which this phase left byte-for-byte unchanged).
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

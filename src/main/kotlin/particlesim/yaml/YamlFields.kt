@@ -27,6 +27,11 @@ internal fun Map<*, *>.requireListOrEmpty(key: String, context: String): List<*>
     else -> throw YamlLoadException("$context.$key: expected a list")
 }
 
+/** A list of plain strings — e.g. a particle generator's `tags:`. Empty (not an error) when
+ * absent, same "absent means empty" convention [requireListOrEmpty] itself already uses. */
+internal fun Map<*, *>.requireStringList(key: String, context: String): List<String> =
+    requireListOrEmpty(key, context).map { it as? String ?: throw YamlLoadException("$context.$key: each entry must be a string") }
+
 internal fun Map<*, *>.requireString(key: String, context: String): String =
     (this[key] as? String) ?: throw YamlLoadException("$context.$key: expected a string, got ${describe(this[key])}")
 

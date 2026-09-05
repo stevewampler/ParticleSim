@@ -1,5 +1,7 @@
 package particlesim.yaml
 
+import particlesim.core.Vector3
+import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -196,5 +198,219 @@ class YamlLoaderTest {
         """.trimIndent()
         val scenario = YamlLoader().load(yaml)
         assertEquals(1.0, scenario.store.mass(scenario.grids.getValue("g")[0][0]), 1e-12)
+    }
+
+    // --- Phase 1 of the YAML second pass: bulk generation beyond a grid, plus tags/ids --------
+
+    @Test
+    fun `particles as a list containing a single grid entry behaves identically to the map shorthand`() {
+        val yaml = """
+            version: 1
+            particles:
+              - grid:
+                  name: g
+                  rows: 2
+                  cols: 2
+                  mass: 1.0
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertEquals(4, scenario.store.size)
+        assertEquals(4, scenario.groups.membersOf("g").size)
+    }
+
+    @Test
+    fun `a particles list entry with an unknown generator kind is a load-time error`() {
+        val yaml = """
+            version: 1
+            particles:
+              - not_a_real_generator: {}
+        """.trimIndent()
+        assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+    }
+
+    @Test
+    fun `random_volume with a box shape generates the requested count within bounds`() {
+        val yaml = """
+            version: 1
+            particles:
+              - random_volume:
+                  name: dust
+                  count: 50
+                  seed: 7
+                  mass: 0.01
+                  tags: [dust]
+                  shape:
+                    box: { center: [0.0, 0.0, 0.0], half_extents: [2.0, 1.0, 3.0] }
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val ids = scenario.groups.membersOf("dust")
+        assertEquals(50, ids.size)
+        for (id in ids) {
+            val p = scenario.store.position(id)
+            assertTrue(abs(p.x) <= 2.0 && abs(p.y) <= 1.0 && abs(p.z) <= 3.0)
+            assertEquals(0.01, scenario.store.mass(id), 1e-12)
+        }
+    }
+
+    @Test
+    fun `random_volume with a sphere shape generates points within the radius`() {
+        val yaml = """
+            version: 1
+            particles:
+              - random_volume:
+                  name: dust
+                  count: 50
+                  seed: 3
+                  shape:
+                    sphere: { center: [1.0, 0.0, 0.0], radius: 2.0 }
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        for (id in scenario.groups.membersOf("dust")) {
+            val p = scenario.store.position(id)
+            assertTrue((p - Vector3(1.0, 0.0, 0.0)).length() <= 2.0 + 1e-9)
+        }
+    }
+
+    @Test
+    fun `random_volume with the same seed reproduces identical positions`() {
+        val yaml = """
+            version: 1
+            particles:
+              - random_volume:
+                  name: dust
+                  count: 10
+                  seed: 42
+                  shape:
+                    box: { center: [0.0, 0.0, 0.0], half_extents: [1.0, 1.0, 1.0] }
+        """.trimIndent()
+        val a = YamlLoader().load(yaml)
+        val b = YamlLoader().load(yaml)
+        val positionsA = a.groups.membersOf("dust").sorted().map { a.store.position(it) }
+        val positionsB = b.groups.membersOf("dust").sorted().map { b.store.position(it) }
+        assertEquals(positionsA, positionsB)
+    }
+
+    @Test
+    fun `random_volume requires a seed`() {
+        val yaml = """
+            version: 1
+            particles:
+              - random_volume:
+                  name: dust
+                  count: 1
+                  shape:
+                    box: { center: [0.0, 0.0, 0.0], half_extents: [1.0, 1.0, 1.0] }
+        """.trimIndent()
+        val ex = assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+        assertTrue(ex.message!!.contains("seed"))
+    }
+
+    @Test
+    fun `random_volume rejects an unknown shape kind`() {
+        val yaml = """
+            version: 1
+            particles:
+              - random_volume:
+                  name: dust
+                  count: 1
+                  seed: 1
+                  shape:
+                    cylinder: {}
+        """.trimIndent()
+        assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+    }
+
+    @Test
+    fun `list generator creates particles with per-entry fields`() {
+        val yaml = """
+            version: 1
+            particles:
+              - list:
+                  name: debris
+                  particles:
+                    - id: p1
+                      position: [1.0, 2.0, 0.0]
+                      mass: 0.1
+                      tags: [big]
+                    - position: [4.0, 5.0, 0.0]
+                      mass: 0.2
+                      radius: 0.05
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val ids = scenario.groups.membersOf("debris").sorted()
+        assertEquals(2, ids.size)
+        assertEquals(Vector3(1.0, 2.0, 0.0), scenario.store.position(ids[0]))
+        assertEquals(0.1, scenario.store.mass(ids[0]), 1e-12)
+        assertEquals(0.2, scenario.store.mass(ids[1]), 1e-12)
+        assertEquals(0.05, scenario.store.radius(ids[1]))
+    }
+
+    @Test
+    fun `list generator rejects a duplicate author id`() {
+        val yaml = """
+            version: 1
+            particles:
+              - list:
+                  name: debris
+                  particles:
+                    - id: p1
+                      position: [0.0, 0.0, 0.0]
+                    - id: p1
+                      position: [1.0, 0.0, 0.0]
+        """.trimIndent()
+        val ex = assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+        assertTrue(ex.message!!.contains("p1"))
+    }
+
+    @Test
+    fun `list generator defaults mass to 1_0, matching ParticleStore's own default`() {
+        val yaml = """
+            version: 1
+            particles:
+              - list:
+                  name: debris
+                  particles:
+                    - position: [0.0, 0.0, 0.0]
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertEquals(1.0, scenario.store.mass(scenario.groups.membersOf("debris").single()), 1e-12)
+    }
+
+    @Test
+    fun `single generator creates one particle with the given fields`() {
+        val yaml = """
+            version: 1
+            particles:
+              - single:
+                  name: anchor
+                  position: [0.0, 3.0, 0.0]
+                  mass: 2.0
+                  tags: [anchor]
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val id = scenario.groups.membersOf("anchor").single()
+        assertEquals(Vector3(0.0, 3.0, 0.0), scenario.store.position(id))
+        assertEquals(2.0, scenario.store.mass(id), 1e-12)
+    }
+
+    @Test
+    fun `particles as a list can combine multiple generator kinds in one scene`() {
+        val yaml = """
+            version: 1
+            particles:
+              - grid:
+                  name: g
+                  rows: 1
+                  cols: 2
+                  mass: 1.0
+              - single:
+                  name: anchor
+                  position: [0.0, 0.0, 0.0]
+                  mass: 1.0
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertEquals(3, scenario.store.size)
+        assertEquals(2, scenario.groups.membersOf("g").size)
+        assertEquals(1, scenario.groups.membersOf("anchor").size)
     }
 }
