@@ -113,3 +113,10 @@ collisions:
         restitution: 0.1
         compression_damping: 2.0
         extension_damping: 0.5
+
+# Matches FlagOnRopeScene's own lights exactly (a scene-level decoration, not part of
+# buildFlagOnRopeScenario's physics scenario, but lights: is real YAML scope in its own right -
+# §4.2/Phase 9 - so reproducing it here is fair game, unlike camera/renderer/material choices).
+lights:
+  - directional: { position: [5.0, 10.0, 7.0], intensity: 0.8, name: sun }
+  - ambient: { intensity: 0.4, name: ambient-fill }

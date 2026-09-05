@@ -4796,10 +4796,22 @@ declarations (nothing needs one).
       silently built or silently skipped — **since closed**, see
       `particlesim.debug.YamlDemoScene` below ("Wire the YAML demo files
       into SceneLibrary"). That pass verified four YAML-loaded scenes live
-      in Chrome (none of the current demo files declare a `lights:`
-      section, so this still hasn't specifically exercised a YAML-loaded
-      light reaching the outliner — a real gap, not silently claimed
-      closed here). Verification for this phase itself was
+      in Chrome, though none of the demo files declared a `lights:`
+      section at the time — that specific gap (a YAML-loaded light
+      reaching the outliner, live) is now closed too: the user asked for
+      a `lights:` section on `flagOnRope.yaml` (`sun` directional +
+      `ambient-fill` ambient, matching `FlagOnRopeScene`'s own hardcoded
+      lights exactly), and reloading it in the picker confirmed both
+      names show up under the outliner's LIGHTS heading. That same check
+      also caught a real gap in `DemoYamlSmokeTest`'s own flagOnRope case
+      (`assertAllFinite` alone can't tell "settled correctly" from
+      "collapsed to a point") — added an assertion that the pole's pinned
+      top particle stays at y=3.5 (loose tolerance, 0.01: `surface_collider`
+      resolves after the per-step `FixedPosition` reset and has no notion
+      of "this particle is pinned," so it can nudge a pole particle a
+      small bounded amount before the next reset — true of
+      `buildFlagOnRopeScenario`'s own Kotlin wiring too, not a bug this
+      pass introduced). Verification for this phase itself was
       `YamlLoaderTest` plus the full suite.
       New `YamlLoaderTest` cases (6): ambient with color/intensity/name,
       directional's position + its default color/intensity, missing-

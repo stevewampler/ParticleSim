@@ -116,7 +116,14 @@ class DemoYamlSmokeTest {
         val scenario = load("flagOnRope")
         assertEquals(7 + 14 + 8 * 14, scenario.store.size)
         assertTrue(scenario.surfaceCollisionSystem != null)
+        val poleTopId = scenario.groups.membersOf("pole").maxByOrNull { scenario.store.position(it).y }!!
         run(scenario, steps = 2000, dt = 1e-3)
         assertAllFinite(scenario)
+        // The pole is pinned (fixed_position, at_current_positions), reset to its exact anchor
+        // every step - but that reset happens inside Integrator.step, before this frame's
+        // surface_collider resolve() call, which (like buildFlagOnRopeScenario's own Kotlin
+        // wiring) has no notion of "this particle is pinned" and can nudge it a small, bounded
+        // amount before the next step's reset - hence a loose tolerance, not exact equality.
+        assertEquals(3.5, scenario.store.position(poleTopId).y, 0.01)
     }
 }
