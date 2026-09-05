@@ -31,6 +31,11 @@ colliders:
       name: floor
       position: [0.0, 0.0, 0.0]
       normal: [0.0, 1.0, 0.0]
+# half_extents.y is 1000.0 (not a real bound) because buildSparks' own destroy predicate is
+# abs(x) > 10 || abs(z) > 10 - no y check at all - and outside_box has no per-axis-optional
+# form. This is only equivalent to "no y bound" within the sample window this file is golden-
+# tested against (see SparksYamlParityTest/sparks.golden.txt); widen the sample window, raise
+# the emitter's velocity, or drop drag, and this diverges from buildSparks for real.
 destroy:
   - group: sparks
     outside_box:

@@ -4807,6 +4807,28 @@ see the Phase 7 note above ("Second pass (not this phase)") for the
 original scope this closes out, and `todo/requirements.md` §4.2/§4.5 for
 the updated stretch-status annotations.
 
+**Post-completion review pass** (a second pair of eyes over all nine
+phases before calling this done): three findings, all addressed.
+`optionalDouble`/`optionalBoolean`/`optionalString`/`optionalInt`
+(`YamlFields.kt`) threw error messages with no context path prefix (just
+`"$key: expected..."`, unlike every `require*` sibling's
+`"$context.$key: ..."`) — a real regression in §4.2's "clear error pointing
+at the offending field" property, silently multiplied across ~30 call
+sites added by Phases 3-9. Fixed by adding an optional `context: String? =
+null` parameter to all four and threading it through every call site in
+`YamlLoader.kt`/`ShapeRegistry.kt` (all of which already had a `context`
+string in scope); `./gradlew test -q` stayed green throughout since every
+assertion on these messages was a substring match, not exact-string. Also
+documented two narrower, no-code-change gaps as comments rather than
+fixing (neither has a real consumer, both are cheap insurance for a future
+one): `sparks.yaml`'s `outside_box` half_extents.y of `1000.0` is a stand-
+in for "no y bound at all" (matching `buildSparks`' own `abs(x)>10 ||
+abs(z)>10` predicate) that only holds within the golden-tested sample
+window, not as a general equivalence; and `ShapeRegistry`'s uniform `name`
+namespacing reaches `emitters[].name`, which is not just a label but seeds
+`Emitter`'s RNG sub-stream — correct for distinct instances (§14.4) but a
+determinism surprise if a shape body is ever used both named and unnamed.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

@@ -31,6 +31,15 @@ import particlesim.core.Vector3
  * since rest-velocity/penetration are scene-wide tuning knobs, not shape-local; author ids
  * (`id:`/`select.ids`) aren't namespaced, since neither target shape uses them — two instances
  * of a shape that *did* use `id:` would collide, a known, undocumented-until-needed gap.
+ *
+ * [NAME_KEYS]' `name` rewrite also reaches an `emitters:` entry's `name:` — which is not just a
+ * label there, [particlesim.lifecycle.Emitter] derives its RNG sub-stream from it
+ * (`mixSeed(masterSeed, name)`, §14.1's per-emitter-seeded-RNG requirement). Two instances of a
+ * shape with an emitter correctly get distinct namespaced names and therefore distinct spawn
+ * sequences (the intended §14.4 behavior), but this also means giving an instance an `instance:`
+ * name changes that emitter's physics, not just its label — an undocumented-until-needed
+ * determinism surprise in the same family as the `id:` gap above, should a shape ever pair
+ * `instance:` with an emitter body used both named and unnamed.
  */
 internal object ShapeRegistry {
 
@@ -56,7 +65,7 @@ internal object ShapeRegistry {
             val context = "shapes[$index]"
             val use = map.requireString("use", context)
             val definition = definitions[use] ?: throw YamlLoadException("$context.use: unknown shape definition '$use'")
-            val instanceName = map.optionalString("instance")
+            val instanceName = map.optionalString("instance", context = context)
             val offset = map.optionalVectorLiteral("offset", context, Vector3.ZERO)
             val params = resolveParams(map, definition, context)
 

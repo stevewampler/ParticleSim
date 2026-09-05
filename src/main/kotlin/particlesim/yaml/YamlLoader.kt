@@ -295,7 +295,7 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         val name = gridSection.requireString("name", context)
         val rows = gridSection.requireInt("rows", context)
         val cols = gridSection.requireInt("cols", context)
-        val spacing = gridSection.optionalDouble("spacing", 1.0)
+        val spacing = gridSection.optionalDouble("spacing", 1.0, context)
         val massExpr = gridSection.requireScalarExpr("mass", context)
         val tags = gridSection.requireStringList("tags", context)
         // Phase 8's shape registry is the only current writer of this field - see its own doc
@@ -448,7 +448,7 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
     }
 
     private fun registerAuthorId(f: Map<*, *>, context: String, id: Int, authorIds: MutableMap<String, Int>) {
-        val authorId = f.optionalString("id") ?: return
+        val authorId = f.optionalString("id", context = context) ?: return
         if (authorIds.containsKey(authorId)) throw YamlLoadException("$context.id: duplicate author id '$authorId'")
         authorIds[authorId] = id
     }
@@ -486,7 +486,7 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
                     val group = f.requireString("group", "$context.gravity")
                     requireKnownGroup(group, "$context.gravity.group")
                     val accel = f.requireVectorLiteral("acceleration", "$context.gravity")
-                    forces += UniformGravity(group, accel, name = f.optionalString("name"))
+                    forces += UniformGravity(group, accel, name = f.optionalString("name", context = "$context.gravity"))
                 }
                 map.containsKey("mesh_springs") -> {
                     val f = map.requireMap("mesh_springs", context)
@@ -515,45 +515,49 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
                         stiffness = stiffness, extensionStiffness = extStiffness, compressionStiffness = compStiffness,
                         damping = damping, extensionDamping = extDamping, compressionDamping = compDamping,
                         breakThreshold = breakThreshold, extensionBreakThreshold = extBreak, compressionBreakThreshold = compBreak,
-                        name = f.optionalString("name"),
+                        name = f.optionalString("name", context = mc),
                     )
                 }
                 map.containsKey("wind") -> {
                     val f = map.requireMap("wind", context)
-                    val grid = resolveGrid(f, grids, "$context.wind")
+                    val wc = "$context.wind"
+                    val grid = resolveGrid(f, grids, wc)
                     val triangles = Grid.triangles(grid)
-                    val velocity = f.requireVectorExpr("velocity", "$context.wind")
-                    val density = f.optionalDouble("density", 1.0)
-                    forces += Wind(triangles, velocity, density = density, name = f.optionalString("name"))
+                    val velocity = f.requireVectorExpr("velocity", wc)
+                    val density = f.optionalDouble("density", 1.0, wc)
+                    forces += Wind(triangles, velocity, density = density, name = f.optionalString("name", context = wc))
                 }
                 map.containsKey("drag") -> {
                     val f = map.requireMap("drag", context)
-                    val group = f.requireString("group", "$context.drag")
-                    requireKnownGroup(group, "$context.drag.group")
-                    val coefficient = f.requireDouble("coefficient", "$context.drag")
-                    val quadratic = f.optionalBoolean("quadratic", false)
-                    forces += Drag(group, coefficient, quadratic = quadratic, name = f.optionalString("name"))
+                    val dc = "$context.drag"
+                    val group = f.requireString("group", dc)
+                    requireKnownGroup(group, "$dc.group")
+                    val coefficient = f.requireDouble("coefficient", dc)
+                    val quadratic = f.optionalBoolean("quadratic", false, dc)
+                    forces += Drag(group, coefficient, quadratic = quadratic, name = f.optionalString("name", context = dc))
                 }
                 map.containsKey("nbody_gravity") -> {
                     val f = map.requireMap("nbody_gravity", context)
-                    val group = f.requireString("group", "$context.nbody_gravity")
-                    requireKnownGroup(group, "$context.nbody_gravity.group")
+                    val nc = "$context.nbody_gravity"
+                    val group = f.requireString("group", nc)
+                    requireKnownGroup(group, "$nc.group")
                     // 6.674e-11 mirrors NBodyGravity's own constructor default exactly (no
                     // named constant on that side to reference - it's an inline literal there
                     // too); DEFAULT_SOFTENING is a real exposed constant, used directly.
-                    val g = f.optionalDouble("g", 6.674e-11)
-                    val softening = f.optionalDouble("softening", NBodyGravity.DEFAULT_SOFTENING)
-                    forces += NBodyGravity(group, g = g, softening = softening, name = f.optionalString("name"))
+                    val g = f.optionalDouble("g", 6.674e-11, nc)
+                    val softening = f.optionalDouble("softening", NBodyGravity.DEFAULT_SOFTENING, nc)
+                    forces += NBodyGravity(group, g = g, softening = softening, name = f.optionalString("name", context = nc))
                 }
                 map.containsKey("constant_force") -> {
                     // §6's "fixed force" - implemented as a Force (ConstantForce), not a
                     // Constraint, since it's just an externally supplied force term, not a
                     // pinned state (see requirements.md §6's own distinction).
                     val f = map.requireMap("constant_force", context)
-                    val group = f.requireString("group", "$context.constant_force")
-                    requireKnownGroup(group, "$context.constant_force.group")
-                    val force = f.requireVectorLiteral("force", "$context.constant_force")
-                    forces += ConstantForce(group, force, name = f.optionalString("name"))
+                    val cc = "$context.constant_force"
+                    val group = f.requireString("group", cc)
+                    requireKnownGroup(group, "$cc.group")
+                    val force = f.requireVectorLiteral("force", cc)
+                    forces += ConstantForce(group, force, name = f.optionalString("name", context = cc))
                 }
                 else -> throw YamlLoadException(
                     "$context: unknown force type (expected one of: gravity, mesh_springs, wind, drag, nbody_gravity, constant_force)",
@@ -574,21 +578,23 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
             when {
                 map.containsKey("fixed_position") -> {
                     val f = map.requireMap("fixed_position", context)
-                    val group = f.requireString("group", "$context.fixed_position")
-                    requireKnownGroup(group, "$context.fixed_position.group")
-                    val name = f.optionalString("name")
-                    constraints += if (f.optionalBoolean("at_current_positions", false)) {
+                    val fpc = "$context.fixed_position"
+                    val group = f.requireString("group", fpc)
+                    requireKnownGroup(group, "$fpc.group")
+                    val name = f.optionalString("name", context = fpc)
+                    constraints += if (f.optionalBoolean("at_current_positions", false, fpc)) {
                         FixedPosition.atCurrentPositions(group, store, groups, name = name)
                     } else {
-                        FixedPosition(group, f.requireVectorLiteral("position", "$context.fixed_position"), name = name)
+                        FixedPosition(group, f.requireVectorLiteral("position", fpc), name = name)
                     }
                 }
                 map.containsKey("fixed_velocity") -> {
                     val f = map.requireMap("fixed_velocity", context)
-                    val group = f.requireString("group", "$context.fixed_velocity")
-                    requireKnownGroup(group, "$context.fixed_velocity.group")
-                    val velocity = f.requireVectorLiteral("velocity", "$context.fixed_velocity")
-                    constraints += FixedVelocity(group, velocity, name = f.optionalString("name"))
+                    val fvc = "$context.fixed_velocity"
+                    val group = f.requireString("group", fvc)
+                    requireKnownGroup(group, "$fvc.group")
+                    val velocity = f.requireVectorLiteral("velocity", fvc)
+                    constraints += FixedVelocity(group, velocity, name = f.optionalString("name", context = fvc))
                 }
                 else -> throw YamlLoadException("$context: unknown constraint type (expected one of: fixed_position, fixed_velocity)")
             }
@@ -656,8 +662,8 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         root: Map<*, *>, colliders: Map<String, Collider>, requireKnownGroup: (String, String) -> Unit,
     ): Pair<CollisionSystem?, ParticleCollisionSystem?> {
         val section = root.optionalMap("collisions") ?: return null to null
-        val restVelocity = section.optionalDouble("rest_velocity", 0.01)
-        val restPenetration = section.optionalDouble("rest_penetration", 0.005)
+        val restVelocity = section.optionalDouble("rest_velocity", 0.01, "collisions")
+        val restPenetration = section.optionalDouble("rest_penetration", 0.005, "collisions")
         val particleColliderRules = ArrayList<ParticleColliderRule>()
         val particleParticleRules = ArrayList<ParticleCollisionRule>()
         for ((index, entry) in section.requireListOrEmpty("rules", "collisions").withIndex()) {
@@ -674,11 +680,11 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
                     particleColliderRules += ParticleColliderRule(
                         group = group, collider = collider,
                         restitution = f.requireDouble("restitution", fc),
-                        compressionDamping = f.optionalDouble("compression_damping", 0.0),
-                        extensionDamping = f.optionalDouble("extension_damping", 0.0),
-                        correctionFactor = f.optionalDouble("correction_factor", 0.2),
-                        staticFriction = f.optionalDouble("static_friction", 0.0),
-                        kineticFriction = f.optionalDouble("kinetic_friction", 0.0),
+                        compressionDamping = f.optionalDouble("compression_damping", 0.0, fc),
+                        extensionDamping = f.optionalDouble("extension_damping", 0.0, fc),
+                        correctionFactor = f.optionalDouble("correction_factor", 0.2, fc),
+                        staticFriction = f.optionalDouble("static_friction", 0.0, fc),
+                        kineticFriction = f.optionalDouble("kinetic_friction", 0.0, fc),
                     )
                 }
                 map.containsKey("particle_particle") -> {
@@ -686,16 +692,16 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
                     val fc = "$context.particle_particle"
                     val groupA = f.requireString("group_a", fc)
                     requireKnownGroup(groupA, "$fc.group_a")
-                    val groupB = f.optionalString("group_b") ?: groupA
+                    val groupB = f.optionalString("group_b", context = fc) ?: groupA
                     if (groupB != groupA) requireKnownGroup(groupB, "$fc.group_b")
                     particleParticleRules += ParticleCollisionRule(
                         groupA = groupA, groupB = groupB,
                         restitution = f.requireDouble("restitution", fc),
-                        compressionDamping = f.optionalDouble("compression_damping", 0.0),
-                        extensionDamping = f.optionalDouble("extension_damping", 0.0),
-                        correctionFactor = f.optionalDouble("correction_factor", 0.2),
-                        staticFriction = f.optionalDouble("static_friction", 0.0),
-                        kineticFriction = f.optionalDouble("kinetic_friction", 0.0),
+                        compressionDamping = f.optionalDouble("compression_damping", 0.0, fc),
+                        extensionDamping = f.optionalDouble("extension_damping", 0.0, fc),
+                        correctionFactor = f.optionalDouble("correction_factor", 0.2, fc),
+                        staticFriction = f.optionalDouble("static_friction", 0.0, fc),
+                        kineticFriction = f.optionalDouble("kinetic_friction", 0.0, fc),
                     )
                 }
                 else -> throw YamlLoadException("$context: unknown collision rule type (expected one of: particle_collider, particle_particle)")
@@ -773,7 +779,7 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
             val radius = f.optionalScalarDistribution("radius", context)
             val lifetime = f.optionalScalarDistribution("lifetime", context)
             val maxAlive = f.requireInt("max_alive", context)
-            val capPolicyStr = f.optionalString("cap_policy", "stop")
+            val capPolicyStr = f.optionalString("cap_policy", "stop", context)
             val capPolicy = when (capPolicyStr) {
                 "stop" -> EmitterCapPolicy.STOP
                 "evict_oldest" -> EmitterCapPolicy.EVICT_OLDEST
@@ -807,24 +813,27 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
             lights += when {
                 map.containsKey("ambient") -> {
                     val f = map.requireMap("ambient", context)
-                    Light.Ambient(color = readColor(f, "$context.ambient"), intensity = f.optionalDouble("intensity", 1.0), name = f.optionalString("name"))
+                    val ac = "$context.ambient"
+                    Light.Ambient(color = readColor(f, ac), intensity = f.optionalDouble("intensity", 1.0, ac), name = f.optionalString("name", context = ac))
                 }
                 map.containsKey("directional") -> {
                     val f = map.requireMap("directional", context)
+                    val dc = "$context.directional"
                     Light.Directional(
-                        position = f.requireVectorLiteral("position", "$context.directional"),
-                        color = readColor(f, "$context.directional"),
-                        intensity = f.optionalDouble("intensity", 1.0),
-                        name = f.optionalString("name"),
+                        position = f.requireVectorLiteral("position", dc),
+                        color = readColor(f, dc),
+                        intensity = f.optionalDouble("intensity", 1.0, dc),
+                        name = f.optionalString("name", context = dc),
                     )
                 }
                 map.containsKey("point") -> {
                     val f = map.requireMap("point", context)
+                    val pc = "$context.point"
                     Light.Point(
-                        position = f.requireVectorLiteral("position", "$context.point"),
-                        color = readColor(f, "$context.point"),
-                        intensity = f.optionalDouble("intensity", 1.0),
-                        name = f.optionalString("name"),
+                        position = f.requireVectorLiteral("position", pc),
+                        color = readColor(f, pc),
+                        intensity = f.optionalDouble("intensity", 1.0, pc),
+                        name = f.optionalString("name", context = pc),
                     )
                 }
                 else -> throw YamlLoadException("$context: unknown light type (expected one of: ambient, directional, point)")

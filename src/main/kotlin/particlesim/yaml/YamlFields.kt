@@ -49,29 +49,31 @@ internal fun Map<*, *>.requireDouble(key: String, context: String): Double = whe
     else -> throw YamlLoadException("$context.$key: expected a number, got ${describe(v)}")
 }
 
-internal fun Map<*, *>.optionalDouble(key: String, default: Double): Double = when (val v = this[key]) {
+internal fun Map<*, *>.optionalDouble(key: String, default: Double, context: String? = null): Double = when (val v = this[key]) {
     null -> default
     is Number -> v.toDouble()
-    else -> throw YamlLoadException("$key: expected a number, got ${describe(v)}")
+    else -> throw YamlLoadException("${fieldPath(context, key)}: expected a number, got ${describe(v)}")
 }
 
-internal fun Map<*, *>.optionalBoolean(key: String, default: Boolean): Boolean = when (val v = this[key]) {
+internal fun Map<*, *>.optionalBoolean(key: String, default: Boolean, context: String? = null): Boolean = when (val v = this[key]) {
     null -> default
     is Boolean -> v
-    else -> throw YamlLoadException("$key: expected a boolean, got ${describe(v)}")
+    else -> throw YamlLoadException("${fieldPath(context, key)}: expected a boolean, got ${describe(v)}")
 }
 
-internal fun Map<*, *>.optionalString(key: String, default: String? = null): String? = when (val v = this[key]) {
+internal fun Map<*, *>.optionalString(key: String, default: String? = null, context: String? = null): String? = when (val v = this[key]) {
     null -> default
     is String -> v
-    else -> throw YamlLoadException("$key: expected a string, got ${describe(v)}")
+    else -> throw YamlLoadException("${fieldPath(context, key)}: expected a string, got ${describe(v)}")
 }
 
-internal fun Map<*, *>.optionalInt(key: String, default: Int): Int = when (val v = this[key]) {
+internal fun Map<*, *>.optionalInt(key: String, default: Int, context: String? = null): Int = when (val v = this[key]) {
     null -> default
     is Int -> v
-    else -> throw YamlLoadException("$key: expected an integer, got ${describe(v)}")
+    else -> throw YamlLoadException("${fieldPath(context, key)}: expected an integer, got ${describe(v)}")
 }
+
+private fun fieldPath(context: String?, key: String): String = if (context == null) key else "$context.$key"
 
 /** [requireScalarExpr]'s optional counterpart — a field that falls back to [default] rather
  * than erroring when absent, for the many symmetric-with-override fields ([directionalTriple]
@@ -104,16 +106,16 @@ internal fun Map<*, *>.optionalVectorExpr(key: String, context: String, default:
  * for a base with no Kotlin-side default (`stiffness`/`damping` are mandatory constructor
  * parameters). */
 internal fun Map<*, *>.directionalTriple(base: String, context: String, default: Double): Triple<Double, Double, Double> {
-    val baseValue = optionalDouble(base, default)
-    val extension = optionalDouble("extension_$base", baseValue)
-    val compression = optionalDouble("compression_$base", baseValue)
+    val baseValue = optionalDouble(base, default, context)
+    val extension = optionalDouble("extension_$base", baseValue, context)
+    val compression = optionalDouble("compression_$base", baseValue, context)
     return Triple(baseValue, extension, compression)
 }
 
 internal fun Map<*, *>.requireDirectionalTriple(base: String, context: String): Triple<Double, Double, Double> {
     val baseValue = requireDouble(base, context)
-    val extension = optionalDouble("extension_$base", baseValue)
-    val compression = optionalDouble("compression_$base", baseValue)
+    val extension = optionalDouble("extension_$base", baseValue, context)
+    val compression = optionalDouble("compression_$base", baseValue, context)
     return Triple(baseValue, extension, compression)
 }
 
