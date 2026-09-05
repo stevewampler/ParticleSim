@@ -1,0 +1,63 @@
+# Matches particlesim.debug.DragScene's own scenario exactly (linkCount=12, spacing=0.4,
+# mass=0.2, stiffness=80.0, damping=12.0, springBreakThreshold=0.5) - a hanging chain of 12
+# particles, top one pinned, each consecutive pair joined by a standalone spring+damper (not
+# mesh_springs - there's no grid topology here, just a 1D chain). DragScene's own interactive
+# drag/delete-particle handling is viewer-only and has no YAML equivalent; this file is the
+# chain's initial scenario only.
+#
+# Break-handling note: DragScene pairs each broken Spring to its Damper *by list index*
+# (`dampers[it]` for a broken spring's index) so a snapped link's damper is removed alongside
+# it. This file's `spring`/`damper` entries are two independent force declarations with no such
+# pairing - if a link here ever breaks (crosses break_threshold: 0.5), the Spring drops out of
+# YamlScenario.forces but the matching Damper does not, unlike DragScene's own cleanup. Not a
+# bug to fix generically (a loader has no way to know two independent force entries are "the
+# same link" without a dedicated wiring mechanism); just something to know before assuming this
+# file's break behavior matches DragScene's exactly.
+version: 1
+
+particles:
+  - list:
+      name: chain
+      particles:
+        - { id: p0, position: [0.0, 4.0, 0.0], mass: 0.2 }
+        - { id: p1, position: [0.0, 3.6, 0.0], mass: 0.2 }
+        - { id: p2, position: [0.0, 3.2, 0.0], mass: 0.2 }
+        - { id: p3, position: [0.0, 2.8, 0.0], mass: 0.2 }
+        - { id: p4, position: [0.0, 2.4, 0.0], mass: 0.2 }
+        - { id: p5, position: [0.0, 2.0, 0.0], mass: 0.2 }
+        - { id: p6, position: [0.0, 1.6, 0.0], mass: 0.2 }
+        - { id: p7, position: [0.0, 1.2, 0.0], mass: 0.2 }
+        - { id: p8, position: [0.0, 0.8, 0.0], mass: 0.2 }
+        - { id: p9, position: [0.0, 0.4, 0.0], mass: 0.2 }
+        - { id: p10, position: [0.0, 0.0, 0.0], mass: 0.2 }
+        - { id: p11, position: [0.0, -0.4, 0.0], mass: 0.2 }
+
+groups:
+  - name: anchor
+    select: { ids: [p0] }
+
+forces:
+  - gravity:
+      group: chain
+      acceleration: [0.0, -9.8, 0.0]
+      name: gravity
+  - drag:
+      group: chain
+      coefficient: 1.5
+      name: drag
+  - spring:
+      pairs: [[p0, p1], [p1, p2], [p2, p3], [p3, p4], [p4, p5], [p5, p6], [p6, p7], [p7, p8], [p8, p9], [p9, p10], [p10, p11]]
+      rest_length: 0.4
+      stiffness: 80.0
+      break_threshold: 0.5
+      name: link
+  - damper:
+      pairs: [[p0, p1], [p1, p2], [p2, p3], [p3, p4], [p4, p5], [p5, p6], [p6, p7], [p7, p8], [p8, p9], [p9, p10], [p10, p11]]
+      damping: 12.0
+      name: link-damper
+
+constraints:
+  - fixed_position:
+      group: anchor
+      position: [0.0, 4.0, 0.0]
+      name: anchor

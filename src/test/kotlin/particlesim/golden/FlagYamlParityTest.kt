@@ -6,7 +6,7 @@ import kotlin.test.Test
 
 /**
  * Proves §4's "both front-ends build the same in-memory model" for the flag scenario, rather
- * than just asserting it: loads `src/test/resources/yaml/flag.yaml` (hand-written to match
+ * than just asserting it: loads `src/main/resources/yaml/flag.yaml` (hand-written to match
  * [particlesim.examples.buildFlag]'s exact parameters and force order — force accumulation
  * order affects the bit-pattern of a floating-point sum, so this isn't just "the same values,"
  * it's "the same sequence of operations"), runs it through

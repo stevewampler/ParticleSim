@@ -1,0 +1,58 @@
+# Matches particlesim.debug.PoleRopeScene: a static flagpole (buildFlagpole defaults,
+# height=3.5, segments=6) plus a slack rope (buildRope) sagging between a top anchor at the
+# pole's own top [0, 3.5, 0] and a bottom anchor offset to the side [0.25, 1.75, 0]
+# (poleHeight*0.5), segments=10. Both shapes are placed at the default (zero) offset in the
+# live scene, so no ShapeRegistry composition is needed here - plain top-level sections with
+# distinct group names ("pole", "rope") reproduce it directly.
+version: 1
+
+particles:
+  - list:
+      name: pole
+      particles:
+        - { position: [0.0, 0.0, 0.0] }
+        - { position: [0.0, 0.5833333, 0.0] }
+        - { position: [0.0, 1.1666667, 0.0] }
+        - { position: [0.0, 1.75, 0.0] }
+        - { position: [0.0, 2.3333333, 0.0] }
+        - { position: [0.0, 2.9166667, 0.0] }
+        - { position: [0.0, 3.5, 0.0] }
+  - list:
+      name: rope
+      particles:
+        - { id: rope0, position: [0.0, 3.5, 0.0], mass: 0.005 }
+        - { id: rope1, position: [0.025, 3.325, 0.0], mass: 0.005 }
+        - { id: rope2, position: [0.05, 3.15, 0.0], mass: 0.005 }
+        - { id: rope3, position: [0.075, 2.975, 0.0], mass: 0.005 }
+        - { id: rope4, position: [0.1, 2.8, 0.0], mass: 0.005 }
+        - { id: rope5, position: [0.125, 2.625, 0.0], mass: 0.005 }
+        - { id: rope6, position: [0.15, 2.45, 0.0], mass: 0.005 }
+        - { id: rope7, position: [0.175, 2.275, 0.0], mass: 0.005 }
+        - { id: rope8, position: [0.2, 2.1, 0.0], mass: 0.005 }
+        - { id: rope9, position: [0.225, 1.925, 0.0], mass: 0.005 }
+        - { id: rope10, position: [0.25, 1.75, 0.0], mass: 0.005 }
+
+groups:
+  - name: rope-anchors
+    select: { ids: [rope0, rope10] }
+
+forces:
+  - gravity:
+      group: rope
+      acceleration: [0.0, -9.8, 0.0]
+  - spring:
+      pairs: [[rope0, rope1], [rope1, rope2], [rope2, rope3], [rope3, rope4], [rope4, rope5],
+              [rope5, rope6], [rope6, rope7], [rope7, rope8], [rope8, rope9], [rope9, rope10]]
+      rest_length: 0.1767767
+      stiffness: 200.0
+      compression_stiffness: 0.0
+      name: segment-spring
+  - damper:
+      pairs: [[rope0, rope1], [rope1, rope2], [rope2, rope3], [rope3, rope4], [rope4, rope5],
+              [rope5, rope6], [rope6, rope7], [rope7, rope8], [rope8, rope9], [rope9, rope10]]
+      damping: 1.0
+      name: segment-damper
+
+constraints:
+  - fixed_position: { group: pole, at_current_positions: true }
+  - fixed_position: { group: rope-anchors, at_current_positions: true }

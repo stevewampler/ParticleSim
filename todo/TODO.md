@@ -4885,8 +4885,57 @@ expanding scope.
   consumer — since duplicating `VectorDistribution` into the bulk
   generator for one consumer isn't worth it; that demo stays Kotlin-DSL-
   only, not translated to YAML.
+- **A fourth, smaller addition discovered mid-way, not part of the
+  original three**: standalone `spring`/`damper` `pairs:` entries can now
+  address a grid cell directly (`{grid: cloth, row: 0, col: 0}`, resolved
+  through the same `grids` map `mesh_springs`/`surface_collider` already
+  read) as an alternative to an author-id string. Needed once
+  `flagOnRope.yaml` (below) had to connect a `grid:`-generated flag's
+  pole-edge cell to a rope segment — the `grid:` generator has no
+  per-cell author ids of its own, so there was no other way to name that
+  particle in a `pairs:` list. Out-of-bounds `row`/`col` is a load-time
+  error, same tier as every other bounds check in this loader. New
+  `YamlLoaderTest` cases (2): a spring pair addresses a grid cell
+  directly, an out-of-bounds row/col is a load-time error.
 
-Full `./gradlew test -q` suite green after each of the three additions.
+Full `./gradlew test -q` suite green after each addition.
+
+**Demo scenario YAML files** (`src/main/resources/yaml/`): writing a YAML
+equivalent for every `SceneLibraryDebugDemo` entry, per the user's
+request, is what surfaced the four gaps above in the first place — each
+was found by actually trying to author the file it blocked, not by
+inspection. `flag.yaml`/`ball_bounce.yaml`/`sparks.yaml` moved here from
+`src/test/resources/yaml/` (their `*YamlParityTest`s repointed at the new
+classpath location, `getResourceAsStream("/yaml/...")` unchanged since
+`src/main/resources` is already on the test classpath) so every demo's
+file lives in one place rather than splitting "the three golden-tested
+ones" from "the rest." New: `trampoline.yaml`, `drag.yaml`,
+`particleCollision.yaml`, `multiShape.yaml`, `poleRope.yaml`,
+`flagOnRope.yaml` — 9 of `SceneLibrary`'s 10 demos (`spatialGrid` stays
+Kotlin-only, per the random-velocity gap above). Each file reproduces its
+demo's *physics scenario* only, not its viewer wrapper (camera function,
+renderer/texture/material choice, drag/delete interactivity, re-drop
+cycles) — none of that is YAML's scope, the same boundary
+`flag.yaml`/`ball_bounce.yaml`/`sparks.yaml` already drew. Two honest,
+documented simplifications, not silent approximations: `particleCollision.yaml`
+spawns all 18 balls at once via `random_volume` instead of
+`ParticleCollisionScene`'s own one-every-0.35s stagger (no bit-exact
+match to its `Random(seed=1)` sequence either — `random_volume`'s own
+sampling algorithm differs); `trampoline.yaml` is `buildTrampoline`
+rotated 90° (gravity along −Z, not −Y) since the `grid:` generator always
+lays particles out in the X/Y plane with no orientation parameter to
+reproduce the real demo's X/Z-plane mat. `drag.yaml`'s spring/damper
+entries are two independent force declarations with no equivalent to
+`DragScene`'s by-index spring→damper break-cleanup pairing — documented
+in the file itself, not silently assumed to match. No YAML-to-`DemoScene`
+bridge exists yet (Phase 9's own note, still true), so none of these are
+reachable from the scene picker — loadable and simulatable, not yet
+pickable. New `particlesim.yaml.DemoYamlSmokeTest` (6 cases, one per new
+file): loads without error, particle/group counts match the source
+demo's, and a real run (the demo's own dt, its own collision systems)
+never produces a non-finite position — not golden-file parity (none of
+these have a pre-existing Kotlin-built reference to prove against), just
+"loads and doesn't blow up." All 6 passed on the first run.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

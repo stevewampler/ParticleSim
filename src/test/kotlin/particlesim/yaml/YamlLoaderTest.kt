@@ -797,6 +797,41 @@ class YamlLoaderTest {
     }
 
     @Test
+    fun `a spring pair endpoint can address a grid cell directly by row and col`() {
+        val yaml = """
+            version: 1
+            particles:
+              - grid: { name: cloth, rows: 3, cols: 3, mass: 1.0 }
+              - single: { id: anchor, name: anchor-p, position: [5.0, 0.0, 0.0] }
+            forces:
+              - spring:
+                  pairs: [[{ grid: cloth, row: 0, col: 0 }, anchor]]
+                  rest_length: 1.0
+                  stiffness: 10.0
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val spring = scenario.forces.single() as particlesim.physics.Spring
+        assertEquals(scenario.grids.getValue("cloth")[0][0], spring.particleA)
+    }
+
+    @Test
+    fun `a spring pair referencing an out-of-bounds grid cell is a load-time error`() {
+        val yaml = """
+            version: 1
+            particles:
+              - grid: { name: cloth, rows: 2, cols: 2, mass: 1.0 }
+              - single: { id: anchor, name: anchor-p, position: [5.0, 0.0, 0.0] }
+            forces:
+              - spring:
+                  pairs: [[{ grid: cloth, row: 9, col: 0 }, anchor]]
+                  rest_length: 1.0
+                  stiffness: 10.0
+        """.trimIndent()
+        val ex = assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+        assertTrue(ex.message!!.contains("out of bounds"))
+    }
+
+    @Test
     fun `a spring pair referencing an unknown author id is a load-time error`() {
         val yaml = """
             version: 1

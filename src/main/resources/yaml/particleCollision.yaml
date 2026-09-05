@@ -1,0 +1,74 @@
+# Approximates particlesim.debug.ParticleCollisionScene's scenario (ballGroup="balls",
+# radius=0.15, ballCount=18, wallExtent=1.5, and the floor/wall/particle-particle collision
+# rules' exact restitution/damping/friction values, all matched exactly). The one deliberate
+# simplification: the live scene staggers its 18 spawns one every 0.35s via an ad hoc timer
+# (SceneControlMessage-driven collider removal/particle-delete interactivity has no YAML
+# equivalent either) - this file spawns all 18 at once via random_volume instead, in the same
+# x/z footprint (a box of half-extent 0.75 around x=0, z=0) at the same drop height (y=2.0,
+# half_extents.y=0 keeps every ball at exactly that height). Not bit-identical to the live
+# scene's own Random(seed=1) sequence (random_volume's own sampling algorithm differs), just
+# the same physical setup.
+version: 1
+
+particles:
+  - random_volume:
+      name: balls
+      count: 18
+      seed: 1
+      radius: 0.15
+      shape:
+        box: { center: [0.0, 2.0, 0.0], half_extents: [0.75, 0.0, 0.75] }
+
+colliders:
+  - plane: { name: floor, position: [0.0, 0.0, 0.0], normal: [0.0, 1.0, 0.0] }
+  - plane: { name: wall-x-neg, position: [-1.5, 0.0, 0.0], normal: [1.0, 0.0, 0.0] }
+  - plane: { name: wall-x-pos, position: [1.5, 0.0, 0.0], normal: [-1.0, 0.0, 0.0] }
+  - plane: { name: wall-z-neg, position: [0.0, 0.0, -1.5], normal: [0.0, 0.0, 1.0] }
+  - plane: { name: wall-z-pos, position: [0.0, 0.0, 1.5], normal: [0.0, 0.0, -1.0] }
+
+forces:
+  - gravity:
+      group: balls
+      acceleration: [0.0, -9.8, 0.0]
+      name: gravity
+
+collisions:
+  rules:
+    - particle_collider:
+        group: balls
+        collider: floor
+        restitution: 0.5
+        compression_damping: 2.0
+        extension_damping: 0.3
+        static_friction: 0.6
+        kinetic_friction: 0.4
+    - particle_collider:
+        group: balls
+        collider: wall-x-neg
+        restitution: 0.5
+        static_friction: 0.3
+        kinetic_friction: 0.2
+    - particle_collider:
+        group: balls
+        collider: wall-x-pos
+        restitution: 0.5
+        static_friction: 0.3
+        kinetic_friction: 0.2
+    - particle_collider:
+        group: balls
+        collider: wall-z-neg
+        restitution: 0.5
+        static_friction: 0.3
+        kinetic_friction: 0.2
+    - particle_collider:
+        group: balls
+        collider: wall-z-pos
+        restitution: 0.5
+        static_friction: 0.3
+        kinetic_friction: 0.2
+    - particle_particle:
+        group_a: balls
+        restitution: 0.6
+        compression_damping: 1.0
+        static_friction: 0.4
+        kinetic_friction: 0.3

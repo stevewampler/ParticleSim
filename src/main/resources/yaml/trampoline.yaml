@@ -1,0 +1,73 @@
+# Matches particlesim.examples.buildTrampoline's defaults (rows=10, cols=10, spacing=0.2,
+# dropHeight=1.0, ballRadius=0.12, restitution=0.85, compressionDamping=0.5, extensionDamping=0.1).
+#
+# Axis note: the `grid:` generator always lays particles out in the X/Y plane (position =
+# (col*spacing, -row*spacing, 0), the same convention buildFlag's own cloth hangs in) - it has
+# no orientation parameter to reproduce buildTrampoline's own X/Z-plane, Y-up mat. So this
+# scenario is buildTrampoline rotated 90 degrees: "down" is -Z here instead of -Y, and the mat
+# sits in the X/Y plane instead of X/Z. Physically identical (a flat mat, a ball dropped
+# straight at its center, bouncing via surface_collider), just not literally axis-for-axis the
+# same numbers as buildTrampoline's own centered-on-origin layout - this grid isn't centered
+# either (no `origin:` given), so the mat spans x:[0, 1.8], y:[-1.8, 0], and the ball's (x, y)
+# below is that span's own center, not (0, 0).
+version: 1
+
+particles:
+  - grid:
+      name: mat
+      rows: 10
+      cols: 10
+      spacing: 0.2
+      mass: 0.02
+      edge_groups:
+        - { edge: left, group: rim }
+        - { edge: right, group: rim }
+        - { edge: top, group: rim }
+        - { edge: bottom, group: rim }
+  - single:
+      name: ball
+      position: [0.9, -0.9, 1.0]
+      radius: 0.12
+
+forces:
+  - gravity:
+      group: mat
+      acceleration: [0.0, 0.0, -9.8]
+      name: gravity
+  - gravity:
+      group: ball
+      acceleration: [0.0, 0.0, -9.8]
+      name: ball-gravity
+  - mesh_springs:
+      grid: mat
+      edges: structural
+      stiffness: 2000.0
+      damping: 4.0
+      name: structural-springs
+  - mesh_springs:
+      grid: mat
+      edges: shear
+      stiffness: 1000.0
+      damping: 2.0
+      name: shear-springs
+  - mesh_springs:
+      grid: mat
+      edges: bend
+      stiffness: 200.0
+      damping: 0.5
+      name: bend-springs
+
+constraints:
+  - fixed_position:
+      group: rim
+      at_current_positions: true
+      name: rim-anchor
+
+collisions:
+  rules:
+    - surface_collider:
+        group: ball
+        surface: mat
+        restitution: 0.85
+        compression_damping: 0.5
+        extension_damping: 0.1

@@ -9,7 +9,7 @@ import kotlin.test.Test
 
 /**
  * Proves §4's "both front-ends build the same in-memory model" for the spark-fountain scenario,
- * the same way [FlagYamlParityTest] does for the flag: loads `src/test/resources/yaml/sparks.yaml`
+ * the same way [FlagYamlParityTest] does for the flag: loads `src/main/resources/yaml/sparks.yaml`
  * (hand-written to match [particlesim.examples.buildSparks]'s exact parameters and force
  * order), runs it through [SparksGoldenTest]'s identical per-step loop order
  * (`integrator.step` → `destruction.resolve` → `emitter.update`) and aggregate-sample function,

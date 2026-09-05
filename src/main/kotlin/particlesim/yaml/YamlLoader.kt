@@ -583,7 +583,7 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
                     // there's more than one (matching how buildTire/buildRope name theirs).
                     val f = map.requireMap("spring", context)
                     val sc = "$context.spring"
-                    val pairs = resolvePairs(f, "pairs", sc, authorIds)
+                    val pairs = resolvePairs(f, "pairs", sc, authorIds, grids)
                     val restLength = f.requireDouble("rest_length", sc)
                     val (stiffness, extStiffness, compStiffness) = f.requireDirectionalTriple("stiffness", sc)
                     val minLength = f.optionalDouble("min_length", Spring.DEFAULT_MIN_LENGTH, sc)
@@ -604,7 +604,7 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
                     // `pairs:` and per-pair naming take the same shape here.
                     val f = map.requireMap("damper", context)
                     val dc = "$context.damper"
-                    val pairs = resolvePairs(f, "pairs", dc, authorIds)
+                    val pairs = resolvePairs(f, "pairs", dc, authorIds, grids)
                     val (damping, extDamping, compDamping) = f.requireDirectionalTriple("damping", dc)
                     val minLength = f.optionalDouble("min_length", Spring.DEFAULT_MIN_LENGTH, dc)
                     val (breakThreshold, extBreak, compBreak) = f.directionalTriple("break_threshold", dc, Double.POSITIVE_INFINITY)
@@ -628,25 +628,42 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
     }
 
     /** A `pairs:` field shared by standalone `spring`/`damper` force entries - a list of
-     * `[idA, idB]` author-id pairs (resolved through [authorIds], the same map Phase 2's `ids:`
-     * selector already reads), each becoming one [Spring]/[Damper] instance sharing this entry's
-     * other fields (stiffness/damping/etc.). */
-    private fun resolvePairs(f: Map<*, *>, key: String, context: String, authorIds: Map<String, Int>): List<Pair<Int, Int>> {
+     * `[a, b]` endpoint pairs, each becoming one [Spring]/[Damper] instance sharing this entry's
+     * other fields (stiffness/damping/etc.). Each endpoint is either an author-id string
+     * (resolved through [authorIds], the same map Phase 2's `ids:` selector already reads) or a
+     * `{grid, row, col}` mapping addressing one particle of a named grid directly - needed for a
+     * spring/damper stitching a `grid:`-generated surface (no per-cell author ids of its own,
+     * e.g. `buildFlagOnRopeScenario`'s attachment springs between a flag row's pole-edge
+     * particle and a rope segment) to another particle. */
+    private fun resolvePairs(
+        f: Map<*, *>, key: String, context: String, authorIds: Map<String, Int>, grids: Map<String, List<List<Int>>>,
+    ): List<Pair<Int, Int>> {
         val list = f.requireListOrEmpty(key, context)
         if (list.isEmpty()) throw YamlLoadException("$context.$key: expected at least one [a, b] pair")
         return list.mapIndexed { i, entry ->
             val pair = entry as? List<*> ?: throw YamlLoadException("$context.$key[$i]: expected a [a, b] list")
             if (pair.size != 2) throw YamlLoadException("$context.$key[$i]: expected exactly 2 ids, got ${pair.size}")
-            val a = resolveAuthorId(pair[0], authorIds, "$context.$key[$i]")
-            val b = resolveAuthorId(pair[1], authorIds, "$context.$key[$i]")
+            val a = resolvePairEndpoint(pair[0], authorIds, grids, "$context.$key[$i]")
+            val b = resolvePairEndpoint(pair[1], authorIds, grids, "$context.$key[$i]")
             a to b
         }
     }
 
-    private fun resolveAuthorId(v: Any?, authorIds: Map<String, Int>, context: String): Int {
-        val idStr = v as? String ?: throw YamlLoadException("$context: expected an author id string")
-        return authorIds[idStr] ?: throw YamlLoadException("$context: unknown id '$idStr'")
-    }
+    private fun resolvePairEndpoint(v: Any?, authorIds: Map<String, Int>, grids: Map<String, List<List<Int>>>, context: String): Int =
+        when (v) {
+            is String -> authorIds[v] ?: throw YamlLoadException("$context: unknown id '$v'")
+            is Map<*, *> -> {
+                val gridName = v.requireString("grid", context)
+                val grid = grids[gridName] ?: throw YamlLoadException("$context.grid: unknown grid '$gridName'")
+                val row = v.requireInt("row", context)
+                val col = v.requireInt("col", context)
+                if (row !in grid.indices || col !in (grid.getOrNull(row)?.indices ?: IntRange.EMPTY)) {
+                    throw YamlLoadException("$context: [$row, $col] out of bounds for grid '$gridName'")
+                }
+                grid[row][col]
+            }
+            else -> throw YamlLoadException("$context: expected an author id string or a {grid, row, col} mapping")
+        }
 
     private fun loadConstraints(
         root: Map<*, *>, store: ParticleStore, groups: Groups,

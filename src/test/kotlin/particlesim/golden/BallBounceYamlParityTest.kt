@@ -8,7 +8,7 @@ import kotlin.test.Test
 /**
  * Proves §4's "both front-ends build the same in-memory model" for the ball-bounce scenario,
  * the same way [FlagYamlParityTest] does for the flag: loads
- * `src/test/resources/yaml/ball_bounce.yaml` (hand-written to match [particlesim.examples.buildBallBounce]'s
+ * `src/main/resources/yaml/ball_bounce.yaml` (hand-written to match [particlesim.examples.buildBallBounce]'s
  * exact defaults), runs it through [BallBounceGoldenTest]'s identical sampling logic, and
  * asserts the result matches the *same* checked-in `ball_bounce.golden.txt`.
  */

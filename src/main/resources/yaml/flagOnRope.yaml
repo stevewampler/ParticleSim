@@ -1,0 +1,115 @@
+# Matches particlesim.debug.buildFlagOnRopeScenario's defaults (poleHeight=3.5, flagRows=8,
+# flagCols=14, flagSpacing=0.15, ropeSegments=13, ropeBottomOffsetX=0.15,
+# poleCollisionRadius=0.03, ropeCollisionRadius=0.015): a flagpole + a rope hanging from its top
+# + a flag whose pole-edge is stitched to the rope's top 8 segments by individual attachment
+# springs/dampers (via the {grid, row, col} pair-endpoint form - the flag's pole edge is
+# grid-generated, so it has no per-cell author ids of its own) instead of being pinned directly
+# to the pole. The pole+rope also collide against the flag's own cloth surface via
+# surface_collider, so neither passes through it.
+#
+# Row-for-row vertical alignment is exact by construction (see buildFlagOnRopeScenario's own
+# doc comment): ropeSegments=13 is chosen so the rope's per-segment vertical step
+# ((topAnchor.y - bottomAnchor.y) / ropeSegments) exactly equals flagSpacing (0.15), so rope
+# segment i's y matches flag row i's y for every row the flag actually reaches (0..7). Only a
+# small sideways gap remains (rope drifts toward ropeBottomOffsetX while the flag's edge stays
+# at x=0), which is what gives the attachment springs their small nonzero rest length below.
+version: 1
+
+particles:
+  - list:
+      name: pole
+      particles:
+        - { position: [0.0, 0.0000000, 0.0], radius: 0.03, tags: [poleRopeCollidable] }
+        - { position: [0.0, 0.5833333, 0.0], radius: 0.03, tags: [poleRopeCollidable] }
+        - { position: [0.0, 1.1666667, 0.0], radius: 0.03, tags: [poleRopeCollidable] }
+        - { position: [0.0, 1.7500000, 0.0], radius: 0.03, tags: [poleRopeCollidable] }
+        - { position: [0.0, 2.3333333, 0.0], radius: 0.03, tags: [poleRopeCollidable] }
+        - { position: [0.0, 2.9166667, 0.0], radius: 0.03, tags: [poleRopeCollidable] }
+        - { position: [0.0, 3.5000000, 0.0], radius: 0.03, tags: [poleRopeCollidable] }
+  - list:
+      name: rope
+      particles:
+        - { id: rope0, position: [0.0000000, 3.5000000, 0.0], mass: 0.005, radius: 0.015, tags: [poleRopeCollidable] }
+        - { id: rope1, position: [0.0115385, 3.3500000, 0.0], mass: 0.005, radius: 0.015, tags: [poleRopeCollidable] }
+        - { id: rope2, position: [0.0230769, 3.2000000, 0.0], mass: 0.005, radius: 0.015, tags: [poleRopeCollidable] }
+        - { id: rope3, position: [0.0346154, 3.0500000, 0.0], mass: 0.005, radius: 0.015, tags: [poleRopeCollidable] }
+        - { id: rope4, position: [0.0461538, 2.9000000, 0.0], mass: 0.005, radius: 0.015, tags: [poleRopeCollidable] }
+        - { id: rope5, position: [0.0576923, 2.7500000, 0.0], mass: 0.005, radius: 0.015, tags: [poleRopeCollidable] }
+        - { id: rope6, position: [0.0692308, 2.6000000, 0.0], mass: 0.005, radius: 0.015, tags: [poleRopeCollidable] }
+        - { id: rope7, position: [0.0807692, 2.4500000, 0.0], mass: 0.005, radius: 0.015, tags: [poleRopeCollidable] }
+        - { id: rope8, position: [0.0923077, 2.3000000, 0.0], mass: 0.005, radius: 0.015, tags: [poleRopeCollidable] }
+        - { id: rope9, position: [0.1038462, 2.1500000, 0.0], mass: 0.005, radius: 0.015, tags: [poleRopeCollidable] }
+        - { id: rope10, position: [0.1153846, 2.0000000, 0.0], mass: 0.005, radius: 0.015, tags: [poleRopeCollidable] }
+        - { id: rope11, position: [0.1269231, 1.8500000, 0.0], mass: 0.005, radius: 0.015, tags: [poleRopeCollidable] }
+        - { id: rope12, position: [0.1384615, 1.7000000, 0.0], mass: 0.005, radius: 0.015, tags: [poleRopeCollidable] }
+        - { id: rope13, position: [0.1500000, 1.5500000, 0.0], mass: 0.005, radius: 0.015, tags: [poleRopeCollidable] }
+  - grid:
+      name: cloth
+      rows: 8
+      cols: 14
+      spacing: 0.15
+      mass: 0.005
+      origin: [0.0, 3.5, 0.0]
+
+groups:
+  - name: rope-anchors
+    select: { ids: [rope0, rope13] }
+  - name: poleRopeCollidable
+    select: { tags: [poleRopeCollidable] }
+
+forces:
+  - gravity: { group: rope, acceleration: [0.0, -9.8, 0.0] }
+  - gravity: { group: cloth, acceleration: [0.0, -9.8, 0.0] }
+  - wind:
+      grid: cloth
+      velocity: "[6.0 + 2.0*sin(t*0.7), 0.3*sin(t*1.3), 0.8*cos(t*0.9)]"
+      density: 1.2
+  - mesh_springs: { grid: cloth, edges: structural, stiffness: 200.0, damping: 1.0 }
+  - mesh_springs: { grid: cloth, edges: shear, stiffness: 100.0, damping: 0.5 }
+  - mesh_springs: { grid: cloth, edges: bend, stiffness: 20.0, damping: 0.2 }
+  - spring:
+      pairs: [[rope0, rope1], [rope1, rope2], [rope2, rope3], [rope3, rope4], [rope4, rope5],
+              [rope5, rope6], [rope6, rope7], [rope7, rope8], [rope8, rope9], [rope9, rope10],
+              [rope10, rope11], [rope11, rope12], [rope12, rope13]]
+      rest_length: 0.15044313
+      stiffness: 200.0
+      compression_stiffness: 0.0
+      name: segment-spring
+  - damper:
+      pairs: [[rope0, rope1], [rope1, rope2], [rope2, rope3], [rope3, rope4], [rope4, rope5],
+              [rope5, rope6], [rope6, rope7], [rope7, rope8], [rope8, rope9], [rope9, rope10],
+              [rope10, rope11], [rope11, rope12], [rope12, rope13]]
+      damping: 1.0
+      name: segment-damper
+  # Attachment springs replace the flag's own pole-anchor pin - each connects one flag row's
+  # pole-edge particle (grid cell [row][0], addressed directly since the grid generator gives
+  # it no author id of its own) to the rope's corresponding segment. Rest length isn't zero
+  # except at row 0 - see this file's own header comment on the small sideways gap.
+  - spring: { pairs: [[{ grid: cloth, row: 0, col: 0 }, rope0]], rest_length: 0.0, stiffness: 200.0, name: attachment-spring-0 }
+  - spring: { pairs: [[{ grid: cloth, row: 1, col: 0 }, rope1]], rest_length: 0.0115385, stiffness: 200.0, name: attachment-spring-1 }
+  - spring: { pairs: [[{ grid: cloth, row: 2, col: 0 }, rope2]], rest_length: 0.0230769, stiffness: 200.0, name: attachment-spring-2 }
+  - spring: { pairs: [[{ grid: cloth, row: 3, col: 0 }, rope3]], rest_length: 0.0346154, stiffness: 200.0, name: attachment-spring-3 }
+  - spring: { pairs: [[{ grid: cloth, row: 4, col: 0 }, rope4]], rest_length: 0.0461538, stiffness: 200.0, name: attachment-spring-4 }
+  - spring: { pairs: [[{ grid: cloth, row: 5, col: 0 }, rope5]], rest_length: 0.0576923, stiffness: 200.0, name: attachment-spring-5 }
+  - spring: { pairs: [[{ grid: cloth, row: 6, col: 0 }, rope6]], rest_length: 0.0692308, stiffness: 200.0, name: attachment-spring-6 }
+  - spring: { pairs: [[{ grid: cloth, row: 7, col: 0 }, rope7]], rest_length: 0.0807692, stiffness: 200.0, name: attachment-spring-7 }
+  - damper:
+      pairs: [[{ grid: cloth, row: 0, col: 0 }, rope0], [{ grid: cloth, row: 1, col: 0 }, rope1],
+              [{ grid: cloth, row: 2, col: 0 }, rope2], [{ grid: cloth, row: 3, col: 0 }, rope3],
+              [{ grid: cloth, row: 4, col: 0 }, rope4], [{ grid: cloth, row: 5, col: 0 }, rope5],
+              [{ grid: cloth, row: 6, col: 0 }, rope6], [{ grid: cloth, row: 7, col: 0 }, rope7]]
+      damping: 1.0
+      name: attachment-damper
+
+constraints:
+  - fixed_position: { group: pole, at_current_positions: true }
+  - fixed_position: { group: rope-anchors, at_current_positions: true }
+
+collisions:
+  rules:
+    - surface_collider:
+        group: poleRopeCollidable
+        surface: cloth
+        restitution: 0.1
+        compression_damping: 2.0
+        extension_damping: 0.5
