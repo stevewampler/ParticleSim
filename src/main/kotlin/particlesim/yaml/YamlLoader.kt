@@ -6,10 +6,13 @@ import particlesim.core.ParticleStore
 import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
 import particlesim.core.VectorExpr
+import particlesim.physics.ConstantForce
 import particlesim.physics.Constraint
+import particlesim.physics.Drag
 import particlesim.physics.FixedPosition
 import particlesim.physics.Force
 import particlesim.physics.MeshSprings
+import particlesim.physics.NBodyGravity
 import particlesim.physics.UniformGravity
 import particlesim.physics.Wind
 import particlesim.surface.Grid
@@ -424,7 +427,7 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
                     val group = f.requireString("group", "$context.gravity")
                     requireKnownGroup(group, "$context.gravity.group")
                     val accel = f.requireVectorLiteral("acceleration", "$context.gravity")
-                    forces += UniformGravity(group, accel)
+                    forces += UniformGravity(group, accel, name = f.optionalString("name"))
                 }
                 map.containsKey("mesh_springs") -> {
                     val f = map.requireMap("mesh_springs", context)
@@ -438,9 +441,23 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
                             "$context.mesh_springs.edges: unknown edge type '$edgeType' (expected structural/shear/bend)",
                         )
                     }
-                    val stiffness = f.requireDouble("stiffness", "$context.mesh_springs")
-                    val damping = f.optionalDouble("damping", 0.0)
-                    forces += MeshSprings(edges, store, stiffness = stiffness, damping = damping)
+                    // Phase 3 of the YAML front-end's second pass: mesh_springs now exposes the
+                    // full direction-dependent stiffness/damping/break-threshold triple Phase 0's
+                    // helpers were built for - stiffness stays mandatory (matches MeshSprings'
+                    // own constructor, which has no Kotlin-side default for it), damping and
+                    // break_threshold stay optional, defaulting to 0.0/infinity exactly as
+                    // MeshSprings' own constructor does.
+                    val mc = "$context.mesh_springs"
+                    val (stiffness, extStiffness, compStiffness) = f.requireDirectionalTriple("stiffness", mc)
+                    val (damping, extDamping, compDamping) = f.directionalTriple("damping", mc, 0.0)
+                    val (breakThreshold, extBreak, compBreak) = f.directionalTriple("break_threshold", mc, Double.POSITIVE_INFINITY)
+                    forces += MeshSprings(
+                        edges, store,
+                        stiffness = stiffness, extensionStiffness = extStiffness, compressionStiffness = compStiffness,
+                        damping = damping, extensionDamping = extDamping, compressionDamping = compDamping,
+                        breakThreshold = breakThreshold, extensionBreakThreshold = extBreak, compressionBreakThreshold = compBreak,
+                        name = f.optionalString("name"),
+                    )
                 }
                 map.containsKey("wind") -> {
                     val f = map.requireMap("wind", context)
@@ -448,9 +465,40 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
                     val triangles = Grid.triangles(grid)
                     val velocity = f.requireVectorExpr("velocity", "$context.wind")
                     val density = f.optionalDouble("density", 1.0)
-                    forces += Wind(triangles, velocity, density = density)
+                    forces += Wind(triangles, velocity, density = density, name = f.optionalString("name"))
                 }
-                else -> throw YamlLoadException("$context: unknown force type (expected one of: gravity, mesh_springs, wind)")
+                map.containsKey("drag") -> {
+                    val f = map.requireMap("drag", context)
+                    val group = f.requireString("group", "$context.drag")
+                    requireKnownGroup(group, "$context.drag.group")
+                    val coefficient = f.requireDouble("coefficient", "$context.drag")
+                    val quadratic = f.optionalBoolean("quadratic", false)
+                    forces += Drag(group, coefficient, quadratic = quadratic, name = f.optionalString("name"))
+                }
+                map.containsKey("nbody_gravity") -> {
+                    val f = map.requireMap("nbody_gravity", context)
+                    val group = f.requireString("group", "$context.nbody_gravity")
+                    requireKnownGroup(group, "$context.nbody_gravity.group")
+                    // 6.674e-11 mirrors NBodyGravity's own constructor default exactly (no
+                    // named constant on that side to reference - it's an inline literal there
+                    // too); DEFAULT_SOFTENING is a real exposed constant, used directly.
+                    val g = f.optionalDouble("g", 6.674e-11)
+                    val softening = f.optionalDouble("softening", NBodyGravity.DEFAULT_SOFTENING)
+                    forces += NBodyGravity(group, g = g, softening = softening, name = f.optionalString("name"))
+                }
+                map.containsKey("constant_force") -> {
+                    // §6's "fixed force" - implemented as a Force (ConstantForce), not a
+                    // Constraint, since it's just an externally supplied force term, not a
+                    // pinned state (see requirements.md §6's own distinction).
+                    val f = map.requireMap("constant_force", context)
+                    val group = f.requireString("group", "$context.constant_force")
+                    requireKnownGroup(group, "$context.constant_force.group")
+                    val force = f.requireVectorLiteral("force", "$context.constant_force")
+                    forces += ConstantForce(group, force, name = f.optionalString("name"))
+                }
+                else -> throw YamlLoadException(
+                    "$context: unknown force type (expected one of: gravity, mesh_springs, wind, drag, nbody_gravity, constant_force)",
+                )
             }
         }
         return forces

@@ -1,6 +1,12 @@
 package particlesim.yaml
 
 import particlesim.core.Vector3
+import particlesim.physics.ConstantForce
+import particlesim.physics.Drag
+import particlesim.physics.FieldValue
+import particlesim.physics.Integrator
+import particlesim.physics.MeshSprings
+import particlesim.physics.NBodyGravity
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -598,5 +604,134 @@ class YamlLoaderTest {
         """.trimIndent()
         val scenario = YamlLoader().load(yaml)
         assertEquals(1, scenario.forces.size)
+    }
+
+    // --- Phase 3 of the YAML second pass: remaining forces -------------------------------------
+
+    @Test
+    fun `forces accept an optional name field`() {
+        val yaml = minimalGrid(
+            """
+            forces:
+              - gravity:
+                  group: g
+                  acceleration: [0.0, -1.0, 0.0]
+                  name: main-gravity
+            """.trimIndent(),
+        )
+        val scenario = YamlLoader().load(yaml)
+        assertEquals("main-gravity", scenario.forces.single().name)
+    }
+
+    @Test
+    fun `nbody_gravity accepts optional g and softening overrides`() {
+        val yaml = """
+            version: 1
+            particles:
+              - single: { name: bodies, position: [0.0, 0.0, 0.0] }
+            forces:
+              - nbody_gravity:
+                  group: bodies
+                  g: 1.0
+                  softening: 0.1
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val force = scenario.forces.single() as NBodyGravity
+        assertEquals(FieldValue.Scalar(1.0), force.editableFields()["g"])
+        assertEquals(FieldValue.Scalar(0.1), force.editableFields()["softening"])
+    }
+
+    @Test
+    fun `nbody_gravity defaults g and softening when not given`() {
+        val yaml = """
+            version: 1
+            particles:
+              - single: { name: bodies, position: [0.0, 0.0, 0.0] }
+            forces:
+              - nbody_gravity:
+                  group: bodies
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val force = scenario.forces.single() as NBodyGravity
+        assertEquals(6.674e-11, (force.editableFields()["g"] as FieldValue.Scalar).value, 1e-20)
+        assertEquals(NBodyGravity.DEFAULT_SOFTENING, (force.editableFields()["softening"] as FieldValue.Scalar).value, 1e-12)
+    }
+
+    @Test
+    fun `drag reduces a moving particle's speed over one integration step`() {
+        val yaml = """
+            version: 1
+            particles:
+              - single: { name: p, position: [0.0, 0.0, 0.0], velocity: [10.0, 0.0, 0.0] }
+            forces:
+              - drag:
+                  group: p
+                  coefficient: 1.0
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertTrue(scenario.forces.single() is Drag)
+        Integrator().step(scenario.store, scenario.groups, scenario.forces, emptyList(), 0.0, 1e-3)
+        val id = scenario.groups.membersOf("p").single()
+        assertTrue(scenario.store.velocity(id).length() < 10.0)
+    }
+
+    @Test
+    fun `constant_force applies a fixed force regardless of position`() {
+        val yaml = """
+            version: 1
+            particles:
+              - single: { name: p, position: [0.0, 0.0, 0.0] }
+            forces:
+              - constant_force:
+                  group: p
+                  force: [0.0, 5.0, 0.0]
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertTrue(scenario.forces.single() is ConstantForce)
+        Integrator().step(scenario.store, scenario.groups, scenario.forces, emptyList(), 0.0, 1e-3)
+        val id = scenario.groups.membersOf("p").single()
+        assertTrue(scenario.store.velocity(id).y > 0.0)
+    }
+
+    @Test
+    fun `mesh_springs exposes the direction-dependent stiffness, damping, and break-threshold triple`() {
+        val yaml = minimalGrid(
+            """
+            forces:
+              - mesh_springs:
+                  grid: g
+                  edges: structural
+                  stiffness: 100.0
+                  extension_stiffness: 120.0
+                  compression_stiffness: 80.0
+                  damping: 1.0
+                  extension_damping: 1.5
+                  break_threshold: 0.5
+                  extension_break_threshold: 0.3
+            """.trimIndent(),
+        )
+        val scenario = YamlLoader().load(yaml)
+        val force = scenario.forces.single() as MeshSprings
+        val fields = force.editableFields()
+        assertEquals(FieldValue.Scalar(120.0), fields["extensionStiffness"])
+        assertEquals(FieldValue.Scalar(80.0), fields["compressionStiffness"])
+        assertEquals(FieldValue.Scalar(1.5), fields["extensionDamping"])
+        assertEquals(FieldValue.Scalar(1.0), fields["compressionDamping"]) // falls back to damping
+        assertEquals(FieldValue.Scalar(0.3), fields["extensionBreakThreshold"])
+        assertEquals(FieldValue.Scalar(0.5), fields["compressionBreakThreshold"]) // falls back to break_threshold
+    }
+
+    @Test
+    fun `mesh_springs still requires stiffness`() {
+        val yaml = minimalGrid(
+            """
+            forces:
+              - mesh_springs:
+                  grid: g
+                  edges: structural
+            """.trimIndent(),
+        )
+        val ex = assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+        assertTrue(ex.message!!.contains("stiffness"))
     }
 }

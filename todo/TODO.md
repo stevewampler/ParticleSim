@@ -4514,6 +4514,41 @@ declarations (nothing needs one).
       Full `./gradlew test -q` suite green, including `FlagYamlParityTest`
       — `flag.yaml` uses no selectors, so the reordered `groups:` pass
       resolves it identically to before.
+- [x] **Phase 3 — remaining forces.** Three new `forces:` kinds — `drag`
+      (`coefficient`, optional `quadratic`), `nbody_gravity` (optional `g`/
+      `softening`, defaulting to `NBodyGravity`'s own constructor defaults
+      — `6.674e-11` mirrored as a literal since that side has no exposed
+      named constant for it, `DEFAULT_SOFTENING` referenced directly since
+      it does), `constant_force` (§6's "fixed force," which turned out to
+      already be a `Force` — `ConstantForce` — not a `Constraint`, per the
+      Kotlin API research this whole second pass started from). `mesh_springs`
+      rewritten to use Phase 0's `requireDirectionalTriple`/
+      `directionalTriple` for stiffness (still mandatory, no Kotlin-side
+      default), damping, and break-threshold — previously only a single
+      symmetric stiffness/damping with no breakable support at all, now the
+      full six-field direction-dependent shape `MeshSprings`' own
+      constructor exposes. Also: **every force kind gained an optional
+      `name:`** (`gravity`/`mesh_springs`/`wind` had none before this
+      phase, a gap noticed while wiring the new kinds, not originally
+      called out in the plan — free to add since every `Force` constructor
+      already defaults `name` to `null`, and named forces are exactly what
+      §10.3's outliner needs to reach them, the same reachability work this
+      session already did for lights/colliders).
+      New `YamlLoaderTest` cases (8): `name:` reaches `Force.name`,
+      `nbody_gravity`'s override and default paths (asserted via its own
+      `editableFields()`, since it implements `EditableFields`),
+      `drag`/`constant_force` (neither implements `EditableFields` — their
+      fields are `private val`s with no public accessor, so verified
+      functionally instead: one `Integrator.step` and check the expected
+      physical effect — drag reduces speed, a constant force accelerates
+      in its own direction), `mesh_springs`' full triple with every
+      extension/compression override present and one path left to its
+      symmetric fallback, and `mesh_springs` still requiring `stiffness`.
+      Full `./gradlew test -q` suite green, including `FlagYamlParityTest`
+      as a direct regression guard on the rewritten `mesh_springs` default
+      path (flag.yaml gives no extension/compression overrides, so its
+      three `mesh_springs` blocks exercise exactly the "falls back to the
+      base value" branch every existing golden sample already depends on).
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
