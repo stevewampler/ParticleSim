@@ -80,11 +80,17 @@ data class YamlScenario(
 class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(it) }) {
 
     fun load(yamlText: String): YamlScenario {
-        val root = (Yaml().load<Any?>(yamlText) as? Map<*, *>)
+        val parsedRoot = (Yaml().load<Any?>(yamlText) as? Map<*, *>)
             ?: throw YamlLoadException("root document must be a mapping")
 
-        val version = root["version"] ?: throw YamlLoadException("missing required top-level field 'version'")
+        val version = parsedRoot["version"] ?: throw YamlLoadException("missing required top-level field 'version'")
         if (version != 1) throw YamlLoadException("unsupported version '$version' (only version 1 is supported)")
+
+        // Phase 8's shape registry (§4.5) is a pre-processing pass, not another section loader:
+        // it rewrites shape_definitions:/shapes: into ordinary particles:/forces:/etc. entries
+        // merged into root, so everything below has no idea any of it came from a shape rather
+        // than being authored inline. A document with neither key returns parsedRoot unchanged.
+        val root = ShapeRegistry.expand(parsedRoot)
 
         val store = ParticleStore()
         val groups = Groups()
@@ -285,11 +291,15 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         val spacing = gridSection.optionalDouble("spacing", 1.0)
         val massExpr = gridSection.requireScalarExpr("mass", context)
         val tags = gridSection.requireStringList("tags", context)
+        // Phase 8's shape registry is the only current writer of this field - see its own doc
+        // comment - translating a whole grid by a shape instance's placement offset, the
+        // grid-generation counterpart to particles/colliders' own literal `position` translation.
+        val origin = gridSection.optionalVectorLiteral("origin", context, Vector3.ZERO)
 
         val grid = (0 until rows).map { r ->
             (0 until cols).map { c ->
                 val id = try {
-                    store.create(position = Vector3(c * spacing, -r * spacing, 0.0), mass = massExpr)
+                    store.create(position = Vector3(c * spacing, -r * spacing, 0.0) + origin, mass = massExpr)
                 } catch (e: IllegalArgumentException) {
                     throw YamlLoadException("$context.mass: ${e.message}")
                 }

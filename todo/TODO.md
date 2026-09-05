@@ -4702,6 +4702,73 @@ declarations (nothing needs one).
       Full `./gradlew test -q` suite green (now including
       `BallBounceGoldenTest`, `BallBounceYamlParityTest`, and
       `SparksYamlParityTest` alongside every earlier phase's own tests).
+- [x] **Phase 8 — shape library/registry (§4.5).** New top-level
+      `shape_definitions:` (name, `params: {name: {type, default}}` —
+      `type` informational only, never enforced — and a `body:` written in
+      the exact grammar Phases 0-7 built) and `shapes:` (`use`, optional
+      `instance`/`offset`/`params`). New `particlesim.yaml.ShapeRegistry`,
+      wired in as a **pre-processing pass over the raw parsed document**
+      (`ShapeRegistry.expand(parsedRoot)`, called at the very top of
+      `YamlLoader.load` before anything else runs) rather than a second
+      parser — it rewrites a shape instance's body (namespacing, `$param`
+      substitution, offset) and merges the result into the ordinary
+      top-level `particles:`/`forces:`/`constraints:`/`colliders:`/
+      `collisions.rules`/`destroy:`/`emitters:`/`groups:` lists, so every
+      other loader in this file has no idea any of its input came from a
+      shape rather than being authored inline - Phases 0-7's section
+      loaders are reused wholesale, not duplicated.
+      **Namespacing and reference-resolution are the same transform**:
+      `instance` dot-prefixes (`"$instanceName.$local"`, matching
+      `particlesim.examples.ShapePlacement.name` exactly) every value
+      under a fixed set of name-carrying keys — `name` (a declaration),
+      `group`/`group_a`/`group_b`/`grid`/`collider` (references to a
+      declaration elsewhere in the same body). Declarations and references
+      get the *identical* prefix, which is what keeps them resolving
+      against each other correctly post-rewrite without needing to tell
+      the two apart.
+      **Offset translation, two cases**: a literal `position` (particles,
+      colliders) gets the offset added component-wise directly; a `grid`
+      generator has no `position` field at all (positions come from row/
+      col arithmetic), so this phase added a genuinely new `origin:`
+      field to the grid generator itself (`YamlLoader.loadGrid`, new
+      `optionalVectorLiteral` helper in `YamlFields.kt`) specifically for
+      the shape registry to write into — mirroring
+      `buildBallBounce`'s own "the floor collider's position moves with
+      placement too, not just the ball" precedent for colliders.
+      **Scope, matching only what `flag`/`ball_bounce` actually need**:
+      `$paramName` substitution is whole-value only, not embeddable inside
+      a larger expression string; a shape body's own
+      `collisions.rest_velocity`/`rest_penetration` are ignored (only
+      `rules:` merges — those are scene-wide knobs, not shape-local);
+      author ids (`id:`/`select.ids`) aren't namespaced, an accepted gap
+      since neither target shape uses them.
+      **A real, documented pitfall hit while writing the tests, not the
+      implementation**: a shared YAML fragment (`ballBounceDefinition()`,
+      already `.trimIndent()`'d to column 0) interpolated into a second
+      `"""..."""`.trimIndent()` string threw off that second call's
+      common-indentation calculation and produced a SnakeYAML parse error
+      ("expected document start, but found block sequence start") —
+      exactly the nested-`trimIndent()` interaction bug
+      `YamlLoaderTest.minimalGrid`'s own doc comment already warned about,
+      just rediscovered independently while writing this file's tests
+      before noticing the existing warning. Fixed by concatenating
+      already-trimmed fragments with plain string ops (`+`, template
+      interpolation) instead of nesting a second `trimIndent()` call
+      around them — documented directly in `ShapeRegistryTest`'s own class
+      doc comment so a third rediscovery doesn't happen.
+      New `ShapeRegistryTest` cases (8): single-instance round-trip through
+      the real loader pipeline, param override, two instances with
+      distinct namespaced groups/colliders/forces and the offset correctly
+      applied to *both* the particle and the collider position, a
+      grid-based shape's `origin` translated by the offset, missing-
+      required-parameter error, unknown-shape-reference error,
+      duplicate-definition-name error, and a plain document with neither
+      key completely unaffected (the common case).
+      Full `./gradlew test -q` suite green, including every earlier
+      phase's tests and `FlagYamlParityTest`/`BallBounceYamlParityTest`/
+      `SparksYamlParityTest` — `ShapeRegistry.expand` returns its input
+      unchanged whenever `shape_definitions:`/`shapes:` are both absent,
+      so no existing fixture's behavior could have shifted.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

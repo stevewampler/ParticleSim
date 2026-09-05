@@ -127,6 +127,13 @@ internal fun Map<*, *>.requireVectorLiteral(key: String, context: String): Vecto
     return Vector3(x.toDouble(), y.toDouble(), z.toDouble())
 }
 
+/** [requireVectorLiteral]'s optional counterpart — falls back to [default] when [key] is
+ * absent, for fields like a grid generator's `origin:` (Phase 8's shape registry is the only
+ * current writer of this field, translating a whole grid by a shape instance's placement
+ * offset) where "not given" means "no translation," not an authoring mistake. */
+internal fun Map<*, *>.optionalVectorLiteral(key: String, context: String, default: Vector3): Vector3 =
+    if (this[key] == null) default else requireVectorLiteral(key, context)
+
 /** An expression-capable scalar field (§4.1): a literal number, or a string parsed by the
  * shared expression grammar. */
 internal fun Map<*, *>.requireScalarExpr(key: String, context: String): ScalarExpr = when (val v = this[key]) {
