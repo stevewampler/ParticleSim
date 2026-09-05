@@ -4569,6 +4569,53 @@ declarations (nothing needs one).
       correctly over time (`advance(t, dt)` then checking `position`),
       duplicate-name error, unknown-collider-type error.
       Full `./gradlew test -q` suite green.
+- [x] **Phase 5 — collision rules and destroy rules.** New top-level
+      `collisions: {rest_velocity?, rest_penetration?, rules: [...]}` with
+      two of §12.3's four rule/system pairs: `particle_collider`
+      (`ParticleColliderRule`→`CollisionSystem`, referencing a Phase-4
+      collider by name) and `particle_particle` (`ParticleCollisionRule`→
+      `ParticleCollisionSystem`, `group_b` defaulting to `group_a` matching
+      the Kotlin constructor's own default). `rest_velocity`/
+      `rest_penetration` are one shared pair, not per-rule, since both
+      systems already default to the identical values Kotlin-side.
+      **`surface_collider`/`surface_self` deliberately not wired** — no
+      named-surface YAML reference exists to target (surfaces are still
+      implicit, built from a grid), and no target scenario needs either;
+      the `when` dispatch is written so adding them later is additive, not
+      a rewrite. New top-level `destroy: [{group, outside_box: {center,
+      half_extents}} | {group, on_collision: {collider}}]`. `outside_box`
+      is a **structural shape, not a boolean-expression grammar** — TODO.md
+      already ruled out widening `ScalarExpr`/`VectorExpr`'s `evaluate(t)`
+      to carry per-particle position/comparisons for this pass, a breaking
+      change to the core expression contract every other phase here builds
+      on; `outside_box` covers `buildSparks`' actual predicate
+      (`abs(x)>10 || abs(z)>10`, an axis-aligned box exit test) without
+      inventing more than that one real consumer needs. `on_collision`
+      maps directly onto `CollisionDestroyRule`. `YamlScenario` gained
+      `collisionSystem`/`particleCollisionSystem`/`destruction`, all
+      nullable and `null` by default — a scene with neither pays nothing
+      extra.
+      **A real test bug caught by the test suite, not review**: two new
+      destroy-rule tests initially queried `groups.membersOf(...)` *after*
+      calling `destruction.resolve(...)` to find the id/particles they'd
+      just asserted got destroyed — but `resolve` already removes
+      destroyed particles from `groups`/`store` as part of resolving, so
+      the query came back empty (`NoSuchElementException` on `.single()`)
+      or short by exactly the destroyed count
+      (`IndexOutOfBoundsException`). Fixed by capturing the ids to check
+      *before* calling `resolve`, not after — a "test the thing before you
+      destroy the thing" ordering bug, not a loader bug; both failures
+      were caught by `./gradlew test -q` itself on the first run, not
+      left latent.
+      New `YamlLoaderTest` cases (7): a `particle_collider` rule actually
+      stopping a falling ball at the floor over 3000 real integration +
+      collision-resolve steps (not just a load-time structural check),
+      unknown-collider-referenced error, `particle_particle`'s `group_b`
+      defaulting, `outside_box` firing only past its bounds, `on_collision`
+      firing on contact, unknown-collider error for `on_collision`, and
+      `collisionSystem`/`particleCollisionSystem`/`destruction` all `null`
+      by default.
+      Full `./gradlew test -q` suite green.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

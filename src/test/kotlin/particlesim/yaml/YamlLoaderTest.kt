@@ -828,4 +828,142 @@ class YamlLoaderTest {
         )
         assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
     }
+
+    // --- Phase 5 of the YAML second pass: collision rules and destroy rules -------------------
+
+    @Test
+    fun `a particle_collider rule stops a falling particle at the floor`() {
+        val yaml = """
+            version: 1
+            particles:
+              - single: { name: ball, position: [0.0, 5.0, 0.0], mass: 1.0, radius: 0.2 }
+            colliders:
+              - plane: { name: floor, position: [0.0, 0.0, 0.0], normal: [0.0, 1.0, 0.0] }
+            forces:
+              - gravity: { group: ball, acceleration: [0.0, -9.8, 0.0] }
+            collisions:
+              rules:
+                - particle_collider:
+                    group: ball
+                    collider: floor
+                    restitution: 0.3
+                    compression_damping: 3.0
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertTrue(scenario.collisionSystem != null)
+        val id = scenario.groups.membersOf("ball").single()
+        val integrator = Integrator()
+        var t = 0.0
+        val dt = 1e-3
+        repeat(3000) {
+            integrator.step(scenario.store, scenario.groups, scenario.forces, scenario.constraints, t, dt)
+            scenario.collisionSystem!!.resolve(scenario.store, scenario.groups, t, dt)
+            t += dt
+        }
+        // Never tunnels through the floor - stays at or above the ball's own radius.
+        assertTrue(scenario.store.position(id).y >= 0.2 - 0.05)
+    }
+
+    @Test
+    fun `an unknown collider referenced by a particle_collider rule is a load-time error`() {
+        val yaml = """
+            version: 1
+            particles:
+              - single: { name: ball, position: [0.0, 0.0, 0.0] }
+            collisions:
+              rules:
+                - particle_collider:
+                    group: ball
+                    collider: nonexistent
+                    restitution: 0.5
+        """.trimIndent()
+        val ex = assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+        assertTrue(ex.message!!.contains("nonexistent"))
+    }
+
+    @Test
+    fun `a particle_particle rule defaults group_b to group_a`() {
+        val yaml = """
+            version: 1
+            particles:
+              - list:
+                  name: debris
+                  particles:
+                    - { position: [0.0, 0.0, 0.0], radius: 0.1 }
+                    - { position: [0.15, 0.0, 0.0], radius: 0.1 }
+            collisions:
+              rules:
+                - particle_particle:
+                    group_a: debris
+                    restitution: 0.5
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertTrue(scenario.particleCollisionSystem != null)
+    }
+
+    @Test
+    fun `an outside_box destroy condition fires only beyond its bounds`() {
+        val yaml = """
+            version: 1
+            particles:
+              - list:
+                  name: sparks
+                  particles:
+                    - position: [0.0, 0.0, 0.0]
+                    - position: [20.0, 0.0, 0.0]
+            destroy:
+              - group: sparks
+                outside_box:
+                  center: [0.0, 0.0, 0.0]
+                  half_extents: [10.0, 1000.0, 10.0]
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertTrue(scenario.destruction != null)
+        val ids = scenario.groups.membersOf("sparks").sorted() // captured before resolve() removes the far one
+        val result = scenario.destruction!!.resolve(scenario.store, scenario.groups, scenario.forces, t = 0.0, dt = 1e-3)
+        assertTrue(ids[0] !in result.destroyedIds)
+        assertTrue(ids[1] in result.destroyedIds)
+    }
+
+    @Test
+    fun `an on_collision destroy rule fires when a particle touches the named collider`() {
+        val yaml = """
+            version: 1
+            particles:
+              - single: { name: p, position: [0.0, 0.0, 0.0], radius: 0.1 }
+            colliders:
+              - plane: { name: floor, position: [0.0, 0.0, 0.0], normal: [0.0, 1.0, 0.0] }
+            destroy:
+              - group: p
+                on_collision:
+                  collider: floor
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val id = scenario.groups.membersOf("p").single() // captured before resolve() removes it
+        val result = scenario.destruction!!.resolve(scenario.store, scenario.groups, scenario.forces, t = 0.0, dt = 1e-3)
+        assertTrue(id in result.destroyedIds)
+    }
+
+    @Test
+    fun `an unknown collider referenced by an on_collision destroy rule is a load-time error`() {
+        val yaml = """
+            version: 1
+            particles:
+              - single: { name: p, position: [0.0, 0.0, 0.0] }
+            destroy:
+              - group: p
+                on_collision:
+                  collider: nonexistent
+        """.trimIndent()
+        val ex = assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+        assertTrue(ex.message!!.contains("nonexistent"))
+    }
+
+    @Test
+    fun `collisions and destroy are absent by default`() {
+        val scenario = YamlLoader().load(minimalGrid())
+        assertEquals(null, scenario.collisionSystem)
+        assertEquals(null, scenario.particleCollisionSystem)
+        assertEquals(null, scenario.destruction)
+    }
 }

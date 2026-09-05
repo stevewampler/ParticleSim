@@ -3,6 +3,10 @@ package particlesim.yaml
 import org.yaml.snakeyaml.Yaml
 import particlesim.collision.BoxCollider
 import particlesim.collision.Collider
+import particlesim.collision.CollisionSystem
+import particlesim.collision.ParticleColliderRule
+import particlesim.collision.ParticleCollisionRule
+import particlesim.collision.ParticleCollisionSystem
 import particlesim.collision.PlaneCollider
 import particlesim.collision.SphereCollider
 import particlesim.core.Groups
@@ -10,6 +14,9 @@ import particlesim.core.ParticleStore
 import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
 import particlesim.core.VectorExpr
+import particlesim.lifecycle.CollisionDestroyRule
+import particlesim.lifecycle.DestroyCondition
+import particlesim.lifecycle.DestructionSystem
 import particlesim.physics.ConstantForce
 import particlesim.physics.Constraint
 import particlesim.physics.Drag
@@ -21,6 +28,7 @@ import particlesim.physics.NBodyGravity
 import particlesim.physics.UniformGravity
 import particlesim.physics.Wind
 import particlesim.surface.Grid
+import kotlin.math.abs
 import kotlin.random.Random
 
 data class YamlScenario(
@@ -35,6 +43,13 @@ data class YamlScenario(
     /** Phase 4 of the YAML front-end's second pass: every top-level `colliders:` declaration,
      * keyed by its (required) name — referenced by Phase 5's `collisions:`/`destroy:` sections. */
     val colliders: Map<String, Collider> = emptyMap(),
+    /** Phase 5: `null` when `collisions:` declared no `particle_collider`/`particle_particle`
+     * rules respectively — a scene with neither pays nothing extra, same "absent means empty"
+     * convention the rest of this loader already uses. */
+    val collisionSystem: CollisionSystem? = null,
+    val particleCollisionSystem: ParticleCollisionSystem? = null,
+    /** Phase 5's `destroy:` section - `null` when empty. */
+    val destruction: DestructionSystem? = null,
 )
 
 /**
@@ -93,12 +108,14 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         val forces = loadForces(root, store, grids, ::requireKnownGroup)
         val constraints = loadConstraints(root, store, groups, ::requireKnownGroup)
         val colliders = loadColliders(root)
+        val (collisionSystem, particleCollisionSystem) = loadCollisions(root, colliders, ::requireKnownGroup)
+        val destruction = loadDestruction(root, colliders, ::requireKnownGroup)
 
         for (name in groupNames) {
             if (groups.membersOf(name).isEmpty()) onWarning("group '$name' matches zero particles")
         }
 
-        return YamlScenario(store, groups, forces, constraints, grids, colliders)
+        return YamlScenario(store, groups, forces, constraints, grids, colliders, collisionSystem, particleCollisionSystem, destruction)
     }
 
     /** §4.2's group selector language (tags/ids/range), Phase 2 of the YAML front-end's second
@@ -590,5 +607,112 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
     private fun resolveGrid(f: Map<*, *>, grids: Map<String, List<List<Int>>>, context: String): List<List<Int>> {
         val name = f.requireString("grid", context)
         return grids[name] ?: throw YamlLoadException("$context.grid: unknown grid '$name'")
+    }
+
+    /** Phase 5's `collisions:` section — two of the four rule/system pairs §12.3 describes
+     * (`particle_collider`/`ParticleColliderRule`→`CollisionSystem`, `particle_particle`/
+     * `ParticleCollisionRule`→`ParticleCollisionSystem`). `surface_collider`/`surface_self`
+     * are deliberately not wired here: neither has a named-surface YAML reference to target yet
+     * (surfaces are still implicit, built from a grid), and no target scenario needs either —
+     * the same "wait for a real consumer" deferral this codebase already applies elsewhere.
+     * `rest_velocity`/`rest_penetration` are one shared top-level pair, not per-rule, since both
+     * systems already default to the identical values on the Kotlin side. Returns
+     * `(null, null)` when `collisions:` is absent or has no rules of either kind - a scene with
+     * neither pays nothing extra. */
+    private fun loadCollisions(
+        root: Map<*, *>, colliders: Map<String, Collider>, requireKnownGroup: (String, String) -> Unit,
+    ): Pair<CollisionSystem?, ParticleCollisionSystem?> {
+        val section = root.optionalMap("collisions") ?: return null to null
+        val restVelocity = section.optionalDouble("rest_velocity", 0.01)
+        val restPenetration = section.optionalDouble("rest_penetration", 0.005)
+        val particleColliderRules = ArrayList<ParticleColliderRule>()
+        val particleParticleRules = ArrayList<ParticleCollisionRule>()
+        for ((index, entry) in section.requireListOrEmpty("rules", "collisions").withIndex()) {
+            val map = entry as? Map<*, *> ?: throw YamlLoadException("collisions.rules[$index]: expected a mapping")
+            val context = "collisions.rules[$index]"
+            when {
+                map.containsKey("particle_collider") -> {
+                    val f = map.requireMap("particle_collider", context)
+                    val fc = "$context.particle_collider"
+                    val group = f.requireString("group", fc)
+                    requireKnownGroup(group, "$fc.group")
+                    val colliderName = f.requireString("collider", fc)
+                    val collider = colliders[colliderName] ?: throw YamlLoadException("$fc.collider: unknown collider '$colliderName'")
+                    particleColliderRules += ParticleColliderRule(
+                        group = group, collider = collider,
+                        restitution = f.requireDouble("restitution", fc),
+                        compressionDamping = f.optionalDouble("compression_damping", 0.0),
+                        extensionDamping = f.optionalDouble("extension_damping", 0.0),
+                        correctionFactor = f.optionalDouble("correction_factor", 0.2),
+                        staticFriction = f.optionalDouble("static_friction", 0.0),
+                        kineticFriction = f.optionalDouble("kinetic_friction", 0.0),
+                    )
+                }
+                map.containsKey("particle_particle") -> {
+                    val f = map.requireMap("particle_particle", context)
+                    val fc = "$context.particle_particle"
+                    val groupA = f.requireString("group_a", fc)
+                    requireKnownGroup(groupA, "$fc.group_a")
+                    val groupB = f.optionalString("group_b") ?: groupA
+                    if (groupB != groupA) requireKnownGroup(groupB, "$fc.group_b")
+                    particleParticleRules += ParticleCollisionRule(
+                        groupA = groupA, groupB = groupB,
+                        restitution = f.requireDouble("restitution", fc),
+                        compressionDamping = f.optionalDouble("compression_damping", 0.0),
+                        extensionDamping = f.optionalDouble("extension_damping", 0.0),
+                        correctionFactor = f.optionalDouble("correction_factor", 0.2),
+                        staticFriction = f.optionalDouble("static_friction", 0.0),
+                        kineticFriction = f.optionalDouble("kinetic_friction", 0.0),
+                    )
+                }
+                else -> throw YamlLoadException("$context: unknown collision rule type (expected one of: particle_collider, particle_particle)")
+            }
+        }
+        val collisionSystem = if (particleColliderRules.isEmpty()) null else CollisionSystem(particleColliderRules, restVelocity, restPenetration)
+        val particleCollisionSystem = if (particleParticleRules.isEmpty()) null else ParticleCollisionSystem(particleParticleRules, restVelocity, restPenetration)
+        return collisionSystem to particleCollisionSystem
+    }
+
+    /** Phase 5's `destroy:` section (§14.2). `outside_box` is a **structural** shape, not a
+     * boolean-expression grammar — widening `ScalarExpr`/`VectorExpr`'s `evaluate(t)` signature
+     * to carry per-particle position/velocity/comparisons was already ruled out for this pass
+     * (see `todo/TODO.md`'s Phase-7 note on `t` being the only working built-in variable);
+     * `outside_box`
+     * covers `buildSparks`' actual predicate (`abs(x)>10 || abs(z)>10`, an axis-aligned box
+     * exit test) without inventing more than that one real consumer needs. `on_collision` maps
+     * directly onto [CollisionDestroyRule]. Returns `null` when `destroy:` is empty/absent. */
+    private fun loadDestruction(
+        root: Map<*, *>, colliders: Map<String, Collider>, requireKnownGroup: (String, String) -> Unit,
+    ): DestructionSystem? {
+        val entries = root.requireListOrEmpty("destroy", "root")
+        if (entries.isEmpty()) return null
+        val destroyConditions = ArrayList<DestroyCondition>()
+        val collisionDestroyRules = ArrayList<CollisionDestroyRule>()
+        for ((index, entry) in entries.withIndex()) {
+            val map = entry as? Map<*, *> ?: throw YamlLoadException("destroy[$index]: expected a mapping")
+            val context = "destroy[$index]"
+            val group = map.requireString("group", context)
+            requireKnownGroup(group, "$context.group")
+            when {
+                map.containsKey("outside_box") -> {
+                    val f = map.requireMap("outside_box", context)
+                    val oc = "$context.outside_box"
+                    val center = f.requireVectorLiteral("center", oc)
+                    val halfExtents = f.requireVectorLiteral("half_extents", oc)
+                    destroyConditions += DestroyCondition(group) { s, id, _ ->
+                        val p = s.position(id)
+                        abs(p.x - center.x) > halfExtents.x || abs(p.y - center.y) > halfExtents.y || abs(p.z - center.z) > halfExtents.z
+                    }
+                }
+                map.containsKey("on_collision") -> {
+                    val f = map.requireMap("on_collision", context)
+                    val colliderName = f.requireString("collider", "$context.on_collision")
+                    val collider = colliders[colliderName] ?: throw YamlLoadException("$context.on_collision.collider: unknown collider '$colliderName'")
+                    collisionDestroyRules += CollisionDestroyRule(group, collider)
+                }
+                else -> throw YamlLoadException("$context: unknown destroy condition type (expected one of: outside_box, on_collision)")
+            }
+        }
+        return DestructionSystem(destroyConditions, collisionDestroyRules)
     }
 }
