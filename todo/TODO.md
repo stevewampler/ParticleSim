@@ -4379,6 +4379,49 @@ on its own - the others are real, code-verified bugs regardless.
       crushing to black; both lights survive a `flag` → `flagOnRope`
       round-trip switch. No console errors. Full test suite green.
 
+## YAML front-end second pass (§4.2/§4.5, follow-up to Phase 7) — not yet phased
+User asked to finish everything the Phase 7 "Second pass" note above scoped
+out: every remaining field, general bulk generation, a real selector
+language, ball-bounce/sparks golden parity, and the shape registry — plus a
+`lights:` section (raised while presenting "what's next," not originally in
+this list, folded in at the user's request). Planned in
+`/Users/swampler/.claude/plans/idempotent-rolling-whistle.md` as ten
+phases (0-9); each phase gets its own entry below as it lands. Explicitly
+out of scope, flagged in the plan rather than silently dropped: full
+`renderers:`/`material:` YAML support (no YAML renderer-declaration
+mechanism exists at all today, a materially bigger undertaking than
+anything else here and not needed by any target scenario),
+`surface_collider`/`surface_self` collision rules (no named-surface YAML
+reference exists to target), and standalone non-mesh `Spring`/`Damper`
+declarations (nothing needs one).
+- [x] **Phase 0 — shared loader infrastructure.** `YamlFields.kt` gained
+      `optionalString`/`optionalInt` (straightforward), `optionalScalarExpr`/
+      `optionalVectorExpr` (the optional counterparts to the existing
+      `requireScalarExpr`/`requireVectorExpr`, for fields that fall back to
+      a default rather than erroring when absent), and the pair
+      `directionalTriple`/`requireDirectionalTriple` — the
+      "`base`, `extension_<base>` defaults to `base`, `compression_<base>`
+      defaults to `base`" shape repeated verbatim across `Spring`/`Damper`/
+      `MeshSprings`' stiffness, damping, and break-threshold constructor
+      parameters (confirmed by reading all three constructors directly this
+      session, not assumed). Two entry points because the shape appears
+      both ways on the Kotlin side: `stiffness`/`damping` are mandatory
+      constructor parameters with no Kotlin-side default
+      (`requireDirectionalTriple`), while `breakThreshold` has one
+      (`Double.POSITIVE_INFINITY`, via `directionalTriple`'s own
+      `default` param). None of these three fields are `ScalarExpr` on the
+      Kotlin side (verified directly), so the triple reads plain `Double`s,
+      not expressions.
+      New `YamlFieldsTest.kt` (12 tests): one per helper's present/absent/
+      wrong-type cases, `directionalTriple`'s three defaulting
+      combinations (base only, one override, both overrides), and both
+      triple functions tested against plain `Map` literals directly rather
+      than through a full `YamlLoader.load()` call — these are extraction
+      primitives, not scenario-level behavior.
+      Full `./gradlew test -q` suite green. No scenario-visible effect yet
+      (Phase 0 adds no new YAML schema surface) — verification is the unit
+      tests alone.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created
