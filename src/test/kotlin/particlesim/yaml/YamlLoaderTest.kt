@@ -259,6 +259,36 @@ class YamlLoaderTest {
     }
 
     @Test
+    fun `random_volume accepts an optional radius, defaulting to null when absent`() {
+        val withRadius = """
+            version: 1
+            particles:
+              - random_volume:
+                  name: dust
+                  count: 5
+                  seed: 7
+                  radius: 0.05
+                  shape:
+                    box: { center: [0.0, 0.0, 0.0], half_extents: [1.0, 1.0, 1.0] }
+        """.trimIndent()
+        val scenario = YamlLoader().load(withRadius)
+        for (id in scenario.groups.membersOf("dust")) assertEquals(0.05, scenario.store.radius(id)!!, 1e-12)
+
+        val withoutRadius = """
+            version: 1
+            particles:
+              - random_volume:
+                  name: dust
+                  count: 5
+                  seed: 7
+                  shape:
+                    box: { center: [0.0, 0.0, 0.0], half_extents: [1.0, 1.0, 1.0] }
+        """.trimIndent()
+        val bare = YamlLoader().load(withoutRadius)
+        for (id in bare.groups.membersOf("dust")) assertEquals(null, bare.store.radius(id))
+    }
+
+    @Test
     fun `random_volume with a sphere shape generates points within the radius`() {
         val yaml = """
             version: 1
@@ -694,6 +724,98 @@ class YamlLoaderTest {
     }
 
     @Test
+    fun `a standalone spring connects two particles by author id`() {
+        val yaml = """
+            version: 1
+            particles:
+              - list:
+                  name: chain
+                  particles:
+                    - { id: a, position: [0.0, 0.0, 0.0] }
+                    - { id: b, position: [1.0, 0.0, 0.0] }
+            forces:
+              - spring:
+                  pairs: [[a, b]]
+                  rest_length: 0.5
+                  stiffness: 100.0
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val spring = scenario.forces.single() as particlesim.physics.Spring
+        assertEquals("chain", scenario.groups.groupsOf(spring.particleA).single())
+        Integrator().step(scenario.store, scenario.groups, scenario.forces, emptyList(), 0.0, 1e-3)
+        // Stretched to 1.0 against a 0.5 rest length - the spring should be pulling the two
+        // particles back toward each other, not pushing them apart.
+        assertTrue(scenario.store.velocity(spring.particleA).x > 0.0)
+        assertTrue(scenario.store.velocity(spring.particleB).x < 0.0)
+    }
+
+    @Test
+    fun `a standalone spring with multiple pairs produces one Spring per pair, named with an index suffix`() {
+        val yaml = """
+            version: 1
+            particles:
+              - list:
+                  name: chain
+                  particles:
+                    - { id: a, position: [0.0, 0.0, 0.0] }
+                    - { id: b, position: [1.0, 0.0, 0.0] }
+                    - { id: c, position: [2.0, 0.0, 0.0] }
+            forces:
+              - spring:
+                  pairs: [[a, b], [b, c]]
+                  rest_length: 1.0
+                  stiffness: 50.0
+                  name: link
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val springs = scenario.forces.map { it as particlesim.physics.Spring }
+        assertEquals(listOf("link-0", "link-1"), springs.map { it.name })
+    }
+
+    @Test
+    fun `a standalone damper connects two particles and opposes their relative velocity`() {
+        val yaml = """
+            version: 1
+            particles:
+              - list:
+                  name: pair
+                  particles:
+                    - { id: a, position: [0.0, 0.0, 0.0], velocity: [1.0, 0.0, 0.0] }
+                    - { id: b, position: [1.0, 0.0, 0.0], velocity: [-1.0, 0.0, 0.0] }
+            forces:
+              - damper:
+                  pairs: [[a, b]]
+                  damping: 10.0
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val damper = scenario.forces.single() as particlesim.physics.Damper
+        Integrator().step(scenario.store, scenario.groups, scenario.forces, emptyList(), 0.0, 1e-3)
+        // a and b are closing (a moving +x, b moving -x) - the damper should slow that closing
+        // approach speed on both, not reverse or leave it untouched.
+        assertTrue(scenario.store.velocity(damper.particleA).x < 1.0)
+        assertTrue(scenario.store.velocity(damper.particleB).x > -1.0)
+    }
+
+    @Test
+    fun `a spring pair referencing an unknown author id is a load-time error`() {
+        val yaml = """
+            version: 1
+            particles:
+              - list:
+                  name: chain
+                  particles:
+                    - { id: a, position: [0.0, 0.0, 0.0] }
+            forces:
+              - spring:
+                  pairs: [[a, missing]]
+                  rest_length: 0.5
+                  stiffness: 100.0
+        """.trimIndent()
+        val ex = assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+        assertTrue(ex.message!!.contains("missing"))
+    }
+
+    @Test
     fun `mesh_springs exposes the direction-dependent stiffness, damping, and break-threshold triple`() {
         val yaml = minimalGrid(
             """
@@ -902,6 +1024,62 @@ class YamlLoaderTest {
     }
 
     @Test
+    fun `a surface_collider rule stops a falling particle against a grid-derived surface`() {
+        // The `grid` generator's particles lie flat in the X/Y plane (`Vector3(c*spacing,
+        // -r*spacing, 0)` - the same plane buildFlag hangs its cloth in), so the surface's face
+        // normal points along +/-Z, not +/-Y - "falling" toward it means gravity along Z, with
+        // the ball positioned within the mat's X/Y footprint (x in [0, 1], y in [-1, 0] for a
+        // 3x3 grid at spacing 0.5) and offset along Z, not the other way around.
+        val yaml = """
+            version: 1
+            particles:
+              - grid: { name: mat, rows: 3, cols: 3, spacing: 0.5, mass: 0.02 }
+              - single: { name: ball, position: [0.5, -0.5, 2.0], mass: 1.0, radius: 0.1 }
+            constraints:
+              - fixed_position: { group: mat, at_current_positions: true }
+            forces:
+              - gravity: { group: ball, acceleration: [0.0, 0.0, -9.8] }
+            collisions:
+              rules:
+                - surface_collider:
+                    group: ball
+                    surface: mat
+                    restitution: 0.2
+                    compression_damping: 2.0
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertTrue(scenario.surfaceCollisionSystem != null)
+        val id = scenario.groups.membersOf("ball").single()
+        val integrator = Integrator()
+        var t = 0.0
+        val dt = 1e-3
+        repeat(3000) {
+            integrator.step(scenario.store, scenario.groups, scenario.forces, scenario.constraints, t, dt)
+            scenario.surfaceCollisionSystem!!.resolve(scenario.store, scenario.groups, t, dt)
+            t += dt
+        }
+        // The mat sits at z=0 (a fixed 3x3 grid in the X/Y plane) - the ball should have settled
+        // at/above it, never having tunneled through to some large negative z.
+        assertTrue(scenario.store.position(id).z > -0.05)
+    }
+
+    @Test
+    fun `an unknown grid name referenced by a surface_collider rule is a load-time error`() {
+        val yaml = minimalGrid(
+            """
+            collisions:
+              rules:
+                - surface_collider:
+                    group: g
+                    surface: nonexistent
+                    restitution: 0.5
+            """.trimIndent(),
+        )
+        val ex = assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+        assertTrue(ex.message!!.contains("nonexistent"))
+    }
+
+    @Test
     fun `an outside_box destroy condition fires only beyond its bounds`() {
         val yaml = """
             version: 1
@@ -964,6 +1142,7 @@ class YamlLoaderTest {
         val scenario = YamlLoader().load(minimalGrid())
         assertEquals(null, scenario.collisionSystem)
         assertEquals(null, scenario.particleCollisionSystem)
+        assertEquals(null, scenario.surfaceCollisionSystem)
         assertEquals(null, scenario.destruction)
     }
 

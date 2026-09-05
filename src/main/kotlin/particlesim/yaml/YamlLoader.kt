@@ -28,11 +28,16 @@ import particlesim.physics.FixedVelocity
 import particlesim.physics.Force
 import particlesim.physics.MeshSprings
 import particlesim.physics.NBodyGravity
+import particlesim.physics.Spring
+import particlesim.physics.Damper
 import particlesim.physics.UniformGravity
 import particlesim.physics.Wind
 import particlesim.render.Color
 import particlesim.render.Light
 import particlesim.surface.Grid
+import particlesim.surface.Surface
+import particlesim.collision.SurfaceCollisionRule
+import particlesim.collision.SurfaceCollisionSystem
 import kotlin.math.abs
 import kotlin.random.Random
 
@@ -53,6 +58,10 @@ data class YamlScenario(
      * convention the rest of this loader already uses. */
     val collisionSystem: CollisionSystem? = null,
     val particleCollisionSystem: ParticleCollisionSystem? = null,
+    /** `null` when `collisions:` declared no `surface_collider` rules — see [YamlLoader]'s
+     * `loadCollisions` doc comment for why this targets an auto-derived per-grid [Surface]
+     * rather than a separate `surfaces:` declaration section. */
+    val surfaceCollisionSystem: SurfaceCollisionSystem? = null,
     /** Phase 5's `destroy:` section - `null` when empty. */
     val destruction: DestructionSystem? = null,
     /** Phase 6's `emitters:` section - empty when absent. */
@@ -133,10 +142,10 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
             if (name !in declaredGroups) throw YamlLoadException("$context: unknown group '$name'")
         }
 
-        val forces = loadForces(root, store, grids, ::requireKnownGroup)
+        val forces = loadForces(root, store, grids, ::requireKnownGroup, authorIds)
         val constraints = loadConstraints(root, store, groups, ::requireKnownGroup)
         val colliders = loadColliders(root)
-        val (collisionSystem, particleCollisionSystem) = loadCollisions(root, colliders, ::requireKnownGroup)
+        val (collisionSystem, particleCollisionSystem, surfaceCollisionSystem) = loadCollisions(root, colliders, grids, ::requireKnownGroup)
         val destruction = loadDestruction(root, colliders, ::requireKnownGroup)
         val lights = loadLights(root)
 
@@ -144,7 +153,10 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
             if (groups.membersOf(name).isEmpty()) onWarning("group '$name' matches zero particles")
         }
 
-        return YamlScenario(store, groups, forces, constraints, grids, colliders, collisionSystem, particleCollisionSystem, destruction, emitters, lights)
+        return YamlScenario(
+            store, groups, forces, constraints, grids, colliders,
+            collisionSystem, particleCollisionSystem, surfaceCollisionSystem, destruction, emitters, lights,
+        )
     }
 
     /** §4.2's group selector language (tags/ids/range), Phase 2 of the YAML front-end's second
@@ -347,6 +359,7 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         val seed = f.requireInt("seed", context)
         val massExpr = f.optionalScalarExpr("mass", context, ScalarExpr.of(1.0))
         val velocity = f.optionalVectorExpr("velocity", context, VectorExpr.of(Vector3.ZERO)).evaluate(0.0)
+        val radiusExpr = if (f["radius"] != null) f.requireScalarExpr("radius", context) else null
         val tags = f.requireStringList("tags", context)
         val shape = f.requireMap("shape", context)
         val rng = Random(seed)
@@ -384,7 +397,7 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         repeat(count) {
             val position = if (isSphere) uniformInSphere(rng, sphereCenter, sphereRadius) else uniformInBox(rng, boxCenter, boxHalfExtents)
             val id = try {
-                store.create(position = position, velocity = velocity, mass = massExpr)
+                store.create(position = position, velocity = velocity, mass = massExpr, radius = radiusExpr)
             } catch (e: IllegalArgumentException) {
                 throw YamlLoadException("$context.mass: ${e.message}")
             }
@@ -474,7 +487,7 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
 
     private fun loadForces(
         root: Map<*, *>, store: ParticleStore, grids: Map<String, List<List<Int>>>,
-        requireKnownGroup: (String, String) -> Unit,
+        requireKnownGroup: (String, String) -> Unit, authorIds: Map<String, Int>,
     ): List<Force> {
         val forces = ArrayList<Force>()
         for ((index, entry) in root.requireListOrEmpty("forces", "root").withIndex()) {
@@ -559,12 +572,80 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
                     val force = f.requireVectorLiteral("force", cc)
                     forces += ConstantForce(group, force, name = f.optionalString("name", context = cc))
                 }
+                map.containsKey("spring") -> {
+                    // Standalone particle-pair Spring (§5, distinct from mesh_springs' grid-
+                    // topology form above) - added once the demo library actually needed it
+                    // (buildTire's rim/diameter braces, buildRope's segments, DragScene's chain),
+                    // contradicting this front-end's earlier "no consumer yet" call. `pairs:` (not
+                    // a single a/b) since every real consumer is a uniform-parameter list of pairs,
+                    // not one spring at a time - each pair gets its own Spring instance sharing
+                    // this entry's stiffness/rest_length/etc., `name` suffixed `-i` per pair when
+                    // there's more than one (matching how buildTire/buildRope name theirs).
+                    val f = map.requireMap("spring", context)
+                    val sc = "$context.spring"
+                    val pairs = resolvePairs(f, "pairs", sc, authorIds)
+                    val restLength = f.requireDouble("rest_length", sc)
+                    val (stiffness, extStiffness, compStiffness) = f.requireDirectionalTriple("stiffness", sc)
+                    val minLength = f.optionalDouble("min_length", Spring.DEFAULT_MIN_LENGTH, sc)
+                    val (breakThreshold, extBreak, compBreak) = f.directionalTriple("break_threshold", sc, Double.POSITIVE_INFINITY)
+                    val baseName = f.optionalString("name", context = sc)
+                    pairs.forEachIndexed { i, (a, b) ->
+                        forces += Spring(
+                            a, b, restLength = restLength, stiffness = stiffness,
+                            extensionStiffness = extStiffness, compressionStiffness = compStiffness,
+                            minLength = minLength,
+                            breakThreshold = breakThreshold, extensionBreakThreshold = extBreak, compressionBreakThreshold = compBreak,
+                            name = baseName?.let { if (pairs.size > 1) "$it-$i" else it },
+                        )
+                    }
+                }
+                map.containsKey("damper") -> {
+                    // Standalone particle-pair Damper - see the `spring` case above for why
+                    // `pairs:` and per-pair naming take the same shape here.
+                    val f = map.requireMap("damper", context)
+                    val dc = "$context.damper"
+                    val pairs = resolvePairs(f, "pairs", dc, authorIds)
+                    val (damping, extDamping, compDamping) = f.requireDirectionalTriple("damping", dc)
+                    val minLength = f.optionalDouble("min_length", Spring.DEFAULT_MIN_LENGTH, dc)
+                    val (breakThreshold, extBreak, compBreak) = f.directionalTriple("break_threshold", dc, Double.POSITIVE_INFINITY)
+                    val baseName = f.optionalString("name", context = dc)
+                    pairs.forEachIndexed { i, (a, b) ->
+                        forces += Damper(
+                            a, b, damping = damping, extensionDamping = extDamping, compressionDamping = compDamping,
+                            minLength = minLength,
+                            breakThreshold = breakThreshold, extensionBreakThreshold = extBreak, compressionBreakThreshold = compBreak,
+                            name = baseName?.let { if (pairs.size > 1) "$it-$i" else it },
+                        )
+                    }
+                }
                 else -> throw YamlLoadException(
-                    "$context: unknown force type (expected one of: gravity, mesh_springs, wind, drag, nbody_gravity, constant_force)",
+                    "$context: unknown force type (expected one of: gravity, mesh_springs, wind, drag, nbody_gravity, " +
+                        "constant_force, spring, damper)",
                 )
             }
         }
         return forces
+    }
+
+    /** A `pairs:` field shared by standalone `spring`/`damper` force entries - a list of
+     * `[idA, idB]` author-id pairs (resolved through [authorIds], the same map Phase 2's `ids:`
+     * selector already reads), each becoming one [Spring]/[Damper] instance sharing this entry's
+     * other fields (stiffness/damping/etc.). */
+    private fun resolvePairs(f: Map<*, *>, key: String, context: String, authorIds: Map<String, Int>): List<Pair<Int, Int>> {
+        val list = f.requireListOrEmpty(key, context)
+        if (list.isEmpty()) throw YamlLoadException("$context.$key: expected at least one [a, b] pair")
+        return list.mapIndexed { i, entry ->
+            val pair = entry as? List<*> ?: throw YamlLoadException("$context.$key[$i]: expected a [a, b] list")
+            if (pair.size != 2) throw YamlLoadException("$context.$key[$i]: expected exactly 2 ids, got ${pair.size}")
+            val a = resolveAuthorId(pair[0], authorIds, "$context.$key[$i]")
+            val b = resolveAuthorId(pair[1], authorIds, "$context.$key[$i]")
+            a to b
+        }
+    }
+
+    private fun resolveAuthorId(v: Any?, authorIds: Map<String, Int>, context: String): Int {
+        val idStr = v as? String ?: throw YamlLoadException("$context: expected an author id string")
+        return authorIds[idStr] ?: throw YamlLoadException("$context: unknown id '$idStr'")
     }
 
     private fun loadConstraints(
@@ -648,24 +729,33 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         return grids[name] ?: throw YamlLoadException("$context.grid: unknown grid '$name'")
     }
 
-    /** Phase 5's `collisions:` section — two of the four rule/system pairs §12.3 describes
+    /** Phase 5's `collisions:` section — three of the four rule/system pairs §12.3 describes
      * (`particle_collider`/`ParticleColliderRule`→`CollisionSystem`, `particle_particle`/
-     * `ParticleCollisionRule`→`ParticleCollisionSystem`). `surface_collider`/`surface_self`
-     * are deliberately not wired here: neither has a named-surface YAML reference to target yet
-     * (surfaces are still implicit, built from a grid), and no target scenario needs either —
-     * the same "wait for a real consumer" deferral this codebase already applies elsewhere.
-     * `rest_velocity`/`rest_penetration` are one shared top-level pair, not per-rule, since both
-     * systems already default to the identical values on the Kotlin side. Returns
-     * `(null, null)` when `collisions:` is absent or has no rules of either kind - a scene with
-     * neither pays nothing extra. */
+     * `ParticleCollisionRule`→`ParticleCollisionSystem`, `surface_collider`/`SurfaceCollisionRule`
+     * →`SurfaceCollisionSystem`). `surface_collider` targets a named grid from [grids], turned
+     * into a [Surface] on demand (`Grid.triangles(grid)`, named after the grid) rather than
+     * requiring a separate `surfaces:` declaration section, since every real consumer
+     * (`buildTrampoline`'s mat, `buildFlagOnRopeScenario`'s flag cloth) already targets exactly
+     * a grid-built surface and nothing else. Built lazily, only for grids a rule actually
+     * references — not eagerly for every declared grid — since [Grid.triangles] requires at
+     * least 2 rows/cols and plenty of grids (e.g. a flag's single-row pole edge) don't qualify;
+     * eagerly building one for every grid broke exactly those. `surface_self` stays unwired: it
+     * exists purely to stop a single mesh's own cloth from passing through itself (FlagScene's
+     * addition on top of `buildFlag`, not part of the scenario itself), so no demo's *scenario*
+     * — as opposed to its viewer wrapper — needs it. `rest_velocity`/`rest_penetration` are one
+     * shared top-level pair, not per-rule, since every system here already defaults to the
+     * identical values on the Kotlin side. Returns `(null, null, null)` when `collisions:` is
+     * absent or has no rules of any kind - a scene with none pays nothing extra. */
     private fun loadCollisions(
-        root: Map<*, *>, colliders: Map<String, Collider>, requireKnownGroup: (String, String) -> Unit,
-    ): Pair<CollisionSystem?, ParticleCollisionSystem?> {
-        val section = root.optionalMap("collisions") ?: return null to null
+        root: Map<*, *>, colliders: Map<String, Collider>, grids: Map<String, List<List<Int>>>,
+        requireKnownGroup: (String, String) -> Unit,
+    ): Triple<CollisionSystem?, ParticleCollisionSystem?, SurfaceCollisionSystem?> {
+        val section = root.optionalMap("collisions") ?: return Triple(null, null, null)
         val restVelocity = section.optionalDouble("rest_velocity", 0.01, "collisions")
         val restPenetration = section.optionalDouble("rest_penetration", 0.005, "collisions")
         val particleColliderRules = ArrayList<ParticleColliderRule>()
         val particleParticleRules = ArrayList<ParticleCollisionRule>()
+        val surfaceColliderRules = ArrayList<SurfaceCollisionRule>()
         for ((index, entry) in section.requireListOrEmpty("rules", "collisions").withIndex()) {
             val map = entry as? Map<*, *> ?: throw YamlLoadException("collisions.rules[$index]: expected a mapping")
             val context = "collisions.rules[$index]"
@@ -704,12 +794,38 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
                         kineticFriction = f.optionalDouble("kinetic_friction", 0.0, fc),
                     )
                 }
-                else -> throw YamlLoadException("$context: unknown collision rule type (expected one of: particle_collider, particle_particle)")
+                map.containsKey("surface_collider") -> {
+                    val f = map.requireMap("surface_collider", context)
+                    val sfc = "$context.surface_collider"
+                    val group = f.requireString("group", sfc)
+                    requireKnownGroup(group, "$sfc.group")
+                    val surfaceName = f.requireString("surface", sfc)
+                    val surfaceGrid = grids[surfaceName]
+                        ?: throw YamlLoadException("$sfc.surface: unknown surface '$surfaceName' (no grid with that name)")
+                    val surface = try {
+                        Surface(Grid.triangles(surfaceGrid), name = surfaceName)
+                    } catch (e: IllegalArgumentException) {
+                        throw YamlLoadException("$sfc.surface: grid '$surfaceName' can't form a surface: ${e.message}")
+                    }
+                    surfaceColliderRules += SurfaceCollisionRule(
+                        group = group, surface = surface,
+                        restitution = f.requireDouble("restitution", sfc),
+                        compressionDamping = f.optionalDouble("compression_damping", 0.0, sfc),
+                        extensionDamping = f.optionalDouble("extension_damping", 0.0, sfc),
+                        correctionFactor = f.optionalDouble("correction_factor", 0.2, sfc),
+                        staticFriction = f.optionalDouble("static_friction", 0.0, sfc),
+                        kineticFriction = f.optionalDouble("kinetic_friction", 0.0, sfc),
+                    )
+                }
+                else -> throw YamlLoadException(
+                    "$context: unknown collision rule type (expected one of: particle_collider, particle_particle, surface_collider)",
+                )
             }
         }
         val collisionSystem = if (particleColliderRules.isEmpty()) null else CollisionSystem(particleColliderRules, restVelocity, restPenetration)
         val particleCollisionSystem = if (particleParticleRules.isEmpty()) null else ParticleCollisionSystem(particleParticleRules, restVelocity, restPenetration)
-        return collisionSystem to particleCollisionSystem
+        val surfaceCollisionSystem = if (surfaceColliderRules.isEmpty()) null else SurfaceCollisionSystem(surfaceColliderRules, restVelocity, restPenetration)
+        return Triple(collisionSystem, particleCollisionSystem, surfaceCollisionSystem)
     }
 
     /** Phase 5's `destroy:` section (§14.2). `outside_box` is a **structural** shape, not a

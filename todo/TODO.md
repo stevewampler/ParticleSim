@@ -3017,9 +3017,10 @@ real prerequisite, not just unstarted — see the note below.
       gap (a true fixed anchor), the tire settled at ~0.05 (its own
       particle radius) above the ground, and the ball resting at exactly
       its placed offset with no cross-talk between shapes.
-- [ ] YAML shape library/registry — second pass, same status as every
-      other post-Phase-7 YAML gap; needs the DSL side built first to know
-      what a shape actually needs to parameterize
+- [x] YAML shape library/registry — done; see the "YAML front-end second
+      pass" section's Phase 8 entry (`particlesim.yaml.ShapeRegistry`).
+      This bullet was a stale duplicate of that entry, left unchecked when
+      Phase 8 landed.
 
 ## Force-arrow selection, wind gust/direction editing, and textured surfaces (§5.2/§10.2/§10.3/§10.4, new requirements) — not yet phased
 Raised by the user in three `/btw`-style comments during the
@@ -4828,6 +4829,64 @@ window, not as a general equivalence; and `ShapeRegistry`'s uniform `name`
 namespacing reaches `emitters[].name`, which is not just a label but seeds
 `Emitter`'s RNG sub-stream — correct for distinct instances (§14.4) but a
 determinism surprise if a shape body is ever used both named and unnamed.
+
+**Third pass: standalone spring/damper, `surface_collider`, `random_volume`
+radius** — writing a YAML equivalent for every current scene demo
+(`SceneLibraryDebugDemo`'s 10 entries) surfaced that two of this front-
+end's earlier "no real consumer yet" deferrals were wrong once every demo
+is checked, not just flag/ballBounce/sparks: standalone particle-pair
+`Spring`/`Damper` (distinct from `mesh_springs`' grid-topology form) turns
+out to have four consumers (`buildTire`'s rim/diameter braces, `buildRope`'s
+segments — used by both `PoleRopeScene` and `FlagOnRopeScene` — and
+`DragScene`'s hand-rolled chain), and `surface_collider` has two
+(`buildTrampoline`'s mat, `buildFlagOnRopeScenario`'s pole/rope-vs-flag-
+cloth). Confirmed with the user before implementing (this contradicted the
+locked plan decision from the previous pass) rather than silently
+expanding scope.
+- **Standalone `spring`/`damper` forces** (`YamlLoader.loadForces`): a
+  `pairs:` field (not a single `a`/`b`) since every real consumer is a
+  uniform-parameter list of pairs sharing one stiffness/damping/rest-
+  length, not one spring authored at a time — each `[idA, idB]` resolves
+  through the same `authorIds` map Phase 2's `ids:` selector already
+  reads, and each pair becomes its own `Spring`/`Damper` instance, named
+  `"$name-$i"` when there's more than one pair (matching how
+  `buildTire`/`buildRope` name theirs). `stiffness`/`damping`/
+  `break_threshold` reuse Phase 0's `directionalTriple` helper exactly
+  like `mesh_springs` does; `min_length` defaults to
+  `Spring.DEFAULT_MIN_LENGTH`. New `YamlLoaderTest` cases (4): a two-
+  particle spring pulls them together when stretched, a multi-pair entry
+  names each `Spring` with an index suffix, a damper opposes closing
+  velocity, and an unknown author id in a pair is a load-time error.
+- **`surface_collider` collision rule** (`YamlLoader.loadCollisions`):
+  targets a named *grid*, turned into a `Surface(Grid.triangles(grid),
+  name = gridName)` lazily, on demand — not a separate `surfaces:`
+  declaration section, since every real consumer already targets exactly
+  a grid-built surface and nothing else, and not eagerly for every
+  declared grid either: `Grid.triangles` requires at least 2 rows/cols,
+  and building one eagerly for every grid broke existing tests using a
+  single-row grid (a flag-style pole edge). `loadCollisions`'s return
+  widened from a `Pair` to a `Triple` (`CollisionSystem?`,
+  `ParticleCollisionSystem?`, `SurfaceCollisionSystem?`); `YamlScenario`
+  gained `surfaceCollisionSystem`. `surface_self` stays unwired — it
+  exists purely to stop a single mesh's own cloth from passing through
+  itself (`FlagScene`'s addition on top of `buildFlag`, not part of the
+  scenario itself), so no demo's *scenario*, as opposed to its viewer
+  wrapper, needs it. New `YamlLoaderTest` cases (2): a falling particle
+  stops against a grid-derived surface (the grid generator's particles
+  lie in the X/Y plane, so this needed gravity along Z, not Y — a real
+  gotcha caught by a first failing run of the test, not spotted by
+  inspection), and an unknown grid name is a load-time error.
+- **`random_volume` radius**: trivially additive — `ParticleStore.create`
+  already takes an optional `radius`, `loadRandomVolume` just wasn't
+  passing one through. New `YamlLoaderTest` case: radius set when given,
+  `null` (not some default literal) when absent, matching every other
+  generator's own radius convention. Per-particle random *velocity*
+  stayed out of scope — `SpatialGridScene`'s only remaining real
+  consumer — since duplicating `VectorDistribution` into the bulk
+  generator for one consumer isn't worth it; that demo stays Kotlin-DSL-
+  only, not translated to YAML.
+
+Full `./gradlew test -q` suite green after each of the three additions.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
