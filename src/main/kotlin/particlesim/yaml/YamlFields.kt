@@ -5,6 +5,8 @@ import particlesim.core.Vector3
 import particlesim.core.VectorExpr
 import particlesim.expr.ExpressionException
 import particlesim.expr.ExpressionParser
+import particlesim.lifecycle.ScalarDistribution
+import particlesim.lifecycle.VectorDistribution
 
 /** Thrown for any structural or semantic problem found while loading a YAML scenario —
  * always at load time (§4.2: "fail fast... with a clear error pointing at the offending
@@ -147,6 +149,63 @@ private inline fun <T> parseOrWrap(context: String, key: String, block: () -> T)
     block()
 } catch (e: ExpressionException) {
     throw YamlLoadException("$context.$key: ${e.message}")
+}
+
+/** §14.1's three native distribution shapes (Phase 6 of the YAML front-end's second pass) —
+ * `box`/`sphere`/`spread` map onto [VectorDistribution.UniformBox]/[VectorDistribution.UniformSphere]/
+ * [VectorDistribution.PointWithSpread] respectively. `spread`'s angle is authored in degrees
+ * (`spread_angle_degrees`) and converted via [Math.toRadians] here, matching how
+ * [particlesim.examples.buildSparks] itself is authored (`Math.toRadians(25.0)`) rather than
+ * asking a YAML author to pre-convert to radians by hand. */
+internal fun Map<*, *>.requireVectorDistribution(key: String, context: String): VectorDistribution =
+    parseVectorDistribution(requireMap(key, context), "$context.$key")
+
+private fun parseVectorDistribution(v: Map<*, *>, context: String): VectorDistribution = when {
+    v.containsKey("box") -> {
+        val box = v.requireMap("box", context)
+        VectorDistribution.UniformBox(box.requireVectorLiteral("center", "$context.box"), box.requireVectorLiteral("half_extents", "$context.box"))
+    }
+    v.containsKey("sphere") -> {
+        val sphere = v.requireMap("sphere", context)
+        VectorDistribution.UniformSphere(sphere.requireVectorLiteral("center", "$context.sphere"), sphere.requireDouble("radius", "$context.sphere"))
+    }
+    v.containsKey("spread") -> {
+        val spread = v.requireMap("spread", context)
+        val sc = "$context.spread"
+        VectorDistribution.PointWithSpread(
+            direction = spread.requireVectorLiteral("direction", sc),
+            spreadAngleRadians = Math.toRadians(spread.requireDouble("spread_angle_degrees", sc)),
+            minMagnitude = spread.requireDouble("min_magnitude", sc),
+            maxMagnitude = spread.requireDouble("max_magnitude", sc),
+        )
+    }
+    else -> throw YamlLoadException("$context: unknown distribution kind (expected one of: box, sphere, spread)")
+}
+
+/** §14.1's two native scalar distribution shapes — `constant`/`range` map onto
+ * [ScalarDistribution.Constant]/[ScalarDistribution.UniformRange]. */
+internal fun Map<*, *>.requireScalarDistribution(key: String, context: String): ScalarDistribution =
+    parseScalarDistribution(requireMap(key, context), "$context.$key")
+
+/** [requireScalarDistribution]'s optional counterpart, for `radius`/`lifetime` — both `null` on
+ * [particlesim.lifecycle.Emitter]'s own constructor when not given, unlike `mass`, which has a
+ * real default ([particlesim.lifecycle.ScalarDistribution.Constant]`(1.0)`) rather than being
+ * nullable - callers pass that default explicitly rather than this function inventing one. */
+internal fun Map<*, *>.optionalScalarDistribution(key: String, context: String): ScalarDistribution? {
+    val v = optionalMap(key) ?: return null
+    return parseScalarDistribution(v, "$context.$key")
+}
+
+private fun parseScalarDistribution(v: Map<*, *>, context: String): ScalarDistribution = when {
+    v.containsKey("constant") -> ScalarDistribution.Constant(v.requireDouble("constant", context))
+    v.containsKey("range") -> {
+        val range = v["range"] as? List<*> ?: throw YamlLoadException("$context.range: expected a [min, max] list")
+        if (range.size != 2) throw YamlLoadException("$context.range: expected exactly 2 components, got ${range.size}")
+        val min = (range[0] as? Number)?.toDouble() ?: throw YamlLoadException("$context.range: components must be numbers")
+        val max = (range[1] as? Number)?.toDouble() ?: throw YamlLoadException("$context.range: components must be numbers")
+        ScalarDistribution.UniformRange(min, max)
+    }
+    else -> throw YamlLoadException("$context: unknown distribution kind (expected one of: constant, range)")
 }
 
 private fun describe(v: Any?): String = when (v) {

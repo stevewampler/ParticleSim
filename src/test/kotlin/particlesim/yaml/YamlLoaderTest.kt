@@ -966,4 +966,139 @@ class YamlLoaderTest {
         assertEquals(null, scenario.particleCollisionSystem)
         assertEquals(null, scenario.destruction)
     }
+
+    // --- Phase 6 of the YAML second pass: emitters ---------------------------------------------
+
+    @Test
+    fun `an emitter with box position, spread velocity, and constant mass spawns particles over time`() {
+        val yaml = """
+            version: 1
+            emitters:
+              - name: fountain
+                group: sparks
+                rate: "20.0 + 15.0*sin(t*0.5)"
+                position:
+                  sphere: { center: [0.0, 0.5, 0.0], radius: 0.05 }
+                velocity:
+                  spread:
+                    direction: [0.0, 1.0, 0.0]
+                    spread_angle_degrees: 25.0
+                    min_magnitude: 3.0
+                    max_magnitude: 6.0
+                mass: { constant: 0.05 }
+                radius: { constant: 0.03 }
+                lifetime: { range: [1.0, 2.0] }
+                max_alive: 300
+                cap_policy: stop
+                master_seed: 1
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val emitter = scenario.emitters.single()
+        assertEquals("fountain", emitter.name)
+        assertEquals(20.0, emitter.currentRate(0.0), 1e-9) // sin(0) = 0 -> 20 + 15*0
+        assertEquals(300, emitter.maxAlive)
+        assertEquals(particlesim.lifecycle.EmitterCapPolicy.STOP, emitter.currentCapPolicy())
+        val result = emitter.update(scenario.store, scenario.groups, 0.0, 1.0) // 1 full second at a >20/s rate
+        assertTrue(result.spawnedIds.isNotEmpty())
+    }
+
+    @Test
+    fun `an emitter accepts box position and evict_oldest cap policy`() {
+        val yaml = """
+            version: 1
+            emitters:
+              - name: dust
+                group: motes
+                rate: 10.0
+                position:
+                  box: { center: [0.0, 0.0, 0.0], half_extents: [1.0, 1.0, 1.0] }
+                velocity:
+                  box: { center: [0.0, 0.0, 0.0], half_extents: [0.1, 0.1, 0.1] }
+                max_alive: 5
+                cap_policy: evict_oldest
+                master_seed: 3
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertEquals(particlesim.lifecycle.EmitterCapPolicy.EVICT_OLDEST, scenario.emitters.single().currentCapPolicy())
+    }
+
+    @Test
+    fun `an emitter's spawn positions are reproducible from the same master_seed`() {
+        val yaml = """
+            version: 1
+            emitters:
+              - name: fountain
+                group: sparks
+                rate: 50.0
+                position:
+                  sphere: { center: [0.0, 0.0, 0.0], radius: 1.0 }
+                velocity:
+                  box: { center: [0.0, 0.0, 0.0], half_extents: [0.0, 0.0, 0.0] }
+                max_alive: 1000
+                master_seed: 9
+        """.trimIndent()
+        val a = YamlLoader().load(yaml)
+        val b = YamlLoader().load(yaml)
+        a.emitters.single().update(a.store, a.groups, 0.0, 1.0)
+        b.emitters.single().update(b.store, b.groups, 0.0, 1.0)
+        val positionsA = a.groups.membersOf("sparks").sorted().map { a.store.position(it) }
+        val positionsB = b.groups.membersOf("sparks").sorted().map { b.store.position(it) }
+        assertEquals(positionsA, positionsB)
+        assertTrue(positionsA.isNotEmpty())
+    }
+
+    @Test
+    fun `an emitter requires master_seed`() {
+        val yaml = """
+            version: 1
+            emitters:
+              - name: fountain
+                group: sparks
+                rate: 10.0
+                position: { box: { center: [0.0, 0.0, 0.0], half_extents: [1.0, 1.0, 1.0] } }
+                velocity: { box: { center: [0.0, 0.0, 0.0], half_extents: [0.0, 0.0, 0.0] } }
+                max_alive: 10
+        """.trimIndent()
+        val ex = assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+        assertTrue(ex.message!!.contains("master_seed"))
+    }
+
+    @Test
+    fun `an emitter rejects an unknown cap_policy`() {
+        val yaml = """
+            version: 1
+            emitters:
+              - name: fountain
+                group: sparks
+                rate: 10.0
+                position: { box: { center: [0.0, 0.0, 0.0], half_extents: [1.0, 1.0, 1.0] } }
+                velocity: { box: { center: [0.0, 0.0, 0.0], half_extents: [0.0, 0.0, 0.0] } }
+                max_alive: 10
+                cap_policy: bogus
+                master_seed: 1
+        """.trimIndent()
+        assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+    }
+
+    @Test
+    fun `an emitter's target group is usable by a force even though nothing has spawned yet`() {
+        val yaml = """
+            version: 1
+            emitters:
+              - name: fountain
+                group: sparks
+                rate: 10.0
+                position: { box: { center: [0.0, 0.0, 0.0], half_extents: [1.0, 1.0, 1.0] } }
+                velocity: { box: { center: [0.0, 0.0, 0.0], half_extents: [0.0, 0.0, 0.0] } }
+                max_alive: 10
+                master_seed: 1
+            forces:
+              - gravity:
+                  group: sparks
+                  acceleration: [0.0, -9.8, 0.0]
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertEquals(1, scenario.forces.size)
+        assertTrue(scenario.groups.membersOf("sparks").isEmpty()) // nothing spawned at load time
+    }
 }

@@ -17,6 +17,9 @@ import particlesim.core.VectorExpr
 import particlesim.lifecycle.CollisionDestroyRule
 import particlesim.lifecycle.DestroyCondition
 import particlesim.lifecycle.DestructionSystem
+import particlesim.lifecycle.Emitter
+import particlesim.lifecycle.EmitterCapPolicy
+import particlesim.lifecycle.ScalarDistribution
 import particlesim.physics.ConstantForce
 import particlesim.physics.Constraint
 import particlesim.physics.Drag
@@ -50,6 +53,8 @@ data class YamlScenario(
     val particleCollisionSystem: ParticleCollisionSystem? = null,
     /** Phase 5's `destroy:` section - `null` when empty. */
     val destruction: DestructionSystem? = null,
+    /** Phase 6's `emitters:` section - empty when absent. */
+    val emitters: List<Emitter> = emptyList(),
 )
 
 /**
@@ -99,6 +104,17 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         // reason to special-case it separately from the selector form it now shares one list with.
         loadParticles(root, store, groups, grids, declaredGroups, tagIndex, authorIds)
 
+        // Phase 6's emitters run before groups:/forces:/etc. resolve group references, not after
+        // (unlike every other loadX above) - an emitter's own `group:` is the *target* it spawns
+        // into, which is commonly never pre-declared by any particle generator (buildSparks'
+        // "sparks" group is a real example: it exists purely because the emitter spawns into it,
+        // and gravity/drag still need to reference it by name). loadEmitters registers each
+        // emitter's group into declaredGroups as a side effect so requireKnownGroup below accepts
+        // it, without adding it to groupNames - a fresh emitter target always has zero members at
+        // load time, and warning about that would be a false positive, not a real "stale
+        // reference" catch.
+        val emitters = loadEmitters(root, declaredGroups)
+
         val groupNames = resolveGroupsSection(root.requireListOrEmpty("groups", "root"), groups, grids, tagIndex, authorIds, declaredGroups)
 
         fun requireKnownGroup(name: String, context: String) {
@@ -115,7 +131,7 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
             if (groups.membersOf(name).isEmpty()) onWarning("group '$name' matches zero particles")
         }
 
-        return YamlScenario(store, groups, forces, constraints, grids, colliders, collisionSystem, particleCollisionSystem, destruction)
+        return YamlScenario(store, groups, forces, constraints, grids, colliders, collisionSystem, particleCollisionSystem, destruction, emitters)
     }
 
     /** §4.2's group selector language (tags/ids/range), Phase 2 of the YAML front-end's second
@@ -714,5 +730,46 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
             }
         }
         return DestructionSystem(destroyConditions, collisionDestroyRules)
+    }
+
+    /** Phase 6's `emitters:` section (§14.1) — wires [Emitter]'s full constructor. `mass`
+     * defaults to `Constant(1.0)` when absent, matching the Kotlin constructor's own default;
+     * `radius`/`lifetime` stay `null` when absent, matching its nullable defaults exactly (a
+     * spawned particle with no radius/lifetime is a real, common case — most YAML scenes won't
+     * set one or the other). `rate` is the one expression-capable field ([ScalarExpr], so
+     * bursts/ramps like `buildSparks`' `20.0 + 15.0*sin(t*0.5)` are directly expressible as a
+     * string); `master_seed` is required, not defaulted, the same §11-determinism reasoning
+     * [loadRandomVolume] already applies to its own `seed:`. Registers each emitter's `group`
+     * into [declaredGroups] as a side effect — see the call site in [load] for why. */
+    private fun loadEmitters(root: Map<*, *>, declaredGroups: MutableSet<String>): List<Emitter> {
+        val emitters = ArrayList<Emitter>()
+        for ((index, entry) in root.requireListOrEmpty("emitters", "root").withIndex()) {
+            val f = entry as? Map<*, *> ?: throw YamlLoadException("emitters[$index]: expected a mapping")
+            val context = "emitters[$index]"
+            val name = f.requireString("name", context)
+            val group = f.requireString("group", context)
+            declaredGroups += group
+            val rate = f.requireScalarExpr("rate", context)
+            val position = f.requireVectorDistribution("position", context)
+            val velocity = f.requireVectorDistribution("velocity", context)
+            val mass = f.optionalScalarDistribution("mass", context) ?: ScalarDistribution.Constant(1.0)
+            val radius = f.optionalScalarDistribution("radius", context)
+            val lifetime = f.optionalScalarDistribution("lifetime", context)
+            val maxAlive = f.requireInt("max_alive", context)
+            val capPolicyStr = f.optionalString("cap_policy", "stop")
+            val capPolicy = when (capPolicyStr) {
+                "stop" -> EmitterCapPolicy.STOP
+                "evict_oldest" -> EmitterCapPolicy.EVICT_OLDEST
+                else -> throw YamlLoadException("$context.cap_policy: unknown cap policy '$capPolicyStr' (expected stop or evict_oldest)")
+            }
+            val masterSeed = f["master_seed"] as? Number ?: throw YamlLoadException("$context.master_seed: missing required field")
+            emitters += Emitter(
+                name = name, group = group, rate = rate, position = position, velocity = velocity,
+                mass = mass, radius = radius, lifetime = lifetime,
+                maxAlive = maxAlive, capPolicy = capPolicy, masterSeed = masterSeed.toLong(),
+                onWarning = onWarning,
+            )
+        }
+        return emitters
     }
 }

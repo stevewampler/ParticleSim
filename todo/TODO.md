@@ -4616,6 +4616,54 @@ declarations (nothing needs one).
       `collisionSystem`/`particleCollisionSystem`/`destruction` all `null`
       by default.
       Full `./gradlew test -q` suite green.
+- [x] **Phase 6 — emitters.** New top-level `emitters:` wiring `Emitter`'s
+      full constructor: `rate` (`ScalarExpr` — bursts/ramps directly
+      expressible, e.g. `"20.0 + 15.0*sin(t*0.5)"`), `position`/`velocity`
+      (§14.1's three distributions — `box`/`sphere`/`spread` mapping onto
+      `UniformBox`/`UniformSphere`/`PointWithSpread`, new
+      `requireVectorDistribution` helper in `YamlFields.kt`), `mass`/
+      `radius`/`lifetime` (`constant`/`range` mapping onto `Constant`/
+      `UniformRange`, new `requireScalarDistribution`/
+      `optionalScalarDistribution` pair — `mass` defaults to `Constant(1.0)`
+      matching `Emitter`'s own default, `radius`/`lifetime` stay `null`
+      when absent matching its nullable defaults), `max_alive`,
+      `cap_policy` (`stop`/`evict_oldest`), `master_seed` (required, not
+      defaulted - same §11-determinism reasoning `random_volume`'s own
+      `seed:` already established in Phase 1). `spread`'s angle is
+      authored as `spread_angle_degrees` and converted via `Math.toRadians`
+      in the loader, matching how `buildSparks` itself is authored
+      (`Math.toRadians(25.0)`) rather than asking a YAML author to
+      pre-convert by hand.
+      **A real ordering bug caught before it shipped, not after**: an
+      emitter's `group:` is the group it spawns *into*, which is commonly
+      never pre-declared by any particle generator — `buildSparks`' own
+      "sparks" group is exactly this case, existing purely because its
+      emitter spawns into it, with `gravity`/`drag` still needing to
+      reference it by name. Every other `loadX` in this file runs after
+      `groups:`/particle resolution and calls `requireKnownGroup` against
+      whatever's already declared by then; if `loadEmitters` ran in that
+      same slot, `forces: [{gravity: {group: sparks}}]` would fail to load
+      with "unknown group 'sparks'" the moment nothing else declared it
+      first - exactly `buildSparks`' own shape. Fixed by moving
+      `loadEmitters` to run immediately after `loadParticles`, *before*
+      `groups:`/forces/constraints/colliders/collisions resolve any
+      references, registering each emitter's `group` into `declaredGroups`
+      as a side effect — but deliberately **not** into the zero-match
+      warning list, since a fresh emitter target has zero members at load
+      time by construction (nothing has spawned yet) and warning about
+      that would be a false positive, not a real stale-reference catch.
+      Caught by design/review while implementing, not by a failing test —
+      but the "emitter's target group is usable by a force even though
+      nothing has spawned yet" test below exists specifically to keep it
+      caught going forward.
+      New `YamlLoaderTest` cases (6): a full emitter (sphere position,
+      spread velocity, constant mass/radius, range lifetime) spawning real
+      particles over a simulated second via `Emitter.update`, box position
+      + `evict_oldest` cap policy, seed-reproducibility (two loads →
+      identical sorted spawn positions after the same `update` call),
+      missing-`master_seed` error, unknown-`cap_policy` error, and the
+      ordering-bug regression test described above.
+      Full `./gradlew test -q` suite green.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
