@@ -1101,4 +1101,85 @@ class YamlLoaderTest {
         assertEquals(1, scenario.forces.size)
         assertTrue(scenario.groups.membersOf("sparks").isEmpty()) // nothing spawned at load time
     }
+
+    // --- Phase 9 of the YAML second pass: lights ------------------------------------------------
+
+    @Test
+    fun `an ambient light accepts color, intensity, and an optional name`() {
+        val yaml = """
+            version: 1
+            lights:
+              - ambient:
+                  color: [0.6, 0.65, 0.78]
+                  intensity: 0.35
+                  name: fill
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val light = scenario.lights.single() as particlesim.render.Light.Ambient
+        assertEquals("fill", light.name)
+        assertEquals(particlesim.render.Color(0.6, 0.65, 0.78), light.color)
+        assertEquals(0.35, light.intensity, 1e-12)
+    }
+
+    @Test
+    fun `a directional light requires a position`() {
+        val yaml = """
+            version: 1
+            lights:
+              - directional:
+                  position: [5.0, 10.0, 7.0]
+                  name: sun
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val light = scenario.lights.single() as particlesim.render.Light.Directional
+        assertEquals(Vector3(5.0, 10.0, 7.0), light.position)
+        assertEquals(particlesim.render.Color(1.0, 1.0, 1.0), light.color) // default white
+        assertEquals(1.0, light.intensity, 1e-12) // default intensity
+    }
+
+    @Test
+    fun `directional light without a position is a load-time error`() {
+        val yaml = """
+            version: 1
+            lights:
+              - directional:
+                  name: sun
+        """.trimIndent()
+        val ex = assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+        assertTrue(ex.message!!.contains("position"))
+    }
+
+    @Test
+    fun `a point light carries position, color, and intensity`() {
+        val yaml = """
+            version: 1
+            lights:
+              - point:
+                  position: [0.0, 3.0, 0.0]
+                  color: [1.0, 0.85, 0.6]
+                  intensity: 45.0
+                  name: highlight
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val light = scenario.lights.single() as particlesim.render.Light.Point
+        assertEquals(Vector3(0.0, 3.0, 0.0), light.position)
+        assertEquals(particlesim.render.Color(1.0, 0.85, 0.6), light.color)
+        assertEquals(45.0, light.intensity, 1e-12)
+    }
+
+    @Test
+    fun `an unknown light type is a load-time error`() {
+        val yaml = """
+            version: 1
+            lights:
+              - not_a_real_light: {}
+        """.trimIndent()
+        assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+    }
+
+    @Test
+    fun `lights are empty by default`() {
+        val scenario = YamlLoader().load(minimalGrid())
+        assertTrue(scenario.lights.isEmpty())
+    }
 }

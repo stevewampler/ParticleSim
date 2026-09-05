@@ -30,6 +30,8 @@ import particlesim.physics.MeshSprings
 import particlesim.physics.NBodyGravity
 import particlesim.physics.UniformGravity
 import particlesim.physics.Wind
+import particlesim.render.Color
+import particlesim.render.Light
 import particlesim.surface.Grid
 import kotlin.math.abs
 import kotlin.random.Random
@@ -55,6 +57,10 @@ data class YamlScenario(
     val destruction: DestructionSystem? = null,
     /** Phase 6's `emitters:` section - empty when absent. */
     val emitters: List<Emitter> = emptyList(),
+    /** Phase 9's `lights:` section - empty when absent, same "viewer falls back to its own
+     * default lighting" meaning [particlesim.render.Light]'s own doc comment already gives an
+     * empty list from any front-end. */
+    val lights: List<Light> = emptyList(),
 )
 
 /**
@@ -132,12 +138,13 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         val colliders = loadColliders(root)
         val (collisionSystem, particleCollisionSystem) = loadCollisions(root, colliders, ::requireKnownGroup)
         val destruction = loadDestruction(root, colliders, ::requireKnownGroup)
+        val lights = loadLights(root)
 
         for (name in groupNames) {
             if (groups.membersOf(name).isEmpty()) onWarning("group '$name' matches zero particles")
         }
 
-        return YamlScenario(store, groups, forces, constraints, grids, colliders, collisionSystem, particleCollisionSystem, destruction, emitters)
+        return YamlScenario(store, groups, forces, constraints, grids, colliders, collisionSystem, particleCollisionSystem, destruction, emitters, lights)
     }
 
     /** §4.2's group selector language (tags/ids/range), Phase 2 of the YAML front-end's second
@@ -781,5 +788,53 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
             )
         }
         return emitters
+    }
+
+    /** Phase 9's `lights:` section — §10.2's `[stretch]` "Lighting & materials," last of the
+     * five items TODO.md tracked as this front-end's deferred second pass. Every [Light] field
+     * is a plain value on the Kotlin side (no [particlesim.core.ScalarExpr]/
+     * [particlesim.core.VectorExpr] anywhere on `Light` — position/color/intensity are only
+     * live-editable via §10.4's `EditableFields` mechanism, a completely different, viewer-side-
+     * only path, not something YAML would author as an expression), so this is a direct 1:1
+     * mapping: `ambient`/`directional`/`point`, each with an optional `color`/`intensity`/`name`
+     * (`color` defaulting to white, `intensity` to `1.0` — [Light]'s own constructor defaults),
+     * `directional`/`point` additionally requiring `position`. */
+    private fun loadLights(root: Map<*, *>): List<Light> {
+        val lights = ArrayList<Light>()
+        for ((index, entry) in root.requireListOrEmpty("lights", "root").withIndex()) {
+            val map = entry as? Map<*, *> ?: throw YamlLoadException("lights[$index]: expected a mapping")
+            val context = "lights[$index]"
+            lights += when {
+                map.containsKey("ambient") -> {
+                    val f = map.requireMap("ambient", context)
+                    Light.Ambient(color = readColor(f, "$context.ambient"), intensity = f.optionalDouble("intensity", 1.0), name = f.optionalString("name"))
+                }
+                map.containsKey("directional") -> {
+                    val f = map.requireMap("directional", context)
+                    Light.Directional(
+                        position = f.requireVectorLiteral("position", "$context.directional"),
+                        color = readColor(f, "$context.directional"),
+                        intensity = f.optionalDouble("intensity", 1.0),
+                        name = f.optionalString("name"),
+                    )
+                }
+                map.containsKey("point") -> {
+                    val f = map.requireMap("point", context)
+                    Light.Point(
+                        position = f.requireVectorLiteral("position", "$context.point"),
+                        color = readColor(f, "$context.point"),
+                        intensity = f.optionalDouble("intensity", 1.0),
+                        name = f.optionalString("name"),
+                    )
+                }
+                else -> throw YamlLoadException("$context: unknown light type (expected one of: ambient, directional, point)")
+            }
+        }
+        return lights
+    }
+
+    private fun readColor(f: Map<*, *>, context: String): Color {
+        val v = f.optionalVectorLiteral("color", context, Vector3(1.0, 1.0, 1.0))
+        return Color(v.x, v.y, v.z)
     }
 }

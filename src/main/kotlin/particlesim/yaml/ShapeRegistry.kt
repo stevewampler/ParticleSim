@@ -34,7 +34,7 @@ import particlesim.core.Vector3
  */
 internal object ShapeRegistry {
 
-    private val MERGED_LIST_KEYS = listOf("particles", "forces", "constraints", "colliders", "destroy", "emitters", "groups")
+    private val MERGED_LIST_KEYS = listOf("particles", "forces", "constraints", "colliders", "destroy", "emitters", "groups", "lights")
 
     /** Returns a new root document with `shape_definitions:`/`shapes:` removed and every
      * instantiated shape's (namespaced, offset, param-substituted) body merged into the

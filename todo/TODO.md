@@ -757,7 +757,9 @@ this project has used since Phase 5.
       distinguishing "declared-empty warns" from "undeclared errors,"
       malformed-expression-string and unknown-grid-name errors, literal
       negative mass rejection).
-- [ ] **Second pass** (not this phase): wire every other expression-capable
+- [x] **Second pass** (deferred at the time, completed in a later
+      session — see "YAML front-end second pass" further down for the
+      full nine-phase retrospective): wire every other expression-capable
       field (colliders' moving position, emitters' rate/distributions,
       destroy conditions, breakable thresholds, N-body/collision/
       resting-contact parameters) into the YAML schema; general
@@ -766,7 +768,9 @@ this project has used since Phase 5.
       a real tag/id/range selector language (§4.2) to replace this phase's
       narrow name-based group model; YAML coverage for the ball-bounce and
       sparks scenarios, each getting their own golden-file parity proof
-      the same way the flag did.
+      the same way the flag did; the §4.5 shape library/registry; and a
+      `lights:` section, folded in alongside the rest at the user's
+      request.
 
 ## Phase 8 — Full execution engine
 - [x] Real-time interactive loop: full state stream contract (camera pose,
@@ -4769,6 +4773,39 @@ declarations (nothing needs one).
       `SparksYamlParityTest` — `ShapeRegistry.expand` returns its input
       unchanged whenever `shape_definitions:`/`shapes:` are both absent,
       so no existing fixture's behavior could have shifted.
+- [x] **Phase 9 — `lights:` section, last of the nine phases.** New
+      top-level `lights:` — `ambient`/`directional`/`point`, a direct 1:1
+      mapping onto `particlesim.render.Light`'s three variants: every
+      field on `Light` is a plain value on the Kotlin side (no
+      `ScalarExpr`/`VectorExpr` anywhere on it — position/color/intensity
+      are only live-editable via §10.4's `EditableFields` mechanism, a
+      different, viewer-side-only path, not something YAML authors as an
+      expression), so `color`/`intensity` default exactly to `Light`'s own
+      constructor defaults (white, `1.0`) when omitted, and
+      `directional`/`point` require `position`.
+      **Not verified live in Chrome, unlike this session's earlier
+      lighting work** — the plan called for a live check here since it's
+      the one phase with viewer-visible output, but that assumption didn't
+      hold: `particlesim.yaml.YamlLoader`/`YamlScenario` have never been
+      wired into `SceneLibraryDebugDemo`'s scene factories or any
+      `DemoScene` — a YAML-declared scenario (lights or otherwise) has no
+      path to the viewer at all yet, confirmed by grepping the debug
+      package for any `Yaml` reference and finding none. Building that
+      bridge (a `DemoScene` wrapping a `YamlScenario`, registered in the
+      SceneLibrary) is a real, separate, not-yet-built capability — well
+      outside "finish the YAML items," so it's called out here rather than
+      silently built or silently skipped. Verification for this phase is
+      the same as every other: `YamlLoaderTest` plus the full suite.
+      New `YamlLoaderTest` cases (6): ambient with color/intensity/name,
+      directional's position + its default color/intensity, missing-
+      position error, point's full field set, unknown-light-type error,
+      and `lights` empty by default.
+      Full `./gradlew test -q` suite green.
+
+**All nine phases of the YAML front-end's second pass are now complete** —
+see the Phase 7 note above ("Second pass (not this phase)") for the
+original scope this closes out, and `todo/requirements.md` §4.2/§4.5 for
+the updated stretch-status annotations.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

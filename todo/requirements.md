@@ -259,16 +259,23 @@ needs to know its ids, only its namespaced group names. Implemented as
 shapes (`buildFlag`, `buildBallBounce`) sharing one scene
 (`ShapeCompositionTest`, `MultiShapeDebugDemo`).
 
-For YAML, this needs an actual **shape library/registry**: a named,
-versioned catalog of shape definitions (each itself expressible in the
-existing YAML grammar, parameterized the way a bulk-generation block
-already is, §4.2) that a scene's `shapes:` section can reference by name
-plus parameters plus placement. Kotlin-DSL-first, same status as every
-other YAML-side feature since Phase 7 (§4.4) — the DSL's function-based
-version is what gets built first; a formal YAML shape registry is a
-second pass once the DSL side has proven out what a shape actually needs
-to parameterize (a flag's rows/cols/spacing is obvious; a tire's
-parameters aren't decided yet).
+For YAML, this needed an actual **shape library/registry** — no longer
+deferred: `shape_definitions:` (a name, `params:` with per-parameter
+defaults, and a `body:` written in the same YAML grammar every other
+section already uses) plus `shapes:` (`use`/`instance`/`offset`/`params`
+to instantiate one), implemented as `particlesim.yaml.ShapeRegistry` — a
+pre-processing pass that namespaces (mirroring `ShapePlacement`'s own
+dotted `"$instanceName.$local"` convention exactly), offset-translates,
+and param-substitutes a shape's body before merging it into the ordinary
+top-level sections the rest of the loader already knows how to read, so
+no parsing logic is duplicated. Scoped to what a flag-shaped and a
+ball-bounce-shaped definition actually need to parameterize, per this
+section's own original framing — a tire's parameters still aren't
+decided, and nothing here speculatively invents them. See
+`todo/TODO.md`'s "YAML front-end second pass," Phase 8, for the full
+retrospective (including the two scope limits this pass accepted:
+`$param` substitution is whole-value only, and author ids aren't
+namespaced).
 
 ## 5. Forces
 
