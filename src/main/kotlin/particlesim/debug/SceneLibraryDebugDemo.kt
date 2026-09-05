@@ -37,6 +37,22 @@ fun main(args: Array<String>) {
         "multiShape" to { MultiShapeScene() },
         "poleRope" to { PoleRopeScene() },
         "flagOnRope" to { FlagOnRopeScene() },
+        // §4.2's YAML front-end, live: one YamlDemoScene per src/main/resources/yaml/*.yaml
+        // demo file (see that class's own doc comment for what it does and doesn't render
+        // relative to its Kotlin-DSL-built ".yaml"-suffix-free namesake above). dt matches
+        // each file's own header-comment note on which dt it was designed for (a YamlScenario
+        // carries no dt/duration of its own - see requirements.md §4.2). spatialGrid has no
+        // YAML file (documented in TODO.md: its per-particle random velocity has no
+        // random_volume equivalent), so there's no "spatialGrid.yaml" entry to add here.
+        "flag.yaml" to { YamlDemoScene("flag", dt = 1e-3) },
+        "ballBounce.yaml" to { YamlDemoScene("ball_bounce", dt = 1e-3) },
+        "trampoline.yaml" to { YamlDemoScene("trampoline", dt = 5e-4) },
+        "sparks.yaml" to { YamlDemoScene("sparks", dt = 1e-3) },
+        "drag.yaml" to { YamlDemoScene("drag", dt = 1e-3) },
+        "particleCollision.yaml" to { YamlDemoScene("particleCollision", dt = 1e-3) },
+        "multiShape.yaml" to { YamlDemoScene("multiShape", dt = 1e-3) },
+        "poleRope.yaml" to { YamlDemoScene("poleRope", dt = 1e-3) },
+        "flagOnRope.yaml" to { YamlDemoScene("flagOnRope", dt = 1e-3) },
     )
     val requestedScene = args.getOrNull(0)
     if (requestedScene != null && requestedScene !in factories) {

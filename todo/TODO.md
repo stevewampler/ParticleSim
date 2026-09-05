@@ -4784,19 +4784,23 @@ declarations (nothing needs one).
       expression), so `color`/`intensity` default exactly to `Light`'s own
       constructor defaults (white, `1.0`) when omitted, and
       `directional`/`point` require `position`.
-      **Not verified live in Chrome, unlike this session's earlier
-      lighting work** — the plan called for a live check here since it's
-      the one phase with viewer-visible output, but that assumption didn't
-      hold: `particlesim.yaml.YamlLoader`/`YamlScenario` have never been
-      wired into `SceneLibraryDebugDemo`'s scene factories or any
-      `DemoScene` — a YAML-declared scenario (lights or otherwise) has no
-      path to the viewer at all yet, confirmed by grepping the debug
-      package for any `Yaml` reference and finding none. Building that
-      bridge (a `DemoScene` wrapping a `YamlScenario`, registered in the
-      SceneLibrary) is a real, separate, not-yet-built capability — well
-      outside "finish the YAML items," so it's called out here rather than
-      silently built or silently skipped. Verification for this phase is
-      the same as every other: `YamlLoaderTest` plus the full suite.
+      **Not verified live in Chrome at the time this phase landed** — the
+      plan called for a live check here since it's the one phase with
+      viewer-visible output, but that assumption didn't hold:
+      `particlesim.yaml.YamlLoader`/`YamlScenario` had never been wired
+      into `SceneLibraryDebugDemo`'s scene factories or any `DemoScene` —
+      a YAML-declared scenario (lights or otherwise) had no path to the
+      viewer at all, confirmed by grepping the debug package for any
+      `Yaml` reference and finding none. Building that bridge was flagged
+      here as a real, separate, not-yet-built capability rather than
+      silently built or silently skipped — **since closed**, see
+      `particlesim.debug.YamlDemoScene` below ("Wire the YAML demo files
+      into SceneLibrary"). That pass verified four YAML-loaded scenes live
+      in Chrome (none of the current demo files declare a `lights:`
+      section, so this still hasn't specifically exercised a YAML-loaded
+      light reaching the outliner — a real gap, not silently claimed
+      closed here). Verification for this phase itself was
+      `YamlLoaderTest` plus the full suite.
       New `YamlLoaderTest` cases (6): ambient with color/intensity/name,
       directional's position + its default color/intensity, missing-
       position error, point's full field set, unknown-light-type error,
@@ -4927,15 +4931,72 @@ lays particles out in the X/Y plane with no orientation parameter to
 reproduce the real demo's X/Z-plane mat. `drag.yaml`'s spring/damper
 entries are two independent force declarations with no equivalent to
 `DragScene`'s by-index spring→damper break-cleanup pairing — documented
-in the file itself, not silently assumed to match. No YAML-to-`DemoScene`
-bridge exists yet (Phase 9's own note, still true), so none of these are
-reachable from the scene picker — loadable and simulatable, not yet
-pickable. New `particlesim.yaml.DemoYamlSmokeTest` (6 cases, one per new
-file): loads without error, particle/group counts match the source
-demo's, and a real run (the demo's own dt, its own collision systems)
-never produces a non-finite position — not golden-file parity (none of
-these have a pre-existing Kotlin-built reference to prove against), just
-"loads and doesn't blow up." All 6 passed on the first run.
+in the file itself, not silently assumed to match. At the time this
+entry was first written there was no YAML-to-`DemoScene` bridge (Phase
+9's own note), so none of these were reachable from the scene picker —
+loadable and simulatable, not pickable. **Since closed** — see "Wire the
+YAML demo files into SceneLibrary" below. New
+`particlesim.yaml.DemoYamlSmokeTest` (6 cases, one per new file): loads
+without error, particle/group counts match the source demo's, and a real
+run (the demo's own dt, its own collision systems) never produces a
+non-finite position — not golden-file parity (none of these have a
+pre-existing Kotlin-built reference to prove against), just "loads and
+doesn't blow up." All 6 passed on the first run.
+
+**Wire the YAML demo files into SceneLibrary** (closing the bridge gap
+noted above and in Phase 9): a new `particlesim.debug.YamlDemoScene`,
+one generic `DemoScene` over any loaded `YamlScenario` rather than one
+hand-written wrapper per file — unlike `FlagScene`/`TrampolineScene`/etc.
+(each adding real viewer-only decoration: a camera function, a textured/
+materialed `SurfaceRenderer`, drag interactivity,
+`SurfaceSelfCollisionSystem`), a YAML scenario carries none of that to
+begin with, so nothing scene-specific was left to hand-write — every
+field a `YamlScenario` can produce (forces/constraints/colliders/three
+collision systems/destruction/emitters/lights) is handled uniformly:
+integrate (dropping broken forces) → resolve all three collision systems
+→ resolve destruction (draining any `DeleteParticle` clicks queued since
+the last step, merged with whatever `destroy:` conditions the file
+itself declares) → update every emitter. §10.4 live-editing
+(`SetScalarField`/`SetVectorField`/particle mass-radius/emitter edits)
+works generically via the existing `applyEditableFieldMessage`/
+`applyEmitterMessage`, plus `SetGroupEnabled`/`SetColliderActive`
+generically too. `RemoveCollider` and dragging are the two messages left
+unhandled — the same limitation `FlagScene`/`BallBounceScene`/
+`TrampolineScene` (every `buildX()`-backed scene, as opposed to
+`ParticleCollisionScene`/`SpatialGridScene`'s own ad hoc
+`liveColliderRules`) already have, not a new gap. No synthesized mesh
+for a `grid:`-generated surface either (a grid's own `mesh_springs`
+already render as visible line connections, matching how
+`DragScene`/`ParticleCollisionScene`/`SpatialGridScene` already render as
+dots+lines with no mesh) — building one generically would be a real
+addition, not "wiring in what's already there."
+Registered each of the 9 demo files in `SceneLibraryDebugDemo`'s picker
+under its own name suffixed `.yaml` (e.g. `"flag.yaml"`) rather than
+replacing its Kotlin-DSL namesake — asked the user first, since this is
+a real UX decision (visible in the picker every time), and "suffix with
+`.yaml`" was the confirmed choice over prefixing or grouping. `dt` is
+hardcoded per registered entry (a `YamlScenario` carries no `dt`/
+`duration` field, §4.2) rather than added to the schema — the minimal-
+scope reading of "wire in what already exists," not a new capability.
+**Verified live in Chrome, not just by the smoke tests**: loaded
+`trampoline.yaml` (confirmed the mat+ball populate the outliner and
+simulate, despite the axis-rotation quirk making it render as a vertical
+sheet rather than a horizontal mat — expected, documented in the file),
+`flagOnRope.yaml` (133 particles, all five groups present including the
+`{grid, row, col}`-stitched attachment springs, cloth+rope visibly
+hanging together), `multiShape.yaml` (136 particles, correctly namespaced
+groups `pole.pole`/`flag.cloth`/`flag.pole`/`tire.rim`/`ball.ball`, the
+tire's diameter braces visibly rendering as spokes), `drag.yaml` (12-
+particle chain hangs taut under gravity), and `sparks.yaml` (the one
+file with an emitter and destroy conditions — confirmed particles
+actually spawn and get destroyed via the events log, steady-state count
+around 19, not climbing unboundedly or sitting flat at zero). A review
+pass caught that the first draft's `YamlDemoScene` doc comment didn't
+mention `ballBounce.yaml`/`trampoline.yaml` lacking their Kotlin
+namesakes' re-drop cycle (viewer-loop state with no YAML representation)
+— fixed before commit, so a user picking one right after its Kotlin
+version doesn't read "settled once, then still forever" as a broken
+load. Full `./gradlew test -q` suite green throughout.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
