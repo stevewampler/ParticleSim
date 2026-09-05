@@ -1,0 +1,41 @@
+version: 1
+emitters:
+  - name: fountain
+    group: sparks
+    rate: "20.0 + 15.0*sin(t*0.5)"
+    position:
+      sphere: { center: [0.0, 0.5, 0.0], radius: 0.05 }
+    velocity:
+      spread:
+        direction: [0.0, 1.0, 0.0]
+        spread_angle_degrees: 25.0
+        min_magnitude: 3.0
+        max_magnitude: 6.0
+    mass: { constant: 0.05 }
+    radius: { constant: 0.03 }
+    lifetime: { range: [1.0, 2.0] }
+    max_alive: 300
+    cap_policy: stop
+    master_seed: 1
+forces:
+  - gravity:
+      group: sparks
+      acceleration: [0.0, -9.8, 0.0]
+      name: gravity
+  - drag:
+      group: sparks
+      coefficient: 0.05
+      name: drag
+colliders:
+  - plane:
+      name: floor
+      position: [0.0, 0.0, 0.0]
+      normal: [0.0, 1.0, 0.0]
+destroy:
+  - group: sparks
+    outside_box:
+      center: [0.0, 0.0, 0.0]
+      half_extents: [10.0, 1000.0, 10.0]
+  - group: sparks
+    on_collision:
+      collider: floor

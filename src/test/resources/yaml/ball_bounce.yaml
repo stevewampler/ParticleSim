@@ -1,0 +1,24 @@
+version: 1
+particles:
+  - single:
+      name: ball
+      position: [0.0, 5.0, 0.0]
+      mass: 1.0
+      radius: 0.2
+colliders:
+  - plane:
+      name: floor
+      position: [0.0, 0.0, 0.0]
+      normal: [0.0, 1.0, 0.0]
+forces:
+  - gravity:
+      group: ball
+      acceleration: [0.0, -9.8, 0.0]
+collisions:
+  rules:
+    - particle_collider:
+        group: ball
+        collider: floor
+        restitution: 0.7
+        compression_damping: 3.0
+        extension_damping: 0.2

@@ -4664,6 +4664,44 @@ declarations (nothing needs one).
       missing-`master_seed` error, unknown-`cap_policy` error, and the
       ordering-bug regression test described above.
       Full `./gradlew test -q` suite green.
+- [x] **Phase 7 — `ballBounce`/`sparks` YAML + golden parity.** The
+      integration proof for Phases 0-6: both scenarios now have their own
+      YAML fixture, loaded and run through the *exact* same sampling
+      harness their Kotlin-DSL-built counterparts already use, asserted
+      against a shared checked-in reference — `FlagYamlParityTest`'s
+      pattern, extended to two more scenarios. **Sparks** reused the
+      existing `sparks.golden.txt` (`SparksGoldenTest` already built it in
+      an earlier phase); `src/test/resources/yaml/sparks.yaml` hand-matches
+      `buildSparks`'s exact rate expression, distributions, force order
+      (`gravity` then `drag` — force-accumulation order affects the bit
+      pattern of a floating-point sum, so this isn't just "the same
+      values"), and destroy rules. `SparksYamlParityTest` mirrors
+      `SparksGoldenTest`'s exact per-step order (`integrator.step` →
+      `destruction.resolve` → `emitter.update`) and its aggregate
+      mean-position/mean-velocity/live-count sampling (a fixed set of
+      named ids doesn't work here — which particles survive to a given
+      sample time depends on randomly-drawn lifetimes). **Ball bounce**
+      had no existing golden reference, so this phase built one first:
+      new `BallBounceGoldenTest` (single-id sampling, like `FlagGoldenTest`
+      — the scenario has exactly one particle, unlike sparks' dynamic
+      population), regenerated once via a temporary `GoldenFile.regenerate`
+      test call (reviewed by hand — a clean fall, bounce, and settle
+      across 4 samples spanning 2 real seconds, physically sensible given
+      `buildBallBounce`'s own damping — then the temporary test method was
+      removed, `assertMatchesReference` swapped in), producing
+      `src/test/resources/golden/ball_bounce.golden.txt`.
+      `src/test/resources/yaml/ball_bounce.yaml` matches `buildBallBounce`'s
+      defaults exactly (drop height 5.0, restitution 0.7, compression/
+      extension damping 3.0/0.2, mass defaulting to `ParticleStore.create`'s
+      own `1.0`). `BallBounceYamlParityTest` mirrors `BallBounceGoldenTest`'s
+      sampling exactly, asserted against the new reference.
+      Both parity tests passed **bit-exact on the first run** — no
+      iteration needed, the strongest available confirmation that Phases
+      0-6's YAML wiring genuinely reproduces the same Kotlin model, not
+      just similar-looking output.
+      Full `./gradlew test -q` suite green (now including
+      `BallBounceGoldenTest`, `BallBounceYamlParityTest`, and
+      `SparksYamlParityTest` alongside every earlier phase's own tests).
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
