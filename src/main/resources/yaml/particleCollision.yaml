@@ -72,3 +72,9 @@ collisions:
         compression_damping: 1.0
         static_friction: 0.4
         kinetic_friction: 0.3
+
+# ParticleCollisionScene declares no custom lights of its own - the same default "sun" the
+# other YAML demos use for the same reason (a real, editable light instead of an invisible
+# default).
+lights:
+  - directional: { position: [5.0, 10.0, 7.0], intensity: 0.8, name: sun }

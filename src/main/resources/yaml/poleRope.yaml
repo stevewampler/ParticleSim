@@ -56,3 +56,8 @@ forces:
 constraints:
   - fixed_position: { group: pole, at_current_positions: true }
   - fixed_position: { group: rope-anchors, at_current_positions: true }
+
+# PoleRopeScene declares no custom lights of its own - the same default "sun" the other YAML
+# demos use for the same reason (a real, editable light instead of an invisible default).
+lights:
+  - directional: { position: [5.0, 10.0, 7.0], intensity: 0.8, name: sun }

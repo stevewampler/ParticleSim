@@ -44,3 +44,10 @@ destroy:
   - group: sparks
     on_collision:
       collider: floor
+
+# SparksScene declares no custom lights of its own - the same default "sun" FlagScene/
+# BallBounceScene's own YAML files use, for the same reason (a real, editable light instead of
+# an invisible default). Lights don't touch physics, so this can't affect SparksYamlParityTest's
+# golden-file comparison.
+lights:
+  - directional: { position: [5.0, 10.0, 7.0], intensity: 0.8, name: sun }

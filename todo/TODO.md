@@ -4819,6 +4819,31 @@ declarations (nothing needs one).
       and `lights` empty by default.
       Full `./gradlew test -q` suite green.
 
+**Lights added to the other eight demo YAML files too** (user follow-up
+to the `flagOnRope.yaml` addition above): `flag.yaml` and `trampoline.yaml`
+mirror their own `FlagScene`/`TrampolineScene`'s custom lights exactly
+(one `sun` directional for flag; `ambient-fill`/`sun`/`bounce-highlight`
+for trampoline, same colors/intensities, not rotated to match
+`trampoline.yaml`'s own 90-degree axis quirk — lights are viewer
+decoration, and that file already documents its visual orientation
+doesn't match `buildTrampoline`'s real layout, so there's no "correct"
+rotation to apply). `ball_bounce.yaml`/`sparks.yaml`/`drag.yaml`/
+`particleCollision.yaml`/`multiShape.yaml`/`poleRope.yaml`'s own Kotlin
+scenes declare no custom lights at all (confirmed by grepping the debug
+package for `Light` usage — only `FlagScene`/`FlagOnRopeScene`/
+`TrampolineScene` reference it), so each gets the same single default
+`sun` `FlagScene`'s own doc comment already justifies (a real, editable
+light instead of an invisible default), rather than either fabricating
+something with no precedent or leaving them dark. `multiShape.yaml`'s
+`sun` is a top-level section, not inside any `shape_definitions` body,
+so `ShapeRegistry`'s rewrite/namespacing never touches it — one light for
+the whole composed scene, not one duplicated per shape instance.
+Verified live in Chrome that lights don't affect physics (full suite,
+including `FlagYamlParityTest`/`SparksYamlParityTest`'s golden-file
+comparisons, stayed green) and that `multiShape.yaml`'s single top-level
+light and `trampoline.yaml`'s three lights both reach the outliner
+correctly.
+
 **All nine phases of the YAML front-end's second pass are now complete** —
 see the Phase 7 note above ("Second pass (not this phase)") for the
 original scope this closes out, and `todo/requirements.md` §4.2/§4.5 for

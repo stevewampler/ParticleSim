@@ -140,3 +140,11 @@ shapes:
   - use: ballShape
     instance: ball
     offset: [-2.5, 0.0, 1.5]
+
+# MultiShapeScene declares no custom lights of its own - the same default "sun" the other YAML
+# demos use for the same reason (a real, editable light instead of an invisible default). A
+# top-level section, not inside any shape_definitions body, so it's untouched by ShapeRegistry's
+# rewrite/namespacing (see ShapeRegistry.expand: a section not merged from any shape instance
+# passes through root unchanged) - one light for the whole composed scene, not one per shape.
+lights:
+  - directional: { position: [5.0, 10.0, 7.0], intensity: 0.8, name: sun }

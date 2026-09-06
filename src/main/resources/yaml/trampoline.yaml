@@ -71,3 +71,13 @@ collisions:
         restitution: 0.85
         compression_damping: 0.5
         extension_damping: 0.1
+
+# Matches TrampolineScene's own three lights exactly - same numbers as the live scene, not
+# rotated to match this file's own 90-degree axis rotation (see the header comment above):
+# lights are viewer decoration, and this file already documents that its visual orientation
+# doesn't match buildTrampoline's own X/Z-plane layout, so there's no "correct" rotation to
+# apply here either.
+lights:
+  - ambient: { color: [0.6, 0.65, 0.78], intensity: 0.35, name: ambient-fill }
+  - directional: { position: [4.0, 8.0, 3.0], color: [1.0, 0.96, 0.9], intensity: 0.7, name: sun }
+  - point: { position: [0.0, 3.0, 0.0], color: [1.0, 0.85, 0.6], intensity: 45.0, name: bounce-highlight }

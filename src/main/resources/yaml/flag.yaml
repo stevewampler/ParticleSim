@@ -39,3 +39,8 @@ constraints:
   - fixed_position:
       group: pole
       at_current_positions: true
+
+# Matches FlagScene's own light exactly - a scene-level decoration, not part of buildFlag's
+# physics scenario, but lights: is real YAML scope in its own right (§4.2/Phase 9).
+lights:
+  - directional: { position: [5.0, 10.0, 7.0], intensity: 0.8, name: sun }

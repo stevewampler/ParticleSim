@@ -22,3 +22,9 @@ collisions:
         restitution: 0.7
         compression_damping: 3.0
         extension_damping: 0.2
+
+# BallBounceScene declares no custom lights of its own (the viewer's own default hemisphere+sun
+# fallback covers it live) - this is the same default "sun" FlagScene/FlagOnRopeScene declare
+# explicitly for exactly that reason: a real, editable light instead of an invisible default.
+lights:
+  - directional: { position: [5.0, 10.0, 7.0], intensity: 0.8, name: sun }

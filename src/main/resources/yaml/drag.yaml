@@ -61,3 +61,8 @@ constraints:
       group: anchor
       position: [0.0, 4.0, 0.0]
       name: anchor
+
+# DragScene declares no custom lights of its own - the same default "sun" the other YAML demos
+# use for the same reason (a real, editable light instead of an invisible default).
+lights:
+  - directional: { position: [5.0, 10.0, 7.0], intensity: 0.8, name: sun }
