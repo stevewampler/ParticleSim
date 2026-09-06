@@ -21,13 +21,15 @@ import particlesim.yaml.YamlLoader
  * produce (forces/constraints/colliders/three collision systems/destruction/emitters/lights) is
  * handled uniformly.
  *
- * **What this deliberately doesn't render**: no [particlesim.render.SurfaceRenderer] mesh for a
- * `grid:`-generated surface (e.g. the flag/trampoline mat's cloth) — a grid's own
- * `mesh_springs` forces already render as visible line connections (see [frame]'s own
- * `connections` below), which is enough for "reachable and inspectable," matching how
- * `DragScene`/`ParticleCollisionScene`/`SpatialGridScene` already render as dots+lines with no
- * mesh either. Building a synthesized wireframe mesh generically would be a real addition, not
- * "wiring in what's already there."
+ * **Surface rendering**: a `grid:`-generated surface renders as a mesh only when the YAML file
+ * itself declares a top-level `renderers:` entry for it (see [particlesim.yaml.YamlLoader]'s
+ * `loadRenderers`, scoped to `surface: {grid, texture?, wireframe?}`) — most demo files don't,
+ * and stay dots+lines only (a grid's own `mesh_springs` forces already render as visible line
+ * connections, matching how `DragScene`/`ParticleCollisionScene`/`SpatialGridScene` render with
+ * no mesh either). When at least one renderer is declared, every particle dot is hidden by
+ * default (`visibleIds = emptySet()`, matching `FlagOnRopeScene`'s own convention) — the mesh
+ * and the force-backed/`chain:`-hinted connections are what's left to look at, the same
+ * "nothing renders unless a renderer targets it" rule §10.2 already establishes.
  *
  * **Interactivity**: every §10.4 live-editing message (`SetScalarField`/`SetVectorField`/
  * particle mass-radius/emitter edits) works generically via [applyEditableFieldMessage]/
@@ -130,9 +132,15 @@ class YamlDemoScene(resourceName: String, override val dt: Double) : DemoScene {
         } + scenario.visualChains
         val frame = SceneFrame(
             connections = connections,
+            meshes = scenario.surfaceRenderers,
+            // Every dot hidden once at least one surface is actually rendered - see the class
+            // doc comment above for why this matches FlagOnRopeScene's own convention rather
+            // than leaving dots on to clutter a now-textured mesh.
+            visibleIds = if (scenario.surfaceRenderers.isEmpty()) null else emptySet(),
             registry = SceneRegistry.build(
-                forces = forces, constraints = constraints, groups = scenario.groups,
-                colliders = scenario.colliders.values.toList(), emitters = scenario.emitters, lights = scenario.lights,
+                forces = forces, constraints = constraints, surfaces = scenario.surfaceRenderers.map { it.surface },
+                groups = scenario.groups, colliders = scenario.colliders.values.toList(),
+                emitters = scenario.emitters, lights = scenario.lights,
             ),
             colliders = scenario.colliders.values.toList(),
             lights = scenario.lights,

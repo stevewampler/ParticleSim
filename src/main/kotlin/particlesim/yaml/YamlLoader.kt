@@ -34,6 +34,7 @@ import particlesim.physics.UniformGravity
 import particlesim.physics.Wind
 import particlesim.render.Color
 import particlesim.render.Light
+import particlesim.render.SurfaceRenderer
 import particlesim.surface.Grid
 import particlesim.surface.Surface
 import particlesim.collision.SurfaceCollisionRule
@@ -75,6 +76,15 @@ data class YamlScenario(
      * [particlesim.debug.YamlDemoScene]) to render alongside the force-backed ones its own
      * `connections` builder already finds. Empty when no `list:` entry opts in. */
     val visualChains: List<Pair<Int, Int>> = emptyList(),
+    /** A top-level `renderers:` section - §10.2's renderer declarations, previously YAML-DSL-
+     * only (see [SurfaceRenderer]'s own doc comment: "YAML `renderers:` support is a deferred
+     * second pass"). Scoped narrowly to exactly what a texture-mapped `grid:` surface needs
+     * (`surface: {grid, texture?, wireframe?}`) - not `renderers:`' full Kotlin-DSL surface
+     * (no `ParticleRenderer`/`LineRenderer`/`ArrowRenderer`/`material:` support), added once a
+     * real consumer (a YAML-authored flag wanting its US-flag texture, matching `FlagScene`'s
+     * own) needed it. Empty when absent - the same "nothing renders unless a renderer targets
+     * it" default §10.2 already establishes. */
+    val surfaceRenderers: List<SurfaceRenderer> = emptyList(),
 )
 
 /**
@@ -157,6 +167,7 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         val (collisionSystem, particleCollisionSystem, surfaceCollisionSystem) = loadCollisions(root, colliders, grids, ::requireKnownGroup)
         val destruction = loadDestruction(root, colliders, ::requireKnownGroup)
         val lights = loadLights(root)
+        val surfaceRenderers = loadRenderers(root, grids)
 
         for (name in groupNames) {
             if (groups.membersOf(name).isEmpty()) onWarning("group '$name' matches zero particles")
@@ -165,7 +176,45 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         return YamlScenario(
             store, groups, forces, constraints, grids, colliders,
             collisionSystem, particleCollisionSystem, surfaceCollisionSystem, destruction, emitters, lights, visualChains,
+            surfaceRenderers,
         )
+    }
+
+    /** §10.2's `renderers:` section, scoped to exactly one shape: `surface: {grid, texture?,
+     * wireframe?}` maps a named grid onto a [SurfaceRenderer] (its own [Surface] built lazily,
+     * on demand, the same pattern `loadCollisions`' `surface_collider` already uses and for the
+     * same reason - not every declared grid can form one, and building eagerly for all of them
+     * broke a single-row grid before). Unlike that Surface, this one carries [Grid.uvs] too,
+     * since a texture is meaningless without UV data. `texture` is a plain string matched
+     * against [particlesim.render.TextureAssets]' own names at render time client-side - this
+     * loader doesn't validate it against that registry, the same "the viewer decides what it
+     * can draw" stance every other renderer-declaration field already takes. */
+    private fun loadRenderers(root: Map<*, *>, grids: Map<String, List<List<Int>>>): List<SurfaceRenderer> {
+        val renderers = ArrayList<SurfaceRenderer>()
+        for ((index, entry) in root.requireListOrEmpty("renderers", "root").withIndex()) {
+            val map = entry as? Map<*, *> ?: throw YamlLoadException("renderers[$index]: expected a mapping")
+            val context = "renderers[$index]"
+            when {
+                map.containsKey("surface") -> {
+                    val f = map.requireMap("surface", context)
+                    val sc = "$context.surface"
+                    val gridName = f.requireString("grid", sc)
+                    val grid = grids[gridName] ?: throw YamlLoadException("$sc.grid: unknown grid '$gridName'")
+                    val surface = try {
+                        Surface(Grid.triangles(grid), name = gridName, uvs = Grid.uvs(grid))
+                    } catch (e: IllegalArgumentException) {
+                        throw YamlLoadException("$sc.grid: grid '$gridName' can't form a surface: ${e.message}")
+                    }
+                    renderers += SurfaceRenderer(
+                        surface,
+                        wireframe = f.optionalBoolean("wireframe", false, sc),
+                        textureName = f.optionalString("texture", context = sc),
+                    )
+                }
+                else -> throw YamlLoadException("$context: unknown renderer type (expected one of: surface)")
+            }
+        }
+        return renderers
     }
 
     /** §4.2's group selector language (tags/ids/range), Phase 2 of the YAML front-end's second

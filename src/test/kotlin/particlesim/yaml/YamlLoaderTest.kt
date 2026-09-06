@@ -1432,4 +1432,71 @@ class YamlLoaderTest {
         val scenario = YamlLoader().load(minimalGrid())
         assertTrue(scenario.lights.isEmpty())
     }
+
+    // --- renderers: (§10.2, scoped to a textured/wireframe surface: grid) -----------------------
+
+    @Test
+    fun `a surface renderer maps a named grid onto a textured mesh`() {
+        val yaml = minimalGrid(
+            """
+            renderers:
+              - surface:
+                  grid: g
+                  texture: us-flag
+            """.trimIndent(),
+        )
+        val scenario = YamlLoader().load(yaml)
+        val renderer = scenario.surfaceRenderers.single()
+        assertEquals("us-flag", renderer.textureName)
+        assertEquals(false, renderer.wireframe)
+        assertEquals("g", renderer.surface.name)
+        assertTrue(renderer.surface.uvs!!.isNotEmpty())
+    }
+
+    @Test
+    fun `a surface renderer accepts an explicit wireframe flag and no texture`() {
+        val yaml = minimalGrid(
+            """
+            renderers:
+              - surface:
+                  grid: g
+                  wireframe: true
+            """.trimIndent(),
+        )
+        val scenario = YamlLoader().load(yaml)
+        val renderer = scenario.surfaceRenderers.single()
+        assertEquals(null, renderer.textureName)
+        assertEquals(true, renderer.wireframe)
+    }
+
+    @Test
+    fun `a surface renderer referencing an unknown grid is a load-time error`() {
+        val yaml = minimalGrid(
+            """
+            renderers:
+              - surface:
+                  grid: nonexistent
+                  texture: us-flag
+            """.trimIndent(),
+        )
+        val ex = assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+        assertTrue(ex.message!!.contains("nonexistent"))
+    }
+
+    @Test
+    fun `an unknown renderer type is a load-time error`() {
+        val yaml = minimalGrid(
+            """
+            renderers:
+              - not_a_real_renderer: {}
+            """.trimIndent(),
+        )
+        assertFailsWith<YamlLoadException> { YamlLoader().load(yaml) }
+    }
+
+    @Test
+    fun `renderers are empty by default`() {
+        val scenario = YamlLoader().load(minimalGrid())
+        assertTrue(scenario.surfaceRenderers.isEmpty())
+    }
 }

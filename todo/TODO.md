@@ -4876,6 +4876,39 @@ force-derived `connections` list. Added `chain: true` to the pole in
 three files - the pole now renders as a solid connected line instead of
 loose dots.
 
+**`renderers:` section added, reversing the "leave out of scope"
+decision above** — after seeing the pole-line fix live, the user came
+back with a concrete side-by-side (the YAML flagOnRope vs. the Kotlin
+one) and asked for the US-flag texture too, superseding the earlier
+"leave texture support out of scope (Recommended)" answer with an
+unambiguous, image-backed request. Scoped narrowly to exactly what that
+needs, not the full Kotlin-DSL renderer system `particlesim.render.Renderer.kt`'s
+own doc comment describes (`ParticleRenderer`/`LineRenderer`/
+`ArrowRenderer`/arbitrary `material:` all stay YAML-DSL-only): a
+top-level `renderers:` list with one shape, `surface: {grid, texture?,
+wireframe?}`, mapping a named grid onto a `SurfaceRenderer` — its
+`Surface` built lazily on demand (same pattern `surface_collider`
+already uses, this time also carrying `Grid.uvs` since a texture needs
+UV data) via new `YamlLoader.loadRenderers`. `YamlScenario` gained
+`surfaceRenderers: List<SurfaceRenderer>`; `YamlDemoScene.frame()` now
+passes them as `meshes` and, whenever at least one is declared, sets
+`visibleIds = emptySet()` (every particle dot hidden, matching
+`FlagOnRopeScene`'s own convention — the mesh plus force-backed/
+`chain:`-hinted connections are what's left to look at) rather than the
+previous always-show-everything default. Added `renderers: [{surface:
+{grid: cloth, texture: us-flag}}]` to `flagOnRope.yaml` only — not to
+`flag.yaml`/`multiShape.yaml`'s flag, since `FlagScene` itself uses a
+*partial* `visibleIds = poleIds` (pole dots stay visible, only the cloth
+hides) that this all-or-nothing rule can't reproduce, and neither file
+was part of the user's actual request. New `YamlLoaderTest` cases (5):
+a surface renderer maps a grid onto a textured mesh (with real UV data),
+accepts `wireframe: true` with no texture, an unknown grid is a
+load-time error, an unknown renderer type is a load-time error,
+`renderers:` is empty by default. Verified live in Chrome:
+`flagOnRope.yaml` now renders the US flag texture with mesh edges
+toggleable and zero particle dots, matching the reference screenshot the
+user provided. Full `./gradlew test -q` suite green throughout.
+
 **All nine phases of the YAML front-end's second pass are now complete** —
 see the Phase 7 note above ("Second pass (not this phase)") for the
 original scope this closes out, and `todo/requirements.md` §4.2/§4.5 for

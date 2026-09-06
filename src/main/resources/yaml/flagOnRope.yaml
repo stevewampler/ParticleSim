@@ -17,9 +17,13 @@
 # The pole's `chain: true` records a visual-only line connecting its particles in declaration
 # order - buildFlagpole never joins them with a Spring (each is independently FixedPosition-
 # pinned), so without this hint the pole would render as disconnected dots instead of the line
-# FlagOnRopeScene draws by hand via poleIds.zipWithNext(). This file still won't show the flag's
-# US-flag texture or hide particle dots the way FlagOnRopeScene does (see YamlDemoScene's own
-# doc comment) - those are deliberately out of scope for the generic YAML-loaded bridge.
+# FlagOnRopeScene draws by hand via poleIds.zipWithNext().
+#
+# The `renderers:` section at the bottom maps the cloth grid onto FlagOnRopeScene's own US-flag
+# texture (§10.2, via particlesim.yaml.YamlLoader's loadRenderers) - declaring at least one
+# renderer also hides every particle dot by default (YamlDemoScene's own convention, matching
+# FlagOnRopeScene's `visibleIds = emptySet()`), so the pole/rope stay visible only via their
+# chain:/spring connections, same as the live Kotlin scene.
 version: 1
 
 particles:
@@ -128,3 +132,8 @@ collisions:
 lights:
   - directional: { position: [5.0, 10.0, 7.0], intensity: 0.8, name: sun }
   - ambient: { intensity: 0.4, name: ambient-fill }
+
+renderers:
+  - surface:
+      grid: cloth
+      texture: us-flag
