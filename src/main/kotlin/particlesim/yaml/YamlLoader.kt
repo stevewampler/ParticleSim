@@ -70,6 +70,11 @@ data class YamlScenario(
      * default lighting" meaning [particlesim.render.Light]'s own doc comment already gives an
      * empty list from any front-end. */
     val lights: List<Light> = emptyList(),
+    /** A `list:` particle generator's `chain: true` entries, flattened to `zipWithNext()` pairs
+     * - visual-only line connections with no force behind them, for a caller (e.g.
+     * [particlesim.debug.YamlDemoScene]) to render alongside the force-backed ones its own
+     * `connections` builder already finds. Empty when no `list:` entry opts in. */
+    val visualChains: List<Pair<Int, Int>> = emptyList(),
 )
 
 /**
@@ -118,12 +123,16 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         // Phase 2's groups: selector resolution (tags/ids/range).
         val tagIndex = HashMap<String, MutableSet<Int>>()
         val authorIds = HashMap<String, Int>()
+        // A `list:` particle generator's optional `chain: true` - visual-only line connections
+        // with no force behind them (see loadParticleList's own doc comment for why this exists:
+        // a static pole of individually-pinned particles has no natural connection to render).
+        val visualChains = ArrayList<Pair<Int, Int>>()
 
         // groups: resolution runs after loadParticles (not before, as the pre-Phase-2 version of
         // this method did) since a selector entry needs tagIndex/authorIds/grids to already be
         // populated - a plain-string entry doesn't strictly need this ordering, but there's no
         // reason to special-case it separately from the selector form it now shares one list with.
-        loadParticles(root, store, groups, grids, declaredGroups, tagIndex, authorIds)
+        loadParticles(root, store, groups, grids, declaredGroups, tagIndex, authorIds, visualChains)
 
         // Phase 6's emitters run before groups:/forces:/etc. resolve group references, not after
         // (unlike every other loadX above) - an emitter's own `group:` is the *target* it spawns
@@ -155,7 +164,7 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
 
         return YamlScenario(
             store, groups, forces, constraints, grids, colliders,
-            collisionSystem, particleCollisionSystem, surfaceCollisionSystem, destruction, emitters, lights,
+            collisionSystem, particleCollisionSystem, surfaceCollisionSystem, destruction, emitters, lights, visualChains,
         )
     }
 
@@ -271,6 +280,7 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
         root: Map<*, *>, store: ParticleStore, groups: Groups,
         grids: MutableMap<String, List<List<Int>>>, declaredGroups: MutableSet<String>,
         tagIndex: MutableMap<String, MutableSet<Int>>, authorIds: MutableMap<String, Int>,
+        visualChains: MutableList<Pair<Int, Int>>,
     ) {
         when (val particlesSection = root["particles"]) {
             null -> return
@@ -288,7 +298,9 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
                         map.containsKey("random_volume") ->
                             loadRandomVolume(map.requireMap("random_volume", context), "$context.random_volume", store, groups, declaredGroups, tagIndex)
                         map.containsKey("list") ->
-                            loadParticleList(map.requireMap("list", context), "$context.list", store, groups, declaredGroups, tagIndex, authorIds)
+                            loadParticleList(
+                                map.requireMap("list", context), "$context.list", store, groups, declaredGroups, tagIndex, authorIds, visualChains,
+                            )
                         map.containsKey("single") ->
                             loadSingleParticle(map.requireMap("single", context), "$context.single", store, groups, declaredGroups, tagIndex, authorIds)
                         else -> throw YamlLoadException("$context: unknown particle generator (expected one of: grid, random_volume, list, single)")
@@ -411,12 +423,25 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
      * author-chosen string, resolved to the real [ParticleStore] id it was assigned) feeds
      * [authorIds] for Phase 2's `ids:` selector - an author id reused across two particles is a
      * load-time error, the same "ambiguous reference" tier [SceneRegistry]-style duplicate-name
-     * checks already use elsewhere in this codebase. */
+     * checks already use elsewhere in this codebase.
+     *
+     * `chain: true` (default `false`) records this entry's particles, in declaration order, as
+     * a **visual-only** line - `zipWithNext()` pairs appended to [visualChains], with no force
+     * behind them. Exists for exactly the case a static line of individually-`FixedPosition`-
+     * pinned particles has no natural connection to render (`buildFlagpole`'s pole: each
+     * particle is pinned independently, never joined by a `Spring`, yet
+     * `FlagOnRopeScene`/`PoleRopeScene`/`MultiShapeScene` all draw it as a connected line by
+     * hand via `poleIds.zipWithNext()`) - `YamlDemoScene`'s generic `connections` builder only
+     * follows real force pairs (`MeshSprings`/`Spring`), so without this hint a YAML-authored
+     * pole renders as disconnected dots instead. */
     private fun loadParticleList(
         f: Map<*, *>, context: String, store: ParticleStore, groups: Groups,
         declaredGroups: MutableSet<String>, tagIndex: MutableMap<String, MutableSet<Int>>, authorIds: MutableMap<String, Int>,
+        visualChains: MutableList<Pair<Int, Int>>,
     ) {
         val name = f.requireString("name", context)
+        val chain = f.optionalBoolean("chain", false, context)
+        val ids = ArrayList<Int>()
         for ((index, entry) in f.requireListOrEmpty("particles", context).withIndex()) {
             val p = entry as? Map<*, *> ?: throw YamlLoadException("$context.particles[$index]: expected a mapping")
             val entryContext = "$context.particles[$index]"
@@ -424,7 +449,9 @@ class YamlLoader(private val onWarning: (String) -> Unit = { System.err.println(
             groups.add(name, id)
             addTags(tagIndex, p.requireStringList("tags", entryContext), id)
             registerAuthorId(p, entryContext, id, authorIds)
+            ids += id
         }
+        if (chain) visualChains += ids.zipWithNext()
         declaredGroups += name
     }
 

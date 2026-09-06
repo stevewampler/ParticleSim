@@ -413,6 +413,42 @@ class YamlLoaderTest {
     }
 
     @Test
+    fun `list generator's chain true records visual-only connections in declaration order`() {
+        val yaml = """
+            version: 1
+            particles:
+              - list:
+                  name: pole
+                  chain: true
+                  particles:
+                    - { id: p0, position: [0.0, 0.0, 0.0] }
+                    - { id: p1, position: [0.0, 1.0, 0.0] }
+                    - { id: p2, position: [0.0, 2.0, 0.0] }
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        val p0 = scenario.store.liveIds().minByOrNull { scenario.store.position(it).y }!!
+        val p2 = scenario.store.liveIds().maxByOrNull { scenario.store.position(it).y }!!
+        assertEquals(2, scenario.visualChains.size)
+        assertTrue(scenario.visualChains.any { it.first == p0 })
+        assertTrue(scenario.visualChains.any { it.second == p2 })
+    }
+
+    @Test
+    fun `list generator's chain defaults to false, producing no visual connections`() {
+        val yaml = """
+            version: 1
+            particles:
+              - list:
+                  name: pole
+                  particles:
+                    - { position: [0.0, 0.0, 0.0] }
+                    - { position: [0.0, 1.0, 0.0] }
+        """.trimIndent()
+        val scenario = YamlLoader().load(yaml)
+        assertEquals(emptyList(), scenario.visualChains)
+    }
+
+    @Test
     fun `single generator creates one particle with the given fields`() {
         val yaml = """
             version: 1

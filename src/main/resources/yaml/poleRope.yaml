@@ -3,12 +3,16 @@
 # pole's own top [0, 3.5, 0] and a bottom anchor offset to the side [0.25, 1.75, 0]
 # (poleHeight*0.5), segments=10. Both shapes are placed at the default (zero) offset in the
 # live scene, so no ShapeRegistry composition is needed here - plain top-level sections with
-# distinct group names ("pole", "rope") reproduce it directly.
+# distinct group names ("pole", "rope") reproduce it directly. The pole's `chain: true` records
+# a visual-only line connecting its particles in declaration order - buildFlagpole never joins
+# them with a Spring (each is independently FixedPosition-pinned), so without this hint the pole
+# would render as disconnected dots instead of the line PoleRopeScene draws by hand.
 version: 1
 
 particles:
   - list:
       name: pole
+      chain: true
       particles:
         - { position: [0.0, 0.0, 0.0] }
         - { position: [0.0, 0.5833333, 0.0] }

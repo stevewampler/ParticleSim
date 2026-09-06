@@ -116,13 +116,18 @@ class YamlDemoScene(resourceName: String, override val dt: Double) : DemoScene {
         // endpoints with a parallel Spring in every current YAML demo, so including it would draw
         // the same line segment twice (the same reasoning DragScene's own `connections` already
         // applies by building its line list from `springs`, not `springs + dampers`).
+        // scenario.visualChains adds a YAML file's own chain: true hints (§4.2's "list:
+        // generator" - see YamlLoader.loadParticleList) - visual-only lines with no force
+        // behind them, for the one case force-backed connections can't cover: a static line of
+        // individually-FixedPosition-pinned particles (e.g. a flagpole) that a Kotlin scene
+        // would otherwise draw by hand via poleIds.zipWithNext().
         val connections = forces.flatMap { force ->
             when (force) {
                 is MeshSprings -> force.activeConnections()
                 is Spring -> listOf(force.particleA to force.particleB)
                 else -> emptyList()
             }
-        }
+        } + scenario.visualChains
         val frame = SceneFrame(
             connections = connections,
             registry = SceneRegistry.build(

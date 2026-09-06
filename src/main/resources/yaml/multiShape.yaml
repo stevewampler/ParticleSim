@@ -12,6 +12,10 @@
 # buildFlagpole's own doc comment: "purely a visual/structural anchor... aren't physically
 # connected"). Don't "fix" this to match flagOnRope's dropped-constraint pattern - the two
 # scenes are deliberately different here.
+#
+# flagpoleShape's pole uses `chain: true` for the same reason flagOnRope.yaml/poleRope.yaml do:
+# buildFlagpole never joins its particles with a Spring (each is independently FixedPosition-
+# pinned), so without this hint the pole renders as disconnected dots instead of a line.
 version: 1
 
 shape_definitions:
@@ -20,6 +24,7 @@ shape_definitions:
       particles:
         - list:
             name: pole
+            chain: true
             particles:
               - { position: [0.0, 0.0, 0.0] }
               - { position: [0.0, 0.5833333, 0.0] }

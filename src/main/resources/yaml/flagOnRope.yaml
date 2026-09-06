@@ -13,11 +13,19 @@
 # segment i's y matches flag row i's y for every row the flag actually reaches (0..7). Only a
 # small sideways gap remains (rope drifts toward ropeBottomOffsetX while the flag's edge stays
 # at x=0), which is what gives the attachment springs their small nonzero rest length below.
+#
+# The pole's `chain: true` records a visual-only line connecting its particles in declaration
+# order - buildFlagpole never joins them with a Spring (each is independently FixedPosition-
+# pinned), so without this hint the pole would render as disconnected dots instead of the line
+# FlagOnRopeScene draws by hand via poleIds.zipWithNext(). This file still won't show the flag's
+# US-flag texture or hide particle dots the way FlagOnRopeScene does (see YamlDemoScene's own
+# doc comment) - those are deliberately out of scope for the generic YAML-loaded bridge.
 version: 1
 
 particles:
   - list:
       name: pole
+      chain: true
       particles:
         - { position: [0.0, 0.0000000, 0.0], radius: 0.03, tags: [poleRopeCollidable] }
         - { position: [0.0, 0.5833333, 0.0], radius: 0.03, tags: [poleRopeCollidable] }

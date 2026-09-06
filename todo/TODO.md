@@ -4844,6 +4844,38 @@ comparisons, stayed green) and that `multiShape.yaml`'s single top-level
 light and `trampoline.yaml`'s three lights both reach the outliner
 correctly.
 
+**`list:` particle generator gains `chain: true`** (user follow-up: "the
+YAML flagOnRope shows particles by default, isn't showing the pole's
+lines, and isn't showing the flag's texture" - three separate things,
+not one bug). Root cause of the pole issue: `YamlDemoScene`'s generic
+`connections` builder only follows real force pairs (`MeshSprings`/
+`Spring`), but `buildFlagpole` never joins its own particles with a
+Spring - each is independently `FixedPosition`-pinned - so
+`FlagOnRopeScene`/`PoleRopeScene`/`MultiShapeScene` all draw the pole as
+a line by hand via `poleIds.zipWithNext()`, something the generic bridge
+had no way to reproduce. Asked the user how to handle all three
+findings before touching anything (confirmed via `AskUserQuestion`):
+add a `chain: true` YAML hint for the pole issue (done here), leave
+particles-visible-by-default alone (copying `FlagOnRopeScene`'s
+`visibleIds = emptySet()` would blank the YAML scene entirely, since it
+has no mesh to fall back on - showing dots is load-bearing, not a bug),
+and leave the missing US-flag texture out of scope (a real
+`renderers:`/`material:` YAML section, already called out of scope when
+the front-end was planned).
+`YamlLoader.loadParticleList` threads a `visualChains:
+MutableList<Pair<Int, Int>>` accumulator through `loadParticles`/`load()`
+- `chain: true` on a `list:` entry appends that entry's particles'
+`zipWithNext()` pairs, in declaration order, with **no force behind
+them** (purely a rendering hint). `YamlScenario` gained `visualChains:
+List<Pair<Int, Int>>`; `YamlDemoScene.frame()` appends them to its
+force-derived `connections` list. Added `chain: true` to the pole in
+`poleRope.yaml`, `flagOnRope.yaml`, and `multiShape.yaml`'s
+`flagpoleShape`. New `YamlLoaderTest` cases (2): `chain: true` records
+`zipWithNext()` pairs in declaration order, `chain` defaults to `false`
+(no visual connections) when omitted. Verified live in Chrome on all
+three files - the pole now renders as a solid connected line instead of
+loose dots.
+
 **All nine phases of the YAML front-end's second pass are now complete** —
 see the Phase 7 note above ("Second pass (not this phase)") for the
 original scope this closes out, and `todo/requirements.md` §4.2/§4.5 for
