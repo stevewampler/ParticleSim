@@ -16,8 +16,9 @@ should be ignored by Claude.
   * I'd like to visualize the stress of the flag's springs and dampers (separately visible).
 * ~~I'd like to be able to set a surface's spring and damper breaking limits.~~
 * UI:
-  * Make "pause on edit" on by default.
-  * I need units on the fields displayed in the panels. e.g. m/s, N, ...
+  * Let's turn the edit UI for a VectorExpr from one input field for the entire vector into three input fields, one for the X expression, another for the Y, and a 3rd for the Z expression.
+    * I also want to see the current expressions for X, Y, & Z in those fields instead of seeing the field's current value.
+    * Put the field's current value into a simple text string [x,y,z] under the input fields for information purposes only.
   * Bug: The panels length flickers due to vectors within the panel that, when rendered, exceed the panel's width:
     * You can see the problem in this screenshot, where the centroid vector is breaking across two lines:
     * ![img.png](img.png)
