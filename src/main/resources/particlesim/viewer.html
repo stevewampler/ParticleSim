@@ -392,7 +392,7 @@ function styleDot(dot, customColor, dragged) {
     // few overlaps, losing all internal shading. A lower opacity means more overlapping dots
     // are needed to reach that same clip point, so the same dense cluster keeps a visible
     // gradient instead of blowing out - a deliberate dimming, not a mistake.
-    mat.opacity = 0.28;
+    mat.opacity = 0.16;
   } else {
     mat.color.setHex(DEFAULT_DOT_COLOR);
     mat.blending = THREE.NormalBlending;
