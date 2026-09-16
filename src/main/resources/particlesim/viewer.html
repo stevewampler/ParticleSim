@@ -44,7 +44,6 @@
   #controlPanel section { margin-bottom: 10px; }
   #controlPanel section:last-child { margin-bottom: 0; }
   #statsPanel { white-space: pre; color: #9f9; }
-  #eventLog { white-space: pre; color: #fc9; max-height: 110px; overflow-y: auto; }
   #bookmarkList { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
   #bookmarkList .bookmarkRow { display: flex; gap: 4px; align-items: center; }
   #bookmarkList button, #bookmarkForm button {
@@ -170,10 +169,6 @@
     <section>
       <h4>stats</h4>
       <div id="statsPanel">–</div>
-    </section>
-    <section>
-      <h4>events</h4>
-      <div id="eventLog">–</div>
     </section>
     <section>
       <h4>camera bookmarks</h4>
@@ -1209,13 +1204,12 @@ document.getElementById("stepOnceBtn").addEventListener("click", () => {
 
 // §9.6's scene switch (restart is now "reload the active scene by name," the same
 // discard-and-rebuild the picker below triggers for a different name): every bit of
-// viewer-side state a new scene has no way to know about gets cleared, not just stats/events -
+// viewer-side state a new scene has no way to know about gets cleared, not just stats -
 // selection and the per-object panel it drives, plus the hidden-group/-surface/-force toggles,
 // which would otherwise silently persist onto a scene whose names may not even mean the same
 // thing (or exist at all).
 function resetViewerStateForSceneChange(sceneName) {
   resetStats();
-  resetEventLog();
   selectedKind = null;
   selectedName = null;
   hiddenGroups.clear();
@@ -1361,43 +1355,6 @@ function updateStats(frame) {
     `particles: ${frame.particles.length}\n` +
     `steps/s:   ${statsStepRate.toFixed(0)}\n` +
     `lag:       ${lagText}`;
-}
-
-// --- Discrete-event log (§9.1) ------------------------------------------------------------
-// A capped, rolling readout of frame.events (SparksDebugDemo produces these continuously;
-// DragDebugDemo's interactive delete produces them on demand) - a person watching the panel gets
-// a legible recent history instead of the raw per-frame list, which would otherwise vanish the
-// instant the next frame overwrote it. Newest first. Capped at EVENT_LOG_MAX so a
-// continuously-spawning demo (Sparks) doesn't grow this array, and the DOM text it's rendered
-// into, without bound for the life of the page.
-const EVENT_LOG_MAX = 20;
-const eventLogEl = document.getElementById("eventLog");
-let eventLogEntries = []; // oldest first internally; rendered reversed
-
-function resetEventLog() {
-  eventLogEntries = [];
-  eventLogEl.textContent = "–";
-}
-
-function eventLogText(e) {
-  if (e.kind === "forceBreak") return `force '${e.name || "(unnamed)"}' broke`;
-  if (e.kind === "destroyed") return `particle ${e.particleId} destroyed`;
-  return `particle ${e.particleId} spawned`;
-}
-
-// frame.events is this frame's fresh list only (never accumulated server-side - see
-// BinaryFrame's own doc comment), so appending it here is exactly "what happened since last
-// frame," not a replay - a paused frame runs zero physics steps and correctly carries zero
-// events, so pausing doesn't spam duplicate entries onto the log.
-function updateEventLog(frame) {
-  if (frame.events.length === 0) return;
-  for (const e of frame.events) {
-    eventLogEntries.push(`t=${frame.t.toFixed(3)}  ${eventLogText(e)}`);
-  }
-  if (eventLogEntries.length > EVENT_LOG_MAX) {
-    eventLogEntries.splice(0, eventLogEntries.length - EVENT_LOG_MAX);
-  }
-  eventLogEl.textContent = eventLogEntries.slice().reverse().join("\n");
 }
 
 // §10.3/§10.4's particle panel has no registry entry to check membership against the way
@@ -2378,7 +2335,6 @@ function connect() {
   ws.onopen = () => {
     statusEl.textContent = "connected";
     resetStats();
-    resetEventLog();
     lastRegistrySignature = null;
     // A load_scene/restart that missed the socket while it was reconnecting (see send()'s own
     // comment) gets one retry here, now that there's actually a connection to carry it.
@@ -2396,7 +2352,6 @@ function connect() {
     statusEl.textContent = `t=${frame.t.toFixed(3)}  step=${frame.step}  particles=${frame.particles.length}${cameraTag}`;
     applyFrame(frame);
     updateStats(frame);
-    updateEventLog(frame);
     clearSelectionIfParticleDestroyed(frame);
     updateOutliner(frame.registry);
     updateScenePicker(frame);
