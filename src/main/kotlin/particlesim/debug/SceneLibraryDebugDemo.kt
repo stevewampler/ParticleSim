@@ -81,6 +81,7 @@ fun main(args: Array<String>) {
                 lineColors = frame.lineColors,
                 connectionNames = frame.connectionNames,
                 sphereRadii = frame.sphereRadii,
+                particleColors = frame.particleColors,
                 meshes = frame.meshes,
                 arrowGroups = frame.arrowGroups,
                 visibleIds = frame.visibleIds,

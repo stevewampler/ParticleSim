@@ -192,6 +192,38 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `round-trips a sparse per-particle color override`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+        val b = store.create(position = Vector3.ZERO)
+        // Channels chosen so u8 quantization (§BinaryFrame's own doc comment on why this
+        // section is u8, not this file's usual f64) round-trips to the exact same Double.
+        val color = Color(1.0, 0.0, 200.0 / 255.0)
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = listOf(a, b), connections = emptyList(),
+            particleColors = mapOf(a to color),
+        )
+        val decoded = BinaryFrame.decode(buffer)
+
+        assertEquals(listOf(DecodedParticleColor(a, color)), decoded.particleColors, "only a has a declared color")
+    }
+
+    @Test
+    fun `a color channel outside 0 to 1 clamps rather than wrapping`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = listOf(a), connections = emptyList(),
+            particleColors = mapOf(a to Color(1.5, -0.5, 0.0)),
+        )
+        val decoded = BinaryFrame.decode(buffer).particleColors.single()
+
+        assertEquals(Color(1.0, 0.0, 0.0), decoded.color)
+    }
+
+    @Test
     fun `round-trips meshes, including the wireframe flag`() {
         val store = ParticleStore()
         val a = store.create(position = Vector3.ZERO)

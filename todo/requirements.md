@@ -845,6 +845,21 @@ it's being built, before its real renderers exist.
 
 **Particle & surface renderers**: `dot`, `sphere` (§10, using the group's
 particles' `radius` by default), or a shaded/wireframe mesh for a surface.
+
+**Per-particle color**: a scene can additionally send a per-particle
+render-color override — computed server-side (e.g. the campfire worked
+example maps each particle's own age fraction, `(t - spawnTime) /
+lifetime`, to a yellow → red gradient) and carried in `BinaryFrame`'s own
+per-particle color section, distinct from (and denser than) the
+`breakProximity`-style connection coloring above: one color per live
+particle per frame, not one per named force. A particle with no entry
+keeps the viewer's default dot color. The viewer additionally renders a
+colored particle with additive blending, reading as a glow appropriate
+for something emissive — applied only to particles carrying a wire color,
+so every other scene's plain dots are unaffected. This is real color, not
+a full material (no roughness/opacity/lighting response): the
+"per-particle/per-dot materials... never in scope" line below still
+holds for anything beyond flat color.
 A surface mesh can also render with an **image texture** instead of its
 shaded material — no longer `[stretch]`: built for §7.3's flag, an actual
 striped-flag graphic mapped onto its surface rather than a flat solid
@@ -915,7 +930,8 @@ external image onto a mesh's surface.
   YAML front-end has no `lights:`/`material:` blocks yet (only the Kotlin
   DSL can declare either — the example below doesn't show them), so this
   joins TODO.md's other tracked post-Phase-7 YAML gaps; and per-particle/
-  per-dot materials, spot lights, and shadows were never in scope.
+  per-dot materials beyond flat color (see this section's own per-particle
+  color note above), spot lights, and shadows were never in scope.
 
 ```yaml
 renderers:

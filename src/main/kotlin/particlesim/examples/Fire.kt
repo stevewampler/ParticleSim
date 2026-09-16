@@ -15,12 +15,12 @@ import particlesim.physics.UniformGravity
 import kotlin.math.sin
 
 /**
- * A campfire: a continuous flame of small short-lived particles licking upward and outward.
- * At this rate and lifetime, the population equilibrates well below [Emitter.maxAlive] (a
- * generous safety ceiling, not a target) purely through lifetime expiry — but unlike
- * [buildSparks]'s fountain, a fire should never visibly stop and gap while draining if that
- * ceiling ever is hit (a rate spike, a slow frame), so it uses [EmitterCapPolicy.EVICT_OLDEST]
- * (recycle the oldest particle) rather than [EmitterCapPolicy.STOP].
+ * A campfire: a continuous flame of many small, short-lived particles licking upward and
+ * outward. The rate is tuned dense enough that `rate * average lifetime` sits close to
+ * [Emitter.maxAlive] — this population spends real time pinned at the cap, not just spiking
+ * into it occasionally — so unlike [buildSparks]'s bursty fountain, a fire should never
+ * visibly stop and gap while its population drains, and uses [EmitterCapPolicy.EVICT_OLDEST]
+ * (recycle the oldest particle to make room) rather than [EmitterCapPolicy.STOP].
  *
  * Buoyancy is modeled the same way gravity is (§3): a uniform, mass-independent acceleration,
  * just pointed up instead of down and much weaker than real thermal buoyancy would be relative
@@ -49,7 +49,9 @@ fun buildFire(masterSeed: Long = 1L): FireScenario {
         group = "fire",
         // A pulsing rate on top of the base, the same "bursts, ramps" idea `buildSparks` uses
         // for its fountain — here it reads as a flame guttering rather than a steady hiss.
-        rate = ScalarExpr.of { t -> 160.0 + 40.0 * sin(t * 3.0) },
+        // Dense enough that the natural (rate * average lifetime) equilibrium sits close to
+        // maxAlive, unlike the first-pass tuning below it — see this file's own doc comment.
+        rate = ScalarExpr.of { t -> 1200.0 + 300.0 * sin(t * 3.0) },
         // A small base area, like a compact bed of embers rather than a single point.
         position = VectorDistribution.UniformSphere(Vector3(0.0, 0.05, 0.0), 0.12),
         velocity = VectorDistribution.PointWithSpread(
@@ -59,9 +61,11 @@ fun buildFire(masterSeed: Long = 1L): FireScenario {
             maxMagnitude = 1.4,
         ),
         mass = ScalarDistribution.Constant(0.01),
-        radius = ScalarDistribution.UniformRange(0.04, 0.09),
+        // Small enough that a dense flame reads as many individual embers rather than a few
+        // big overlapping blobs — the user's own "a lot more small particles" ask.
+        radius = ScalarDistribution.UniformRange(0.02, 0.05),
         lifetime = ScalarDistribution.UniformRange(0.4, 0.9),
-        maxAlive = 400,
+        maxAlive = 1000,
         capPolicy = EmitterCapPolicy.EVICT_OLDEST,
         masterSeed = masterSeed,
     )

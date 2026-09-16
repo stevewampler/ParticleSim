@@ -31,6 +31,10 @@ data class SceneFrame(
     val lineColors: Map<Pair<Int, Int>, Color> = emptyMap(),
     val connectionNames: Map<Pair<Int, Int>, String> = emptyMap(),
     val sphereRadii: Map<Int, Double> = emptyMap(),
+    /** A per-particle render-color override (§10.2), e.g. [FireScene]'s yellow-to-red-by-age -
+     * see [particlesim.debug.BinaryFrame]'s own doc comment for the wire format. A particle
+     * with no entry here keeps the viewer's default dot color. */
+    val particleColors: Map<Int, Color> = emptyMap(),
     val meshes: List<SurfaceRenderer> = emptyList(),
     val arrowGroups: List<NamedArrowSamples> = emptyList(),
     /** §10.2's `[stretch]` "Lighting & materials" — empty (the default) means the viewer keeps

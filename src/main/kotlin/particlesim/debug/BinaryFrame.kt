@@ -23,6 +23,7 @@ import particlesim.surface.UV
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
+import kotlin.math.roundToInt
 
 /**
  * Binary per-frame encoding (§9.1: "a WebSocket using a compact binary framing... since
@@ -48,6 +49,15 @@ import java.nio.charset.StandardCharsets
  * u8   hasCamera (0 or 1); if set: 9x f64 (position.xyz, lookAt.xyz, up.xyz)
  * i32  sphereCount
  * sphereCount * { i32 id, f64 radius }
+ * i32  particleColorCount
+ * particleColorCount * { i32 id, u8 r, u8 g, u8 b }
+ *                        (a per-particle render-color override, §10.2 - sparse in principle
+ *                        like [sphereRadii] above it, but in practice one entry per live
+ *                        particle for a scene like the campfire that colors every particle by
+ *                        age, so channels are quantized to u8 rather than this file's usual f64
+ *                        - a quarter the bytes, and finer precision than an 8-bit display
+ *                        channel could show anyway. A particle with no entry here keeps the
+ *                        viewer's default dot color.)
  * i32  meshCount
  * meshCount * { u8 wireframe, i32 nameLen, nameLen UTF-8 bytes, i32 triangleCount,
  *               triangleCount * { i32 a, i32 b, i32 c },
@@ -232,6 +242,8 @@ object BinaryFrame {
     private const val CAMERA_SIZE = 9 * 8 // position, lookAt, up
     private const val SPHERE_HEADER_SIZE = 4
     private const val SPHERE_SIZE = 4 + 8 // id, radius
+    private const val PARTICLE_COLOR_HEADER_SIZE = 4
+    private const val PARTICLE_COLOR_SIZE = 4 + 1 + 1 + 1 // id, r, g, b (u8 channels)
     private const val MESH_HEADER_SIZE = 4
     private const val MESH_ENTRY_HEADER_SIZE = 1 + 4 // wireframe, triangleCount
     private const val TRIANGLE_SIZE = 4 + 4 + 4 // a, b, c
@@ -281,6 +293,7 @@ object BinaryFrame {
         lineColors: Map<Pair<Int, Int>, Color> = emptyMap(),
         connectionNames: Map<Pair<Int, Int>, String> = emptyMap(),
         sphereRadii: Map<Int, Double> = emptyMap(),
+        particleColors: Map<Int, Color> = emptyMap(),
         meshes: List<SurfaceRenderer> = emptyList(),
         arrowGroups: List<NamedArrowSamples> = emptyList(),
         visibleIds: Set<Int>? = null,
@@ -299,6 +312,7 @@ object BinaryFrame {
             CONNECTION_HEADER_SIZE + connections.sumOf { CONNECTION_FIXED_SIZE + stringSize(connectionNames[it] ?: "") } +
             CAMERA_FLAG_SIZE + (if (camera != null) CAMERA_SIZE else 0) +
             SPHERE_HEADER_SIZE + sphereRadii.size * SPHERE_SIZE +
+            PARTICLE_COLOR_HEADER_SIZE + particleColors.size * PARTICLE_COLOR_SIZE +
             MESH_HEADER_SIZE + meshes.sumOf {
                 MESH_ENTRY_HEADER_SIZE + stringSize(it.surface.name ?: "") + it.surface.triangles.size * TRIANGLE_SIZE +
                     stringSize(textureUrlOf(it)) + MESH_UV_HEADER_SIZE + uvsToEmit(it).size * MESH_UV_ENTRY_SIZE +
@@ -353,6 +367,13 @@ object BinaryFrame {
         buffer.putInt(sphereRadii.size)
         for ((id, radius) in sphereRadii) {
             buffer.putInt(id); buffer.putDouble(radius)
+        }
+        buffer.putInt(particleColors.size)
+        for ((id, color) in particleColors) {
+            buffer.putInt(id)
+            buffer.put(colorChannelToByte(color.r))
+            buffer.put(colorChannelToByte(color.g))
+            buffer.put(colorChannelToByte(color.b))
         }
         buffer.putInt(meshes.size)
         for (mesh in meshes) {
@@ -528,6 +549,12 @@ object BinaryFrame {
         }
         val sphereCount = buf.int
         val spheres = (0 until sphereCount).map { DecodedSphere(buf.int, buf.double) }
+        val particleColorCount = buf.int
+        val particleColors = (0 until particleColorCount).map {
+            val id = buf.int
+            val color = Color(byteToColorChannel(buf.get()), byteToColorChannel(buf.get()), byteToColorChannel(buf.get()))
+            DecodedParticleColor(id, color)
+        }
         val meshCount = buf.int
         val meshes = (0 until meshCount).map {
             val wireframe = buf.get().toInt() != 0
@@ -604,8 +631,8 @@ object BinaryFrame {
             }
         }
         return DecodedFrame(
-            t, step, particles, connections, camera, spheres, meshes, arrowGroups, visibleIds, registry, colliders, events,
-            availableScenes, activeScene, lights,
+            t, step, particles, connections, camera, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
+            colliders, events, availableScenes, activeScene, lights,
         )
     }
 
@@ -614,6 +641,14 @@ object BinaryFrame {
     }
 
     private fun getVector(buffer: ByteBuffer): Vector3 = Vector3(buffer.double, buffer.double, buffer.double)
+
+    /** [Color] channels are `[0,1]` `Double`s; the wire's u8 channels are `[0,255]` - clamped
+     * before rounding so a caller's slightly-out-of-range value (e.g. an unclamped ramp
+     * endpoint) degrades to opaque black/white instead of wrapping via [Int]-to-[Byte]
+     * truncation. */
+    private fun colorChannelToByte(c: Double): Byte = (c.coerceIn(0.0, 1.0) * 255.0).roundToInt().toByte()
+
+    private fun byteToColorChannel(b: Byte): Double = (b.toInt() and 0xFF) / 255.0
 
     private fun stringSize(s: String) = STRING_HEADER_SIZE + s.toByteArray(StandardCharsets.UTF_8).size
 
@@ -844,6 +879,8 @@ data class DecodedConnection(val a: Int, val b: Int, val color: Color, val force
 
 data class DecodedSphere(val id: Int, val radius: Double)
 
+data class DecodedParticleColor(val id: Int, val color: Color)
+
 /** [name] is `""` when the mesh's [particlesim.surface.Surface] is unnamed — see [BinaryFrame]'s
  * own doc comment for why that collapses with "no name" instead of using a separate flag.
  * [textureUrl] is `""` for a flat-shaded mesh (§10.2); [uvs] is empty whenever the source
@@ -951,6 +988,7 @@ data class DecodedFrame(
     val connections: List<DecodedConnection>,
     val camera: CameraPose?,
     val spheres: List<DecodedSphere> = emptyList(),
+    val particleColors: List<DecodedParticleColor> = emptyList(),
     val meshes: List<DecodedMesh> = emptyList(),
     val arrowGroups: List<DecodedArrowGroup> = emptyList(),
     val visibleIds: Set<Int>? = null,

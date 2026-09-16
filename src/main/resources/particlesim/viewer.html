@@ -357,10 +357,42 @@ bookmarkNameInputEl.addEventListener("keydown", (event) => {
 // and a particle listed in a frame's visibleIds-exclusion is skipped entirely — see applyFrame.
 const BASE_DOT_RADIUS = 0.06;
 const dotGeometry = new THREE.SphereGeometry(BASE_DOT_RADIUS, 8, 6);
+// Template only - every pooled dot below clones its own material instance rather than sharing
+// this one, so a per-particle color override (§10.2, e.g. FireScene's yellow-to-red-by-age)
+// can recolor one dot without recoloring every dot.
 const dotMaterial = new THREE.MeshBasicMaterial({ color: 0xffcc33 });
-const draggedDotMaterial = new THREE.MeshBasicMaterial({ color: 0xff4444 });
+const DEFAULT_DOT_COLOR = 0xffcc33;
+const DRAGGED_DOT_COLOR = 0xff4444;
 let dots = new THREE.Group();
 scene.add(dots);
+
+// Styles one pooled dot for this frame: [customColor] is this particle's wire-color entry (or
+// undefined for the vast majority of demos that don't send one), [dragged] whether it's the
+// one particle currently being dragged (wins over a custom color - you're moving it, you should
+// see that clearly). Additive blending on a custom-colored dot reads as a glow, appropriate for
+// something emissive like fire; applied only there so every other demo's plain dots are
+// visually unchanged. Called every frame for every visible dot, not just newly-created ones -
+// the pool is index-keyed (dots.children[i] is a different particle each frame), so a slot
+// last styled for a fire particle must be explicitly reset when it's reused for a plain one.
+function styleDot(dot, customColor, dragged) {
+  const mat = dot.material;
+  if (dragged) {
+    mat.color.setHex(DRAGGED_DOT_COLOR);
+    mat.blending = THREE.NormalBlending;
+    mat.transparent = false;
+    mat.depthWrite = true;
+  } else if (customColor) {
+    mat.color.setRGB(customColor.r, customColor.g, customColor.b);
+    mat.blending = THREE.AdditiveBlending;
+    mat.transparent = true;
+    mat.depthWrite = false;
+  } else {
+    mat.color.setHex(DEFAULT_DOT_COLOR);
+    mat.blending = THREE.NormalBlending;
+    mat.transparent = false;
+    mat.depthWrite = true;
+  }
+}
 
 // vertexColors so each connection can carry its own §10.2 breakProximity-mapped color
 // (or the server's default line blue when nothing overrides it) instead of one uniform color.
@@ -588,6 +620,7 @@ function applyFrame(frame) {
   const byId = new Map();
   frame.particles.forEach((p) => byId.set(p.id, p));
   const sphereRadii = new Map(frame.spheres.map((s) => [s.id, s.radius]));
+  const particleColorMap = new Map(frame.particleColors.map((c) => [c.id, c]));
   latestVisibleIds = frame.visibleIds;
   latestById = byId;
   latestMeshes = frame.meshes;
@@ -625,7 +658,7 @@ function applyFrame(frame) {
   const visible = [...visibleIdSet].map((id) => byId.get(id)).filter(Boolean);
 
   while (dots.children.length < visible.length) {
-    dots.add(new THREE.Mesh(dotGeometry, dotMaterial));
+    dots.add(new THREE.Mesh(dotGeometry, dotMaterial.clone()));
   }
   while (dots.children.length > visible.length) {
     dots.remove(dots.children[dots.children.length - 1]);
@@ -634,7 +667,7 @@ function applyFrame(frame) {
     const dot = dots.children[i];
     dot.position.set(p.x, p.y, p.z);
     dot.userData.particleId = p.id;
-    dot.material = p.id === draggedParticleId ? draggedDotMaterial : dotMaterial;
+    styleDot(dot, particleColorMap.get(p.id), p.id === draggedParticleId);
     // A demo's own explicit sphereRadii entry (a cosmetic render-size declaration, §10.2) wins
     // when present - e.g. TrampolineDebugDemo's rim anchors, which have no physics radius of
     // their own at all and would otherwise render at the plain default size. Otherwise the dot
@@ -985,6 +1018,20 @@ function decodeFrame(buffer) {
     spheres[i] = { id, radius };
   }
 
+  // A per-particle render-color override (§10.2) - u8 channels, not f64 like every other color
+  // on the wire, since this is dense (one entry per live particle for a scene like fire that
+  // colors everything by age) rather than sparse like the sections around it. See
+  // BinaryFrame.kt's own doc comment for why.
+  const particleColorCount = view.getInt32(offset, true); offset += 4;
+  const particleColors = new Array(particleColorCount);
+  for (let i = 0; i < particleColorCount; i++) {
+    const id = view.getInt32(offset, true); offset += 4;
+    const r = view.getUint8(offset) / 255; offset += 1;
+    const g = view.getUint8(offset) / 255; offset += 1;
+    const b = view.getUint8(offset) / 255; offset += 1;
+    particleColors[i] = { id, r, g, b };
+  }
+
   const meshCount = view.getInt32(offset, true); offset += 4;
   const meshes = new Array(meshCount);
   for (let i = 0; i < meshCount; i++) {
@@ -1121,8 +1168,8 @@ function decodeFrame(buffer) {
   }
 
   return {
-    t, step, particles, connections, camera: cam, spheres, meshes, arrowGroups, visibleIds, registry, colliders, events,
-    availableScenes, activeScene, lights,
+    t, step, particles, connections, camera: cam, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
+    colliders, events, availableScenes, activeScene, lights,
   };
 }
 
@@ -2449,7 +2496,7 @@ renderer.domElement.addEventListener("pointerdown", (event) => {
 
   draggedParticleId = picked.particleId;
   const draggedDot = dots.children.find((d) => d.userData.particleId === draggedParticleId);
-  if (draggedDot) draggedDot.material = draggedDotMaterial;
+  if (draggedDot) styleDot(draggedDot, null, true);
 
   // Drag plane: through the picked point, facing the camera — the standard way to turn a 2D
   // mouse position into a 3D target without the user having to separately control depth.
