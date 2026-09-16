@@ -381,16 +381,24 @@ function styleDot(dot, customColor, dragged) {
     mat.blending = THREE.NormalBlending;
     mat.transparent = false;
     mat.depthWrite = true;
+    mat.opacity = 1;
   } else if (customColor) {
     mat.color.setRGB(customColor.r, customColor.g, customColor.b);
     mat.blending = THREE.AdditiveBlending;
     mat.transparent = true;
     mat.depthWrite = false;
+    // Additive blending sums every overlapping dot's contribution, and a dense cluster of
+    // full-opacity near-white dots (e.g. a campfire's base) clips to flat white within just a
+    // few overlaps, losing all internal shading. A lower opacity means more overlapping dots
+    // are needed to reach that same clip point, so the same dense cluster keeps a visible
+    // gradient instead of blowing out - a deliberate dimming, not a mistake.
+    mat.opacity = 0.28;
   } else {
     mat.color.setHex(DEFAULT_DOT_COLOR);
     mat.blending = THREE.NormalBlending;
     mat.transparent = false;
     mat.depthWrite = true;
+    mat.opacity = 1;
   }
 }
 

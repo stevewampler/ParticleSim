@@ -51,7 +51,7 @@ fun buildFire(masterSeed: Long = 1L): FireScenario {
         // for its fountain — here it reads as a flame guttering rather than a steady hiss.
         // Dense enough that the natural (rate * average lifetime) equilibrium sits close to
         // maxAlive, unlike the first-pass tuning below it — see this file's own doc comment.
-        rate = ScalarExpr.of { t -> 1200.0 + 300.0 * sin(t * 3.0) },
+        rate = ScalarExpr.of { t -> 2000.0 + 500.0 * sin(t * 3.0) },
         // A small base area, like a compact bed of embers rather than a single point.
         position = VectorDistribution.UniformSphere(Vector3(0.0, 0.05, 0.0), 0.12),
         velocity = VectorDistribution.PointWithSpread(
@@ -63,9 +63,9 @@ fun buildFire(masterSeed: Long = 1L): FireScenario {
         mass = ScalarDistribution.Constant(0.01),
         // Small enough that a dense flame reads as many individual embers rather than a few
         // big overlapping blobs — the user's own "a lot more small particles" ask.
-        radius = ScalarDistribution.UniformRange(0.02, 0.05),
+        radius = ScalarDistribution.UniformRange(0.015, 0.035),
         lifetime = ScalarDistribution.UniformRange(0.4, 0.9),
-        maxAlive = 1000,
+        maxAlive = 1600,
         capPolicy = EmitterCapPolicy.EVICT_OLDEST,
         masterSeed = masterSeed,
     )

@@ -18,7 +18,10 @@ import particlesim.render.SceneRegistry
  * rather than added to that shared object.
  */
 class FireScene : DemoScene {
-    private val youngColor = Color(1.0, 0.95, 0.55) // pale yellow - just spawned
+    // A richer gold rather than a near-white pale yellow - the base already reads as "hot" from
+    // many overlapping dots (see viewer.html's own additive-blending opacity note); starting
+    // this close to white on top of that clipped the whole base to flat white almost instantly.
+    private val youngColor = Color(1.0, 0.75, 0.2) // gold - just spawned
     private val oldColor = Color(0.75, 0.08, 0.02) // deep red - about to expire
 
     private fun colorForAge(ageFraction: Double): Color {
