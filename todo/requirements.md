@@ -7,9 +7,9 @@ Target platform: JVM (Java/Kotlin)
 
 ParticleSim is a general-purpose particle physics simulator. It simulates
 sets of point particles and triangulated surfaces built from particles,
-subject to configurable forces and constraints, defined declaratively in
-YAML. Simulations can be watched in real time or run headless at large scale
-with results recorded for later playback.
+subject to configurable forces and constraints, defined with a type-safe
+Kotlin DSL. Simulations can be watched in real time or run headless at
+large scale with results recorded for later playback.
 
 ## 2. Core Concepts
 
@@ -22,8 +22,8 @@ with results recorded for later playback.
 - **Surface**: a mesh of triangles whose vertices are particles, used to
   simulate cloth/flags/membranes and to give forces (e.g. wind) a surface to
   act on.
-- **Simulation**: a YAML-defined collection of particles, surfaces, forces,
-  constraints, and time/run parameters.
+- **Simulation**: a Kotlin-DSL-defined collection of particles, surfaces,
+  forces, constraints, and time/run parameters.
 - **Group**: a named, reusable set of particles (e.g. by tag or ID range)
   that forces/constraints/renderers can target instead of listing individual
   particles.
@@ -41,13 +41,13 @@ bugs aren't possible.
 
 ### Mass as an expression
 
-Mass may be a constant or an expression string evaluated at each timestep,
-e.g.:
+Mass may be a constant or a native Kotlin lambda evaluated at each
+timestep, e.g.:
 
-```yaml
-mass: 2.5                        # constant
-mass: "2.0 + 0.1 * sin(t)"       # function of time
-mass: "1.0 + 0.01 * |velocity|"  # function of other particle state [stretch]
+```kotlin
+mass(2.5)                                    // constant
+mass { t -> 2.0 + 0.1 * sin(t) }             // function of time
+mass { t -> 1.0 + 0.01 * velocity.length() } // function of other particle state [stretch]
 ```
 
 **Recommendation**: start with expressions that are functions of time `t`
@@ -77,26 +77,31 @@ Beyond the core state above, a particle can optionally carry:
 
 ## 4. Simulation Definition Language
 
-A simulation is described using one of **two authoring front-ends** that
-both build the same in-memory simulation model (particles, surfaces,
-forces, constraints, colliders, groups, time settings) — there is no
-functional gap between them by design; the engine, recorded output, and
-viewers never know or care which one produced a given run.
+A simulation is described with the **Kotlin DSL** — a type-safe builder
+API, written and compiled as real Kotlin, giving full access to functions,
+loops, `for`/`when`, reusable generators, and external libraries. The
+engine, recorded output, and viewers only ever see the in-memory model it
+builds (particles, surfaces, forces, constraints, colliders, groups, time
+settings); nothing downstream is aware a scene came from Kotlin rather than
+some other format.
 
-- **YAML** — plain, declarative data. The default choice: portable across
-  tools, diffable/reviewable, safe to load from an untrusted source (it can
-  only ever describe data, never execute code), and the natural interchange
-  format if a non-JVM tool ever needs to read or generate scenarios.
-- **Kotlin DSL** — a type-safe builder API, written and compiled as real
-  Kotlin. The choice when a scenario needs actual logic — functions,
-  loops, reusable generators — rather than just data.
+A declarative YAML front-end existed alongside the DSL for a while (see
+`todo/TODO.md`'s Phase 7 and its "second pass" section, both now marked
+superseded) and was removed once it became clear that maintaining two
+front-ends against one evolving model cost more than the safe-to-load-as-
+data property it bought. Don't reintroduce a second, data-only authoring
+surface without discussing it first — if that need comes back, revisit this
+section rather than quietly rebuilding YAML support.
 
 ### 4.1 Expression language (shared)
 
-To make the YAML front-end "powerful but intuitive" without turning it into
-a general scripting language, any field documented as *expression-capable*
-accepts either a literal value or a string containing a small, sandboxed
-math expression grammar:
+To keep expression-capable fields "powerful but intuitive" without turning
+them into a general scripting language, any field documented as
+*expression-capable* accepts either a literal value or a string containing
+a small, sandboxed math expression grammar — this is also the format the
+viewer's live-editing panel (§10.4) sends when a user types a new value
+for such a field, since that's plain text over the wire, not a Kotlin
+lambda:
 - Arithmetic: `+ - * / ^`, parentheses
 - Functions: `sin cos tan sqrt abs min max clamp noise(...) ...`
 - Built-in variables: `t` (sim time, s), `dt` (timestep, s), and (where
@@ -111,16 +116,16 @@ it for a gusty wind field (§5.2) or similar.
 
 Every expression is **type-checked at parse time** — scalar vs. vector
 mismatches (e.g. adding a vector to a scalar, or a field expecting a
-scalar getting a vector expression) are a load-time schema error (§4.2),
-not a runtime surprise. Mixing scalar and vector operands is the most
-likely authoring mistake in this grammar, and it should fail the moment
-the simulation is loaded, not four thousand steps into a run.
+scalar getting a vector expression) are an error the moment the string is
+parsed, not a runtime surprise four thousand steps into a run. Mixing
+scalar and vector operands is the most likely authoring mistake in this
+grammar.
 
 This one expression engine is shared across mass, force magnitude/
 direction, constraint values, and anything else marked expression-capable,
-so the mental model is consistent everywhere in the DSL — and it's exactly
-what the Kotlin DSL also accepts wherever a plain literal isn't enough but
-a full lambda would be overkill (§4.3).
+so the mental model is consistent everywhere — and it's exactly what the
+Kotlin DSL accepts wherever a plain literal isn't enough but a full lambda
+would be overkill (§4.3).
 
 **Scene queries (camera only)**: camera expressions (§10.1) additionally
 get a *scene query* API — `position(id)`, `centroid(group)`,
@@ -135,43 +140,48 @@ mass expressions `[stretch]` don't apply here.
 **Implementation**: a small hand-rolled recursive-descent parser, not an
 existing general-purpose JVM expression library. The grammar is
 deliberately tiny (arithmetic, ~10 functions, vectors, scene queries), and
-since it must stay safely sandboxed for untrusted YAML, owning the parser
-guarantees the sandbox boundary is exactly what's intended — no risk of a
-general-purpose library exposing more than meant to (e.g. via reflection).
+since it must stay safely sandboxed for untrusted text arriving over the
+wire from the viewer, owning the parser guarantees the sandbox boundary is
+exactly what's intended — no risk of a general-purpose library exposing
+more than meant to (e.g. via reflection).
 
-### 4.2 YAML front-end
+### 4.2 Particle definition and groups
 
-Particles can be defined individually or generated in bulk (grids, random
-distributions within a volume, explicit lists) — bulk generation is
-essential for large-N scenarios. Every particle can carry an optional `id`
-and one or more `tags`; `groups` are named selectors over tags/ids/ranges
-that other sections (forces, constraints, colliders, renderers) reference.
+Particles can be defined individually (`particles.single { ... }`) or
+generated in bulk — grids (`particles.grid(rows, cols, spacing) { row, col
+-> ... }`), random distributions within a volume (§14.1's
+`VectorDistribution`s), or an explicit Kotlin loop — bulk generation is
+essential for large-N scenarios and is exactly what a real loop is for.
+Every particle can carry an optional `id` and one or more `tags`; `groups`
+are named selectors over tags/ids/ranges that other sections (forces,
+constraints, colliders, renderers) reference.
 
-**Groups are a first-class runtime concept**, not just a YAML-authoring
-convenience resolved once at load time: emitters (§14.1) spawn new
-particles into a group *during* a run, so group membership has to be
-something the live engine can update, not a static list baked in from
-parsing.
+**Groups are a first-class runtime concept**, not just a builder-time
+convenience resolved once when a scene is constructed: emitters (§14.1)
+spawn new particles into a group *during* a run, so group membership has to
+be something the live engine can update, not a static list baked in at
+build time.
 
-**Validation**: the YAML schema is formally defined (e.g. JSON Schema or a
-Kotlin data-class-driven schema) so malformed simulations fail fast with a
-clear error pointing at the offending field, rather than failing deep
-inside the physics loop. This covers structural/syntax errors; two
-*semantic* cases need to be checked too, since they're the most common
-authoring mistakes that a schema alone won't catch:
+**Validation**: a malformed scene fails fast — Kotlin's own type system
+catches structural mistakes at compile time, and the builders `require()`
+the rest (e.g. a negative mass, a reference to an undeclared group) so an
+invalid simulation errors out when it's built, not deep inside the physics
+loop. Two *semantic* cases need explicit checks beyond what the type
+system catches on its own, since they're the most common authoring
+mistakes:
 - A group selector (tag/id/range) that matches **zero particles** is a
   warning, not a silent no-op — a typo'd tag name should be visible
   immediately, not discovered by "why isn't this force doing anything."
 - A renderer (§10.2) or force reference targeting an **unknown name** is a
-  load-time error, not something that's only noticed when nothing renders.
+  build-time error, not something that's only noticed when nothing renders.
 
-### 4.3 Kotlin DSL front-end
+### 4.3 The Kotlin DSL
 
 The Kotlin DSL is a type-safe builder using trailing-lambda syntax, the
 same style as the Gradle Kotlin DSL or Ktor's routing DSL — it stays
 readable for simple scenes while giving full access to Kotlin (functions,
 loops, `for`/`when`, reusable generators, external libraries) for complex
-ones. Anywhere the YAML expression grammar (§4.1) would be used, the Kotlin
+ones. Anywhere §4.1's expression grammar would otherwise be needed, the
 DSL instead accepts a **native Kotlin lambda** — this is the direct answer
 to "can we just define functions": yes, as real closures, not expression
 strings.
@@ -207,28 +217,22 @@ Compare to the flag example in §7.3 — same scenario, same underlying model,
 just authored with real code instead of data when the loop-driven grid
 generation and closures are worth it.
 
-**Trust boundary**: unlike YAML, a Kotlin DSL file *is* JVM code — running
-one means compiling and executing arbitrary logic, the same trust model as
-running someone's `build.gradle.kts`. It should only be used for scenarios
-the user authors or explicitly trusts, never for loading a simulation
-definition from an untrusted source (that's exactly the case YAML stays
-safe for).
-
-`[stretch]` **Export to YAML**: a Kotlin DSL script can programmatically
-generate a scene (e.g. procedurally placing thousands of particles) and
-then serialize the resulting model out to a YAML file — bridging the two
-front-ends when a Kotlin-authored scenario later needs to be shared,
-diffed, or handed to a non-JVM tool.
+**Trust boundary**: a Kotlin DSL file *is* JVM code — running one means
+compiling and executing arbitrary logic, the same trust model as running
+someone's `build.gradle.kts`. It should only be used for scenarios the
+user authors or explicitly trusts, never for loading a simulation
+definition from an untrusted source. There is currently no data-only
+authoring format that would be safe for that case (see §4's note on the
+removed YAML front-end) — an untrusted scenario simply isn't something
+this project supports loading today.
 
 ### 4.4 Choosing between them
 
-Default to YAML for simple, shareable, hand-editable scenes and for
-anything that should remain safely loadable as plain data. Reach for the
-Kotlin DSL when a scenario is naturally *generated* rather than *described*
-— procedural particle layouts, parametric sweeps across many similar runs,
-or force/mass logic that's awkward to express in the expression grammar.
-Both remain first-class; neither is meant to fall behind the other in
-capability.
+There's no longer a choice to make here: the Kotlin DSL (plus
+hand-written builders in `particlesim.examples` for one-off scenarios) is
+the only authoring surface. This section is kept as a placeholder — see
+§4's note above for why a second, data-only front-end (YAML) was tried and
+then removed, and don't reintroduce one without discussing it first.
 
 ### 4.5 Shape library
 
@@ -259,23 +263,12 @@ needs to know its ids, only its namespaced group names. Implemented as
 shapes (`buildFlag`, `buildBallBounce`) sharing one scene
 (`ShapeCompositionTest`, `MultiShapeDebugDemo`).
 
-For YAML, this needed an actual **shape library/registry** — no longer
-deferred: `shape_definitions:` (a name, `params:` with per-parameter
-defaults, and a `body:` written in the same YAML grammar every other
-section already uses) plus `shapes:` (`use`/`instance`/`offset`/`params`
-to instantiate one), implemented as `particlesim.yaml.ShapeRegistry` — a
-pre-processing pass that namespaces (mirroring `ShapePlacement`'s own
-dotted `"$instanceName.$local"` convention exactly), offset-translates,
-and param-substitutes a shape's body before merging it into the ordinary
-top-level sections the rest of the loader already knows how to read, so
-no parsing logic is duplicated. Scoped to what a flag-shaped and a
-ball-bounce-shaped definition actually need to parameterize, per this
-section's own original framing — a tire's parameters still aren't
-decided, and nothing here speculatively invents them. See
-`todo/TODO.md`'s "YAML front-end second pass," Phase 8, for the full
-retrospective (including the two scope limits this pass accepted:
-`$param` substitution is whole-value only, and author ids aren't
-namespaced).
+YAML had an equivalent `shape_definitions:`/`shapes:` mechanism
+(`particlesim.yaml.ShapeRegistry`, a pre-processing pass that namespaced,
+offset-translated, and param-substituted a shape's body), removed along
+with the rest of the YAML front-end (§4). See `todo/TODO.md`'s "YAML
+front-end second pass," Phase 8, for the retrospective on how it worked
+while it existed.
 
 ## 5. Forces
 
@@ -763,12 +756,9 @@ itself.
   for a single long-lived run: loading the same named scene twice must
   produce identical frames from `t=0`, the same guarantee already
   required of a fresh process start.
-- **Both authoring front-ends** (§4.4): a scene-library entry is addressed
-  by name regardless of whether it's defined via the Kotlin DSL (a
-  function returning a scenario — today's only mechanism, e.g. the
-  existing `buildFlag`-style builders) or, once YAML scenes exist, a YAML
-  file — matching §4.4's "DSL first, YAML once the shape has stabilized"
-  precedent rather than building two separate catalogs.
+- A scene-library entry is addressed by name and backed by a Kotlin DSL
+  function returning a scenario (e.g. the existing `buildFlag`-style
+  builders, §4.4) — one catalog, one authoring surface.
 
 ## 10. Visualization & Rendering
 
@@ -1223,14 +1213,13 @@ touched.
   sub-stream instead of a single shared one, since a shared stream
   consumed by whichever emitter/thread gets there first isn't
   reproducible.
-- **Validation**: YAML schema validation with actionable error messages
-  (§4.2).
-- **Format versioning**: both the YAML schema (§4.2) and the recording
-  format (§9.2) carry an explicit version field from the start. Adding one
-  later, once files exist in the wild, means writing a migration; adding
-  one now is a single field.
+- **Validation**: scene construction fails fast with actionable error
+  messages (§4.2).
+- **Format versioning**: the recording format (§9.2) carries an explicit
+  version field from the start. Adding one later, once files exist in the
+  wild, means writing a migration; adding one now is a single field.
 - **Extensibility**: new force types, constraint types, and render styles
-  should be addable without changing the YAML parser core — a
+  should be addable without changing core DSL/engine code — a
   registry/plugin pattern internally, even before the `[stretch]` public
   plugin escape hatch is exposed.
 - **Diagnostics**: logging of total system energy/momentum over time —
@@ -1582,7 +1571,7 @@ The core distribution shapes supported natively are **uniform-in-box**,
 random cone/range, typical for sparks and debris) — covering the common
 fire/smoke/spark/firework cases. Anything more exotic (custom shapes,
 non-uniform distributions) is left to the Kotlin DSL's programmatic
-generators (§4.3), consistent with the YAML-vs-Kotlin split in §4.4.
+generators (§4.3).
 
 Newly spawned particles are automatically added to a target group (§4.2),
 so any force, constraint, collision rule, or renderer already targeting
@@ -1705,7 +1694,7 @@ reviewed action, never automatic.
 
 Ordinary unit tests for the pieces most likely to have localized bugs: the
 expression parser (§4.1 — parsing, evaluation, and the parse-time
-scalar/vector type-checking already required there), YAML schema
+scalar/vector type-checking already required there), scene-construction
 validation (§4.2 — malformed input produces the expected error), and
 force/collision geometry in isolation (spring force magnitude for known
 inputs, sphere–plane/sphere–box intersection correctness, §12.4). These

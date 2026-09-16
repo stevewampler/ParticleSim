@@ -663,6 +663,15 @@ items below for exactly what's deferred and why.
 
 ## Phase 7 — Expression language & YAML front-end
 
+> **[PARTIALLY SUPERSEDED, 2026-09-15]** The YAML front-end this phase (and
+> its "second pass" follow-up below) built was removed on the
+> `remove-yaml-frontend` branch — scenes are now Kotlin-DSL-only (see
+> `requirements.md` §4). The **expression language** this phase also
+> introduced is unaffected and still current: it's used by the Kotlin DSL
+> wherever a plain literal isn't enough, and by the viewer's live-editing
+> wire protocol. Everything below is kept as a historical record of the
+> YAML work; it no longer describes the current codebase.
+
 Scoped narrowly on purpose: instead of schema coverage for every
 force/constraint/collider/emitter type built across Phases 2–6, this phase
 gets exactly one worked example — the flag (§7.3) — expressible in YAML, and
@@ -4385,6 +4394,13 @@ on its own - the others are real, code-verified bugs regardless.
       round-trip switch. No console errors. Full test suite green.
 
 ## YAML front-end second pass (§4.2/§4.5, follow-up to Phase 7) — not yet phased
+
+> **[SUPERSEDED, 2026-09-15]** The entire YAML front-end this section
+> describes was removed on the `remove-yaml-frontend` branch — scenes are
+> now Kotlin-DSL-only (see `requirements.md` §4, and Phase 7's note above).
+> Kept below as a historical record of the work; it no longer describes
+> the current codebase.
+
 User asked to finish everything the Phase 7 "Second pass" note above scoped
 out: every remaining field, general bulk generation, a real selector
 language, ball-bounce/sparks golden parity, and the shape registry — plus a

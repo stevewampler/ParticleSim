@@ -46,23 +46,26 @@ implementing anything, since it's the only source of intended architecture
 right now and is under active iteration with the user (do not treat it as
 final/frozen). Key decisions already locked in there:
 
-- **Two authoring front-ends, one model**: simulations (particles, surfaces,
-  forces, constraints, colliders, time/run settings) can be declared in
-  YAML (validated against a formal schema, §4.2) or built with a type-safe
-  Kotlin DSL (§4.3) — both produce the same in-memory simulation model, and
-  the engine/recordings/viewers never distinguish which one built a given
-  run. YAML is the default for portable, shareable, safely-loadable-as-data
-  scenes; the Kotlin DSL is for scenarios that need real functions, loops,
-  or procedural generation. Don't let one front-end gain capability the
-  other structurally can't reach.
-- **One shared expression language**: any YAML field marked
-  expression-capable (particle mass, force magnitude/direction, constraint
-  values, collider position) accepts either a literal or a small sandboxed
-  math expression string (e.g. `"2.0 + 0.1 * sin(t)"`) evaluated by a single
-  shared engine — not a general scripting language. The Kotlin DSL accepts
-  a native lambda in the same spots instead of an expression string. Keep
-  new expression-capable fields consistent with this one grammar rather
-  than inventing per-feature parsing.
+- **Scenes are authored in Kotlin only.** A simulation (particles, surfaces,
+  forces, constraints, colliders, time/run settings) is built with the
+  type-safe Kotlin DSL (§4.3) or a hand-written builder in
+  `particlesim.examples` — there is no YAML scene format. A YAML front-end
+  existed for a while (`todo/TODO.md`'s Phase 7 and its "second pass"
+  section, both now marked superseded) and was deliberately removed in
+  favor of a single authoring surface; don't reintroduce a declarative
+  scene-data format without discussing it first. SnakeYAML is still a
+  dependency, but only for two things unrelated to scene authoring: parsing
+  the viewer's WebSocket control messages and the checkpoint's `.yaml`
+  metadata sidecar (§9.5).
+- **One shared expression language**: any expression-capable field
+  (particle mass, force magnitude/direction, constraint values, collider
+  position, and any field the viewer's live-editing panel accepts typed
+  input for) takes either a literal or a small sandboxed math expression
+  string (e.g. `"2.0 + 0.1 * sin(t)"`) evaluated by a single shared engine —
+  not a general scripting language. The Kotlin DSL accepts a native lambda
+  in the same spots instead of an expression string. Keep new
+  expression-capable fields consistent with this one grammar rather than
+  inventing per-feature parsing.
 - **Decoupled simulation/visualization**: the physics engine exposes state
   through a stable interface (WebSocket, binary framing) that the web
   viewer (WebGL/three.js) consumes — the sole first-class viewer; a native

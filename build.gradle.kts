@@ -25,11 +25,10 @@ dependencies {
     // WebSocketServer subclass to broadcast on; Phase 8's bidirectional upgrade reuses the
     // same class via its onMessage callback, no re-architecture.
     implementation("org.java-websocket:Java-WebSocket:1.6.0")
-    // Phase 7's YAML front-end (§4.2): only used to parse YAML text into generic
-    // Map/List/scalar structures — all schema validation and binding into the simulation
-    // model is hand-written (particlesim.yaml.YamlLoader), the same "own the sandbox
-    // boundary, don't lean on a general framework" choice already made for the expression
-    // parser (§4.1) rather than a data-binding library like Jackson.
+    // Not the (removed) YAML scene front-end — SnakeYAML is still used to parse the viewer's
+    // WebSocket control messages (DragMessage/SceneControlMessage/TimeControlMessage, which
+    // arrive as YAML-superset-of-JSON text) and to read/write a checkpoint's `.yaml` metadata
+    // sidecar (CheckpointReader/CheckpointWriter, §9.5).
     implementation("org.yaml:snakeyaml:2.2")
     // Phase 8's recording format (§9.2): Arrow IPC File format, chosen in requirements.md over
     // a custom binary format or Parquet for its footer-based random access and off-the-shelf
