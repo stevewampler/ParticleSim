@@ -52,11 +52,8 @@ fun buildFire(masterSeed: Long = 1L): FireScenario {
         // Dense enough that the natural (rate * average lifetime) equilibrium sits close to
         // maxAlive, unlike the first-pass tuning below it — see this file's own doc comment.
         rate = ScalarExpr.of { t -> 2000.0 + 500.0 * sin(t * 3.0) },
-        // A small base area, like a compact bed of embers rather than a single point - wide
-        // enough that this many particles aren't all landing in the same few cm^3, which is
-        // what was driving the base's additive-blended overlap to solid white regardless of
-        // per-particle opacity (see viewer.html's own note on that).
-        position = VectorDistribution.UniformSphere(Vector3(0.0, 0.05, 0.0), 0.2),
+        // A small base area, like a compact bed of embers rather than a single point.
+        position = VectorDistribution.UniformSphere(Vector3(0.0, 0.05, 0.0), 0.12),
         velocity = VectorDistribution.PointWithSpread(
             direction = Vector3(0.0, 1.0, 0.0),
             spreadAngleRadians = Math.toRadians(30.0),
