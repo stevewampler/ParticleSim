@@ -43,12 +43,12 @@ fun buildFluid(): FluidScenario {
     val store = ParticleStore()
     val groups = Groups()
 
-    val spacing = 0.08
+    val spacing = 0.05
     val particleMass = 1.0
     val smoothingRadius = spacing * 2.0
-    val nx = 6
-    val ny = 10
-    val nz = 6
+    val nx = 10
+    val ny = 15
+    val nz = 10
     val origin = Vector3(-0.5 * (nx - 1) * spacing, 0.15, -0.5 * (nz - 1) * spacing)
 
     val positions = ArrayList<Vector3>(nx * ny * nz)
@@ -77,8 +77,8 @@ fun buildFluid(): FluidScenario {
     val sph = SphFluid(
         group = "fluid",
         restDensity = restDensity,
-        gasConstant = 1.0,
-        viscosity = 0.1,
+        gasConstant = 0.06,
+        viscosity = 0.01,
         smoothingRadius = smoothingRadius,
         name = "sph",
     )
@@ -88,8 +88,8 @@ fun buildFluid(): FluidScenario {
     // normal points into the box's interior - the same "solid on one side, open on the other"
     // convention `buildBallBounce`'s own floor uses, just walled on all four sides here instead
     // of just below.
-    val halfX = 0.6
-    val halfZ = 0.6
+    val halfX = 0.9
+    val halfZ = 0.9
     val floor = PlaneCollider(VectorExpr.of(Vector3(0.0, 0.0, 0.0)), normal = Vector3(0.0, 1.0, 0.0), name = "floor")
     val wallXNeg = PlaneCollider(VectorExpr.of(Vector3(-halfX, 0.0, 0.0)), normal = Vector3(1.0, 0.0, 0.0), name = "wallXNeg")
     val wallXPos = PlaneCollider(VectorExpr.of(Vector3(halfX, 0.0, 0.0)), normal = Vector3(-1.0, 0.0, 0.0), name = "wallXPos")

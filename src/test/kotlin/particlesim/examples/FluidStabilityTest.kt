@@ -31,7 +31,7 @@ class FluidStabilityTest {
                 val vel = scenario.store.velocity(id)
                 assertTrue(pos.isFinite() && vel.isFinite(), "particle $id has a non-finite position/velocity at t=$t: pos=$pos vel=$vel")
                 assertTrue(
-                    pos.x in -0.7..0.7 && pos.z in -0.7..0.7 && pos.y in -0.1..3.0,
+                    pos.x in -1.0..1.0 && pos.z in -1.0..1.0 && pos.y in -0.1..3.0,
                     "particle $id escaped the container at t=$t: pos=$pos",
                 )
             }
