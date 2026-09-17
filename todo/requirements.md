@@ -387,6 +387,41 @@ run. It does not reform.
   constraints (§6) themselves (e.g. an anchor that gives way under enough
   load), rather than just spring/damper connectors.
 
+### 5.5 SPH fluid
+
+A named group of particles can be given **Smoothed Particle Hydrodynamics**
+(SPH) behavior instead of, or alongside, the forces above — the CPU/Kotlin-
+engine counterpart to a GPU compute-shader fluid solver, reusing this
+project's existing `Force`/spatial-partitioning machinery rather than adding
+a second, viewer-side physics stage (§9's decoupled simulation/visualization
+architecture keeps the viewer a thin generic renderer). Each particle's
+local density is estimated from nearby group members via a smoothing kernel
+(`smoothingRadius`), compared against a target `restDensity` to derive a
+pressure force that pushes overcrowded regions apart, plus a `viscosity`
+force that damps relative velocity between neighbors — Müller et al. 2003's
+real-time formulation. Pressure is clamped to non-negative, trading away
+genuine (but real-time-unstable) SPH surface tension for a free surface that
+settles instead of collapsing into clumps.
+
+Reuses the same spatial-partitioning index collision broad-phase already
+uses (§9.3's "shared spatial partitioning" intent) for neighbor search,
+since SPH's smoothing radius is exactly the kind of real, physical cutoff
+that index is valid for — unlike N-body gravity's unbounded pairwise sum.
+Containing the fluid (a box, a basin) is not a separate mechanism: it's
+ordinary colliders (§12) — typically a floor plus walls — targeting the
+fluid's group through the existing collision system, the same as any other
+particle group.
+
+`restDensity`, `gasConstant`, `viscosity`, and `smoothingRadius` are tightly
+coupled to the scene's own particle spacing and mass — a value borrowed from
+real water (1000 kg/m^3) describes a spacing/mass this simulation isn't
+using, and plugging it in directly starts the fluid far from its own
+kernel's actual equilibrium, exploding or collapsing on the first step. A
+scene author is expected to measure `restDensity` from the packing they
+actually build (evaluate the kernel once against a real interior particle of
+the initial lattice) rather than guess a textbook figure — see the
+`buildFluid` worked example.
+
 ## 6. Constraints
 
 A constraint pins some aspect of a particle's state, overriding what the

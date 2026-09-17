@@ -32,6 +32,7 @@ fun main(args: Array<String>) {
         "trampoline" to { TrampolineScene() },
         "sparks" to { SparksScene() },
         "fire" to { FireScene() },
+        "fluid" to { FluidScene() },
         "drag" to { DragScene(viewerInput.dragQueue) },
         "particleCollision" to { ParticleCollisionScene() },
         "spatialGrid" to { SpatialGridScene() },
