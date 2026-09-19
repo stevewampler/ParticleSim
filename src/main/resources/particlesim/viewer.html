@@ -100,6 +100,21 @@
     display: flex; align-items: center; justify-content: flex-end; gap: 12px;
   }
   #statusBarText { white-space: pre; }
+  .statusBarClickable { cursor: pointer; }
+  .statusBarClickable:hover { color: #fff; text-decoration: underline; }
+  #statusBarSceneMenu {
+    display: none; position: fixed; right: 10px; bottom: 34px; z-index: 2;
+    font: 12px/1.5 monospace; color: #ddd; background: rgba(20,20,20,0.95);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; padding: 4px;
+    max-height: 260px; overflow-y: auto; min-width: 140px;
+  }
+  #statusBarSceneMenu.open { display: block; }
+  #statusBarSceneMenu button {
+    display: block; width: 100%; text-align: left; font: inherit; color: #ddd;
+    background: none; border: none; padding: 3px 8px; border-radius: 3px; cursor: pointer;
+  }
+  #statusBarSceneMenu button:hover { background: rgba(255,255,255,0.12); }
+  #statusBarSceneMenu button.active { color: #fff; background: rgba(80,140,220,0.4); }
   #statusBarLegend { display: none; align-items: center; gap: 6px; color: #bbb; font-size: 11px; white-space: nowrap; }
   #statusBarLegend.active { display: flex; }
   /* Matches particlesim.render.ColorRamp.blueOrange's Okabe-Ito palette exactly (0,114,178) ->
@@ -179,6 +194,7 @@
     </section>
   </div>
 </div>
+<div id="statusBarSceneMenu"></div>
 <div id="statusBar">
   <span id="statusBarText">–</span>
   <span id="statusBarLegend">
@@ -203,6 +219,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 const statusEl = document.getElementById("status");
 const statusBarTextEl = document.getElementById("statusBarText");
 const statusBarLegendEl = document.getElementById("statusBarLegend");
+const statusBarSceneMenuEl = document.getElementById("statusBarSceneMenu");
 const returnToScriptedEl = document.getElementById("returnToScripted");
 const meshEdgesToggleEl = document.getElementById("meshEdgesToggle");
 const meshEdgesCheckboxEl = document.getElementById("meshEdgesCheckbox");
@@ -1274,6 +1291,8 @@ function updateScenePicker(frame) {
   if (frame.availableScenes.length === 0) {
     scenePickerEl.style.display = "none";
     lastAvailableScenes = null;
+    statusBarSceneMenuEl.innerHTML = "";
+    statusBarSceneMenuEl.classList.remove("open");
     return;
   }
   scenePickerEl.style.display = "block";
@@ -1289,14 +1308,43 @@ function updateScenePicker(frame) {
       sceneSelectEl.appendChild(option);
     }
     lastAvailableScenes = frame.availableScenes;
+    rebuildStatusBarSceneMenu(frame.availableScenes);
   }
   if (document.activeElement !== sceneSelectEl) sceneSelectEl.value = frame.activeScene;
+  for (const btn of statusBarSceneMenuEl.children) {
+    btn.classList.toggle("active", btn.dataset.scene === frame.activeScene);
+  }
 }
 
 sceneSelectEl.addEventListener("change", () => {
   send({ type: "load_scene", name: sceneSelectEl.value });
   resetViewerStateForSceneChange(sceneSelectEl.value);
 });
+
+// Status bar's own "Scene: ..." popup (§10.3): a lightweight in-page menu rather than
+// `sceneSelectEl.showPicker()` - the native picker requires a live user gesture and its anchor
+// point is wherever <select> itself sits (the far-off left panel), both wrong fits for "click a
+// status-bar field, get a small popup right there." Shares sceneSelectEl's underlying
+// load_scene/resetViewerStateForSceneChange logic rather than duplicating it.
+function rebuildStatusBarSceneMenu(names) {
+  statusBarSceneMenuEl.innerHTML = "";
+  for (const name of names) {
+    const btn = document.createElement("button");
+    btn.textContent = name;
+    btn.dataset.scene = name;
+    btn.addEventListener("click", () => {
+      send({ type: "load_scene", name });
+      resetViewerStateForSceneChange(name);
+      statusBarSceneMenuEl.classList.remove("open");
+    });
+    statusBarSceneMenuEl.appendChild(btn);
+  }
+}
+
+// Closes on any click outside the menu itself - the "scene" field's own click (handled by
+// #statusBarText's delegated listener below) stops propagation before this ever sees it, so
+// toggling open and immediately closing again on the same click can't happen.
+document.addEventListener("click", () => statusBarSceneMenuEl.classList.remove("open"));
 
 document.querySelectorAll("#speedButtons button").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -1371,11 +1419,39 @@ function updateStats(frame) {
 function updateStatusBar(frame, lagText) {
   const sceneName = frame.activeScene || "–";
   const cameraTag = cameraMode === "manual" ? "Manual" : "Scripted";
-  statusBarTextEl.textContent =
-    `Scene: ${sceneName} | Time: ${frame.t.toFixed(3)} | Lag: ${lagText} | ` +
-    `Status: ${isPaused ? "Paused" : "Running"} | Step: ${frame.step} | ` +
-    `Particles: ${frame.particles.length} | Camera: ${cameraTag}`;
+  // sceneName is always one of the server's own known scene names (never user input), so
+  // interpolating it into innerHTML needs no escaping - same trust level as every other field
+  // here (t/step/particle count are all just numbers).
+  statusBarTextEl.innerHTML =
+    `<span class="statusBarClickable" data-action="scene">Scene: ${sceneName}</span> | ` +
+    `Time: ${frame.t.toFixed(3)} | Lag: ${lagText} | ` +
+    `<span class="statusBarClickable" data-action="status">Status: ${isPaused ? "Paused" : "Running"}</span> | ` +
+    `Step: ${frame.step} | Particles: ${frame.particles.length} | ` +
+    `<span class="statusBarClickable" data-action="camera">Camera: ${cameraTag}</span>`;
 }
+
+// Status-bar quick actions: clicking the Scene/Status/Camera fields reaches the same controls
+// the left panel already exposes (scene picker, play/pause, return-to-scripted) rather than
+// duplicating their logic - delegated on the container since #statusBarText's own children are
+// replaced wholesale every frame (see updateStatusBar above), which would silently drop any
+// listener attached to a specific span.
+statusBarTextEl.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-action]");
+  if (!target) return;
+  const action = target.dataset.action;
+  if (action === "scene") {
+    // A demo with no scene library leaves the menu empty (see updateScenePicker) - nothing to
+    // pop up there, so this is a deliberate no-op rather than showing an empty box.
+    if (statusBarSceneMenuEl.children.length === 0) return;
+    event.stopPropagation(); // don't let the document-level "click outside" listener immediately re-close this
+    statusBarSceneMenuEl.classList.toggle("open");
+  } else if (action === "status") {
+    playPauseBtn.click();
+  } else if (action === "camera") {
+    if (cameraMode === "manual") returnToScriptedEl.click();
+    else enterManualCamera();
+  }
+});
 
 // §10.3/§10.4's particle panel has no registry entry to check membership against the way
 // updateOutliner already does for a removed collider (`registry.colliders.some(...)`), so a
