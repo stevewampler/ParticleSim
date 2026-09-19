@@ -110,6 +110,11 @@
     background: linear-gradient(to right, rgb(0,114,178), rgb(230,159,0));
   }
   #colorLegendLabels { display: flex; justify-content: space-between; font-size: 10px; margin-top: 3px; color: #bbb; }
+  #statusBar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 1;
+    font: 12px/1.4 monospace; color: #ddd; background: rgba(0,0,0,0.6);
+    padding: 5px 10px; text-align: center; white-space: pre; overflow-x: auto;
+  }
 </style>
 </head>
 <body>
@@ -185,6 +190,7 @@
   <div id="colorLegendBar"></div>
   <div id="colorLegendLabels"><span>0 · at rest</span><span>1 · about to break</span></div>
 </div>
+<div id="statusBar">–</div>
 <script type="importmap">
 {
   "imports": {
@@ -198,6 +204,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const statusEl = document.getElementById("status");
+const statusBarEl = document.getElementById("statusBar");
 const returnToScriptedEl = document.getElementById("returnToScripted");
 const meshEdgesToggleEl = document.getElementById("meshEdgesToggle");
 const meshEdgesCheckboxEl = document.getElementById("meshEdgesCheckbox");
@@ -1355,6 +1362,20 @@ function updateStats(frame) {
     `particles: ${frame.particles.length}\n` +
     `steps/s:   ${statsStepRate.toFixed(0)}\n` +
     `lag:       ${lagText}`;
+  updateStatusBar(frame, lagText);
+}
+
+// Bottom-of-screen application status bar (§10.3) - a single-line summary of everything the
+// per-object stats panel and top-left connection indicator otherwise show piecemeal, kept in one
+// glanceable place. Lag text is computed once by updateStats (its own wall-clock anchoring logic
+// shouldn't be duplicated here) and threaded through rather than recomputed.
+function updateStatusBar(frame, lagText) {
+  const sceneName = frame.activeScene || "–";
+  const cameraTag = cameraMode === "manual" ? "Manual" : "Scripted";
+  statusBarEl.textContent =
+    `Scene: ${sceneName} | Time: ${frame.t.toFixed(3)} | Lag: ${lagText} | ` +
+    `Status: ${isPaused ? "Paused" : "Running"} | Step: ${frame.step} | ` +
+    `Particles: ${frame.particles.length} | Camera: ${cameraTag}`;
 }
 
 // §10.3/§10.4's particle panel has no registry entry to check membership against the way
@@ -2348,8 +2369,6 @@ function connect() {
   ws.onerror = () => ws.close();
   ws.onmessage = (event) => {
     const frame = decodeFrame(event.data);
-    const cameraTag = cameraMode === "manual" ? " [manual camera]" : "";
-    statusEl.textContent = `t=${frame.t.toFixed(3)}  step=${frame.step}  particles=${frame.particles.length}${cameraTag}`;
     applyFrame(frame);
     updateStats(frame);
     clearSelectionIfParticleDestroyed(frame);
