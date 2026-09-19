@@ -93,27 +93,21 @@
   #objectPanel .noRenderer { color: #888; font-style: italic; }
   #objectPanel .objectInfo { color: #9f9; margin-top: 2px; }
   #objectPanel .objectInspect { color: #9cf; margin-top: 2px; white-space: pre-line; }
-  #colorLegend {
-    position: fixed; bottom: 8px; right: 8px; z-index: 1;
-    font: 12px/1.5 monospace; color: #ddd; background: rgba(0,0,0,0.55);
-    padding: 8px 10px; border-radius: 4px; display: none;
-  }
-  #colorLegend h4 {
-    margin: 0 0 5px; font-size: 10px; color: #9cf; font-weight: normal;
-    text-transform: uppercase; letter-spacing: 0.05em;
-  }
-  /* Matches particlesim.render.ColorRamp.blueOrange's Okabe-Ito palette exactly (0,114,178) ->
-     (230,159,0) - a visual constant, not derived from live data, so it's fine to hardcode here
-     rather than compute it in JS from values that never change at runtime. */
-  #colorLegendBar {
-    width: 160px; height: 10px; border-radius: 3px;
-    background: linear-gradient(to right, rgb(0,114,178), rgb(230,159,0));
-  }
-  #colorLegendLabels { display: flex; justify-content: space-between; font-size: 10px; margin-top: 3px; color: #bbb; }
   #statusBar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 1;
     font: 12px/1.4 monospace; color: #ddd; background: rgba(0,0,0,0.6);
-    padding: 5px 10px; text-align: center; white-space: pre; overflow-x: auto;
+    padding: 5px 10px; overflow-x: auto;
+    display: flex; align-items: center; justify-content: flex-end; gap: 12px;
+  }
+  #statusBarText { white-space: pre; }
+  #statusBarLegend { display: none; align-items: center; gap: 6px; color: #bbb; font-size: 11px; white-space: nowrap; }
+  #statusBarLegend.active { display: flex; }
+  /* Matches particlesim.render.ColorRamp.blueOrange's Okabe-Ito palette exactly (0,114,178) ->
+     (230,159,0) - a visual constant, not derived from live data, so it's fine to hardcode here
+     rather than compute it in JS from values that never change at runtime. */
+  #statusBarLegendBar {
+    width: 90px; height: 8px; border-radius: 3px;
+    background: linear-gradient(to right, rgb(0,114,178), rgb(230,159,0));
   }
 </style>
 </head>
@@ -185,12 +179,15 @@
     </section>
   </div>
 </div>
-<div id="colorLegend">
-  <h4>break proximity</h4>
-  <div id="colorLegendBar"></div>
-  <div id="colorLegendLabels"><span>0 · at rest</span><span>1 · about to break</span></div>
+<div id="statusBar">
+  <span id="statusBarText">–</span>
+  <span id="statusBarLegend">
+    <span>break proximity</span>
+    <span>0 · at rest</span>
+    <span id="statusBarLegendBar"></span>
+    <span>1 · about to break</span>
+  </span>
 </div>
-<div id="statusBar">–</div>
 <script type="importmap">
 {
   "imports": {
@@ -204,7 +201,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const statusEl = document.getElementById("status");
-const statusBarEl = document.getElementById("statusBar");
+const statusBarTextEl = document.getElementById("statusBarText");
+const statusBarLegendEl = document.getElementById("statusBarLegend");
 const returnToScriptedEl = document.getElementById("returnToScripted");
 const meshEdgesToggleEl = document.getElementById("meshEdgesToggle");
 const meshEdgesCheckboxEl = document.getElementById("meshEdgesCheckbox");
@@ -416,8 +414,9 @@ let lines = new THREE.LineSegments(new THREE.BufferGeometry(), lineMaterial);
 // any connection whose color isn't the uncolored default. That's a sound heuristic today because
 // exactly one colorBy variant exists (BREAK_PROXIMITY, §10.2) - if a second one is ever added,
 // this needs to become variant-aware (which gradient, which two labels) rather than assuming
-// "not the default color" always means breakProximity specifically.
-const colorLegendEl = document.getElementById("colorLegend");
+// "not the default color" always means breakProximity specifically. Lives in the status bar
+// (§10.3's own request) rather than its own floating panel, so it's only ever shown alongside
+// everything else the status bar reports.
 const DEFAULT_LINE_COLOR = { r: 0x33 / 255, g: 0x88 / 255, b: 0xff / 255 }; // mirrors Color.DEFAULT_LINE
 
 function isDefaultLineColor(color) {
@@ -426,7 +425,7 @@ function isDefaultLineColor(color) {
 
 function updateColorLegend(frame) {
   const active = frame.connections.some((c) => !isDefaultLineColor(c.color));
-  colorLegendEl.style.display = active ? "block" : "none";
+  statusBarLegendEl.classList.toggle("active", active);
 }
 scene.add(lines);
 
@@ -1372,7 +1371,7 @@ function updateStats(frame) {
 function updateStatusBar(frame, lagText) {
   const sceneName = frame.activeScene || "–";
   const cameraTag = cameraMode === "manual" ? "Manual" : "Scripted";
-  statusBarEl.textContent =
+  statusBarTextEl.textContent =
     `Scene: ${sceneName} | Time: ${frame.t.toFixed(3)} | Lag: ${lagText} | ` +
     `Status: ${isPaused ? "Paused" : "Running"} | Step: ${frame.step} | ` +
     `Particles: ${frame.particles.length} | Camera: ${cameraTag}`;
