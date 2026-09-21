@@ -10,12 +10,6 @@
     font: 12px/1.4 monospace; color: #9f9; background: rgba(0,0,0,0.5);
     padding: 4px 8px; border-radius: 4px;
   }
-  #returnToScripted {
-    position: fixed; top: 8px; right: 8px; z-index: 1;
-    font: 12px/1.4 monospace; color: #fff; background: rgba(50,90,160,0.85);
-    padding: 6px 10px; border-radius: 4px; border: none; cursor: pointer;
-    display: none;
-  }
   #meshEdgesToggle {
     position: fixed; top: 44px; right: 8px; z-index: 1;
     font: 12px/1.4 monospace; color: #fff; background: rgba(0,0,0,0.5);
@@ -103,7 +97,10 @@
   .statusBarClickable { cursor: pointer; }
   .statusBarClickable:hover { color: #fff; text-decoration: underline; }
   #statusBarSceneMenu {
-    display: none; position: fixed; right: 10px; bottom: 34px; z-index: 2;
+    /* left is set from JS (see the "scene" click handler) to track wherever the "Scene: ..."
+       field currently sits, since the whole status bar is right-justified as one block and
+       Scene's own left edge shifts frame to frame. */
+    display: none; position: fixed; bottom: 34px; z-index: 2;
     font: 12px/1.5 monospace; color: #ddd; background: rgba(20,20,20,0.95);
     border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; padding: 4px;
     max-height: 260px; overflow-y: auto; min-width: 140px;
@@ -128,7 +125,6 @@
 </head>
 <body>
 <div id="status">connecting…</div>
-<button id="returnToScripted">return to scripted camera</button>
 <label id="meshEdgesToggle"><input type="checkbox" id="meshEdgesCheckbox"> show mesh edges</label>
 <div id="leftColumn">
   <div id="leftPanel">
@@ -246,7 +242,6 @@ statusBarTextEl.append(
   statusBarStatusEl, " | Step: ", statusBarStepEl, " | Particles: ", statusBarParticlesEl, " | ",
   statusBarCameraEl,
 );
-const returnToScriptedEl = document.getElementById("returnToScripted");
 const meshEdgesToggleEl = document.getElementById("meshEdgesToggle");
 const meshEdgesCheckboxEl = document.getElementById("meshEdgesCheckbox");
 let showMeshEdges = false;
@@ -326,8 +321,8 @@ let hasSetInitialCameraMode = false;
 // The flag demo's scripted orbit (FlagScene.kt's own CameraFunction, §10.1) makes aiming a
 // right-click at one particle to inspect it fight the camera's own motion - defaults to manual
 // there so a session opens already under the user's control, same as if they'd just grabbed it;
-// still reachable via "return to scripted camera" like any other manually-overridden scene.
-// Every other scene keeps starting scripted, unchanged - "flag" is the only scene with a
+// still reachable via the status bar's "Camera: Manual" field like any other manually-overridden
+// scene. Every other scene keeps starting scripted, unchanged - "flag" is the only scene with a
 // scripted camera at all today. Used both for the very first frame ever received (applyFrame)
 // and every explicit scene switch/restart (resetViewerStateForSceneChange) below.
 function defaultCameraModeForScene(sceneName) {
@@ -338,13 +333,14 @@ function enterManualCamera() {
   if (cameraMode === "manual") return;
   cameraMode = "manual";
   controls.target.copy(lastScriptedLookAt);
-  returnToScriptedEl.style.display = "block";
 }
 controls.addEventListener("start", enterManualCamera);
-returnToScriptedEl.addEventListener("click", () => {
+
+// Formerly a standalone "return to scripted camera" button (top-right) - dropped in favor of
+// the status bar's own "Camera: Manual/Scripted" field, which already reaches the same toggle.
+function returnToScriptedCamera() {
   cameraMode = "scripted";
-  returnToScriptedEl.style.display = "none";
-});
+}
 
 // --- Camera bookmarks (§10.3) -------------------------------------------------------------
 // Session-only (in-memory), not persisted across a page reload — nothing in §10.3 asks for
@@ -652,7 +648,6 @@ function applyFrame(frame) {
   if (!hasSetInitialCameraMode) {
     hasSetInitialCameraMode = true;
     cameraMode = defaultCameraModeForScene(frame.activeScene);
-    returnToScriptedEl.style.display = cameraMode === "manual" ? "block" : "none";
   }
 
   // §10.1's scripted camera: engine-evaluated, so applying it here is just "set the numbers
@@ -1273,15 +1268,14 @@ function resetViewerStateForSceneChange(sceneName) {
   // framed or off-screen. Unconditionally forcing scripted mode here (not just resetting the
   // pose while already in it) matters just as much: if the user had ever manually orbited the
   // view - on this scene or an earlier one - cameraMode stays "manual" indefinitely until they
-  // click "return to scripted," so a reset gated on cameraMode === "scripted" would silently
-  // no-op and leave the camera exactly where they last dragged it. A scene switch is a big
-  // enough context change that carrying over a manual framing from the *previous* scene doesn't
-  // make sense either way, so this always drops back to the target scene's default (per
+  // click the status bar's "Camera: Manual" field, so a reset gated on cameraMode === "scripted"
+  // would silently no-op and leave the camera exactly where they last dragged it. A scene switch
+  // is a big enough context change that carrying over a manual framing from the *previous* scene
+  // doesn't make sense either way, so this always drops back to the target scene's default (per
   // defaultCameraModeForScene - "scripted" except for "flag") rather than the pose the *previous*
   // scene's orbit last computed - a scene with its own scripted camera overwrites it on the very
   // next frame (costs nothing there).
   cameraMode = defaultCameraModeForScene(sceneName);
-  returnToScriptedEl.style.display = cameraMode === "manual" ? "block" : "none";
   lastScriptedLookAt.set(0, 0, 0);
   camera.position.set(6, 4, 8);
   camera.up.set(0, 1, 0);
@@ -1470,11 +1464,19 @@ statusBarTextEl.addEventListener("click", (event) => {
     // pop up there, so this is a deliberate no-op rather than showing an empty box.
     if (statusBarSceneMenuEl.children.length === 0) return;
     event.stopPropagation(); // don't let the document-level "click outside" listener immediately re-close this
+    const opening = !statusBarSceneMenuEl.classList.contains("open");
+    if (opening) {
+      // Anchored to wherever "Scene: ..." currently sits, not a fixed corner - its own left
+      // edge shifts frame to frame since the whole status bar is right-justified as one block
+      // (see updateStatusBar) and Scene is its first/leftmost field.
+      const rect = statusBarSceneEl.getBoundingClientRect();
+      statusBarSceneMenuEl.style.left = `${Math.round(rect.left)}px`;
+    }
     statusBarSceneMenuEl.classList.toggle("open");
   } else if (action === "status") {
     playPauseBtn.click();
   } else if (action === "camera") {
-    if (cameraMode === "manual") returnToScriptedEl.click();
+    if (cameraMode === "manual") returnToScriptedCamera();
     else enterManualCamera();
   }
 });
