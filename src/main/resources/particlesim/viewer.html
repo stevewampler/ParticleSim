@@ -196,7 +196,7 @@
 </div>
 <div id="statusBarSceneMenu"></div>
 <div id="statusBar">
-  <span id="statusBarText">–</span>
+  <span id="statusBarText"></span>
   <span id="statusBarLegend">
     <span>break proximity</span>
     <span>0 · at rest</span>
@@ -220,6 +220,32 @@ const statusEl = document.getElementById("status");
 const statusBarTextEl = document.getElementById("statusBarText");
 const statusBarLegendEl = document.getElementById("statusBarLegend");
 const statusBarSceneMenuEl = document.getElementById("statusBarSceneMenu");
+
+// Built once, not re-created every frame the way an `innerHTML =` rewrite would: this span
+// tree is the mousedown/mouseup target for a real click, and a human click's mousedown-to-mouseup
+// gap (~100-200ms) spans many WebSocket frames (60/s, see SceneLibraryDebugDemoKt's
+// framesPerSecond) - if that target were torn down and replaced mid-click, the browser silently
+// drops the click event entirely rather than firing it on the replacement node. Only a fast
+// synthetic click can land within one frame's window and dodge this, which is why the bug wasn't
+// obvious from automated testing. updateStatusBar (below) only ever touches these nodes'
+// textContent afterward, never replaces them.
+function statusBarField(dataAction) {
+  const span = document.createElement("span");
+  if (dataAction) { span.className = "statusBarClickable"; span.dataset.action = dataAction; }
+  return span;
+}
+const statusBarSceneEl = statusBarField("scene");
+const statusBarTimeEl = statusBarField();
+const statusBarLagEl = statusBarField();
+const statusBarStatusEl = statusBarField("status");
+const statusBarStepEl = statusBarField();
+const statusBarParticlesEl = statusBarField();
+const statusBarCameraEl = statusBarField("camera");
+statusBarTextEl.append(
+  statusBarSceneEl, " | Time: ", statusBarTimeEl, " | Lag: ", statusBarLagEl, " | ",
+  statusBarStatusEl, " | Step: ", statusBarStepEl, " | Particles: ", statusBarParticlesEl, " | ",
+  statusBarCameraEl,
+);
 const returnToScriptedEl = document.getElementById("returnToScripted");
 const meshEdgesToggleEl = document.getElementById("meshEdgesToggle");
 const meshEdgesCheckboxEl = document.getElementById("meshEdgesCheckbox");
@@ -1419,22 +1445,22 @@ function updateStats(frame) {
 function updateStatusBar(frame, lagText) {
   const sceneName = frame.activeScene || "–";
   const cameraTag = cameraMode === "manual" ? "Manual" : "Scripted";
-  // sceneName is always one of the server's own known scene names (never user input), so
-  // interpolating it into innerHTML needs no escaping - same trust level as every other field
-  // here (t/step/particle count are all just numbers).
-  statusBarTextEl.innerHTML =
-    `<span class="statusBarClickable" data-action="scene">Scene: ${sceneName}</span> | ` +
-    `Time: ${frame.t.toFixed(3)} | Lag: ${lagText} | ` +
-    `<span class="statusBarClickable" data-action="status">Status: ${isPaused ? "Paused" : "Running"}</span> | ` +
-    `Step: ${frame.step} | Particles: ${frame.particles.length} | ` +
-    `<span class="statusBarClickable" data-action="camera">Camera: ${cameraTag}</span>`;
+  // .textContent only - never replace statusBarSceneEl/StatusEl/CameraEl themselves (see their
+  // own doc comment above on why that would silently break a real click).
+  statusBarSceneEl.textContent = `Scene: ${sceneName}`;
+  statusBarTimeEl.textContent = frame.t.toFixed(3);
+  statusBarLagEl.textContent = lagText;
+  statusBarStatusEl.textContent = `Status: ${isPaused ? "Paused" : "Running"}`;
+  statusBarStepEl.textContent = frame.step;
+  statusBarParticlesEl.textContent = frame.particles.length;
+  statusBarCameraEl.textContent = `Camera: ${cameraTag}`;
 }
 
 // Status-bar quick actions: clicking the Scene/Status/Camera fields reaches the same controls
 // the left panel already exposes (scene picker, play/pause, return-to-scripted) rather than
-// duplicating their logic - delegated on the container since #statusBarText's own children are
-// replaced wholesale every frame (see updateStatusBar above), which would silently drop any
-// listener attached to a specific span.
+// duplicating their logic - delegated on the stable container rather than attached to each
+// field span individually, purely so one listener covers all three (the spans themselves are
+// never replaced - see their own doc comment above).
 statusBarTextEl.addEventListener("click", (event) => {
   const target = event.target.closest("[data-action]");
   if (!target) return;
