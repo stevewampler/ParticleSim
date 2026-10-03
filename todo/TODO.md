@@ -5116,6 +5116,52 @@ namesakes' re-drop cycle (viewer-loop state with no YAML representation)
 version doesn't read "settled once, then still forever" as a broken
 load. Full `./gradlew test -q` suite green throughout.
 
+## N-body orbital demo (§5.2/§9.6, new requirement) — not yet phased
+- [x] **New shape + library scene, `orbital`** — `NBodyGravity` (§5.2)
+      already had its own analytic stability proof (`TwoBodyOrbitTest`,
+      §15.1), but nothing actually *showed* it; this is the first scene
+      that does. `particlesim.examples.buildOrbital` (shape-library
+      convention, like `buildFlag`/`buildBallBounce`: shared
+      `store`/`groups`/`placement`) builds a star + 3 planets, all one
+      `NBodyGravity` group including the star itself — not a simplified
+      fixed-star setup — so planet-planet terms are real, same
+      "heavy-enough-to-keep-its-own-drift-negligible" approximation
+      `TwoBodyOrbitTest`'s own doc comment already makes. Each planet
+      starts on a circular orbit (`v = sqrt(G*M_star/r)`) in the XZ
+      plane (§11's ground plane). `particlesim.debug.OrbitalScene`
+      wraps it: scripted camera slowly circling the system from an
+      elevated angle (so orbits read as orbits, not an edge-on line,
+      the same "orbit a fixed point at a rotating offset" shape
+      `FlagScene`'s own camera uses) and purely-cosmetic
+      `sphereRadii`/`particleColors` (star large and warm-colored, each
+      planet a distinct size/color outward) built in the scene layer,
+      not the shape builder — same "physics builder stays visual-free"
+      split `FireScene`'s own particle-coloring already follows.
+      Reachable via the picker or `./gradlew runSceneLibraryDemo
+      --args="orbital"`.
+      `ORBITAL_DT` (`1e-3`) and the default radii (5/8/12) were picked
+      for a *watchable* period (~3s/~6s/~12s) rather than
+      `TwoBodyOrbitTest`'s own much-faster analytic-proof system
+      (~0.2s period) — a different empirical check, `OrbitalStabilityTest`
+      (`src/test/kotlin/particlesim/examples/`), confirms this specific
+      three-planet/`dt` combination holds each planet's orbital radius
+      within 15% of its start over a 20s run (several periods of even
+      the outermost planet), mirroring `FlagStabilityTest`/
+      `TrampolineStabilityTest`'s "run it for real" shape rather than
+      re-deriving `TwoBodyOrbitTest`'s own two-body analytic proof.
+      **Verified live in Chrome** (via the new `run-particlesim` skill):
+      loaded `orbital`, confirmed 4 particles (star + 3 planets) render
+      as distinctly colored/sized spheres, and that each planet's
+      angular position visibly advanced by a different amount between
+      two screenshots 2s apart (inner planet moving fastest) — real
+      orbital motion, not a frozen frame. Clicking the `gravity` force
+      correctly shows only its editable `g`/`softening` fields and no
+      arrow toggle, since `NBodyGravity` isn't a `UniformFieldForce`
+      (§10.2 already scopes field-force arrow rendering to
+      `UniformGravity`/`Wind` only — N-body has no single "value at a
+      point" to sample, same reasoning that interface's own doc comment
+      gives). No console errors. Full `./gradlew test -q` suite green.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

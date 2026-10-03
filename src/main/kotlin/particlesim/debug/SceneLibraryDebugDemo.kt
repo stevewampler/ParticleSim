@@ -39,6 +39,7 @@ fun main(args: Array<String>) {
         "multiShape" to { MultiShapeScene() },
         "poleRope" to { PoleRopeScene() },
         "flagOnRope" to { FlagOnRopeScene() },
+        "orbital" to { OrbitalScene() },
     )
     val requestedScene = args.getOrNull(0)
     if (requestedScene != null && requestedScene !in factories) {
