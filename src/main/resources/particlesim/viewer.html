@@ -851,14 +851,17 @@ function applyFrame(frame) {
   });
 
   // Arrow-sampled field forces (§10.2), grouped by source force. §10.3's per-force visibility
-  // toggle (hiddenForces) hides a whole group by name before flattening - an unnamed group's
-  // name is "" which never matches anything in hiddenForces (nothing unnamed is reachable in the
-  // outliner to hide it with), same convention as hiddenSurfaces/hiddenGroups. One ArrowHelper
-  // per visible sample, pooled the same way dots/lines are.
+  // toggle (shownForces) shows a whole group by name before flattening - arrows default to
+  // *off* (unlike every other per-object toggle here, which defaults on - see shownForces' own
+  // comment for why). An unnamed group's name "" still always draws regardless: nothing unnamed
+  // is reachable in the outliner to turn it on with, so defaulting it off too would make it
+  // permanently, silently invisible with no way to ever see it - same reasoning hiddenSurfaces/
+  // hiddenGroups already apply the other way (unnamed can't be hidden; here, unnamed can't be
+  // defaulted off).
   latestArrowGroups = frame.arrowGroups;
   const visibleArrowSamples = [];
   for (const group of frame.arrowGroups) {
-    if (group.name !== "" && hiddenForces.has(group.name)) continue;
+    if (group.name !== "" && !shownForces.has(group.name)) continue;
     for (const sample of group.samples) visibleArrowSamples.push({ sample, forceName: group.name });
   }
   while (arrowObjects.length < visibleArrowSamples.length) {
@@ -1249,16 +1252,16 @@ document.getElementById("stepOnceBtn").addEventListener("click", () => {
 // §9.6's scene switch (restart is now "reload the active scene by name," the same
 // discard-and-rebuild the picker below triggers for a different name): every bit of
 // viewer-side state a new scene has no way to know about gets cleared, not just stats -
-// selection and the per-object panel it drives, plus the hidden-group/-surface/-force toggles,
-// which would otherwise silently persist onto a scene whose names may not even mean the same
-// thing (or exist at all).
+// selection and the per-object panel it drives, plus the hidden-group/-surface/shown-force
+// toggles, which would otherwise silently persist onto a scene whose names may not even mean the
+// same thing (or exist at all).
 function resetViewerStateForSceneChange(sceneName) {
   resetStats();
   selectedKind = null;
   selectedName = null;
   hiddenGroups.clear();
   hiddenSurfaces.clear();
-  hiddenForces.clear();
+  shownForces.clear();
   shownSurfaceLines.clear();
   updateSelectionHighlight();
   renderObjectPanel();
@@ -1535,7 +1538,6 @@ let particleRadiusSourceRow = null; // radius's counterpart to the above
 // particle/mesh draws only if the server permits it *and* nothing here hides it - see applyFrame.
 const hiddenGroups = new Set();
 const hiddenSurfaces = new Set();
-const hiddenForces = new Set(); // names of forces whose arrow samples (see NamedArrowSamples) are unchecked
 
 // §10.3's per-surface polyline toggle: names of surfaces whose connections (structural/shear/
 // bend spring lines, or any other connection whose endpoints happen to be an edge of this
@@ -1546,6 +1548,15 @@ const hiddenForces = new Set(); // names of forces whose arrow samples (see Name
 // like the other sets, which for this one just means "back to the default-hidden state," not
 // "back to default-shown."
 const shownSurfaceLines = new Set();
+
+// Names of forces a person has explicitly *checked* "show arrows" for - inverted the same way
+// shownSurfaceLines is, and for the same kind of reason: a field force's arrows default to
+// *hidden*, not shown. Unlike polylines (redundant once a mesh already renders), arrows default
+// off simply because every field force in every scene gets them for free now (§10.2's
+// ArrowSampling.defaultGroupsFor) - with no scene-specific opt-in left to gate them, a brand new
+// scene would otherwise dump every field force's arrows on screen at once with no way to have
+// asked for that first.
+const shownForces = new Set();
 
 // §10.4's per-surface mesh-style toggle (shaded vs. wireframe): viewer-local, like the
 // visibility sets above, not a round trip to the engine - render style can't affect physics (the
@@ -2040,7 +2051,7 @@ registerEntityKind({
   // note below instead of a checkbox that would silently do nothing.
   renderPanel: () => {
     const hasArrows = latestArrowGroups.some((g) => g.name === selectedName);
-    if (hasArrows) addPanelToggle("show arrows", hiddenForces);
+    if (hasArrows) addPanelToggle("show arrows", shownForces, true);
     currentFieldInputs = {};
     renderEditableFields("force", selectedName, currentFieldInputs);
 
