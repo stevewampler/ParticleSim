@@ -9,6 +9,7 @@ import particlesim.examples.buildFlag
 import particlesim.physics.Constraint
 import particlesim.physics.DragConstraint
 import particlesim.physics.Integrator
+import particlesim.physics.UniformGravity
 import particlesim.physics.Wind
 import particlesim.render.ArrowRenderer
 import particlesim.render.ArrowSampling
@@ -34,6 +35,7 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
     private val scenario = buildFlag(rows = 8, cols = 14)
     private val structural = scenario.meshSprings[0]
     private val wind = scenario.forces.filterIsInstance<Wind>().single()
+    private val gravity = scenario.forces.filterIsInstance<UniformGravity>().single()
     private val flagTip = scenario.grid.last().last()
     private val scene = SceneQueryImpl(scenario.store, scenario.groups)
     private val camera = CameraFunction { t, s ->
@@ -49,6 +51,14 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
     // of a flat shaded color. scenario.surface already carries Grid.uvs (see buildFlag).
     private val clothMesh = SurfaceRenderer(scenario.surface, wireframe = false, textureName = TextureAssets.USA_FLAG)
     private val windArrows = ArrowRenderer(wind, regionMin = Vector3(-0.5, -2.0, -1.0), regionMax = Vector3(2.5, 0.5, 1.0), resolution = 1.0)
+    // Gravity is the flag's other field force (UniformGravity, same UniformFieldForce interface
+    // as Wind) - without its own ArrowRenderer it had no arrow samples, so the forces panel's
+    // "show arrows" toggle (DebugRenderer's hasArrows gate, keyed off latestArrowGroups) silently
+    // never appeared for it even though the panel itself opens fine on right-click/outliner
+    // selection. Same region as windArrows: both forces act on the same cloth group, so sampling
+    // them over the same grid lets the two be compared/toggled independently at matching origins
+    // rather than inventing a second, differently-scoped region.
+    private val gravityArrows = ArrowRenderer(gravity, regionMin = Vector3(-0.5, -2.0, -1.0), regionMax = Vector3(2.5, 0.5, 1.0), resolution = 1.0)
     private val arrowVisualScale = 0.15
     // Named (§10.3's outliner) so it's reachable/editable, not just present - same reasoning as
     // TrampolineScene's own named rig. Position/color/intensity mirror the viewer's own hardcoded
@@ -127,7 +137,8 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
     }
 
     override fun frame(t: Double): SceneFrame {
-        val arrowSamples = ArrowSampling.sample(windArrows, t).map { it.copy(vector = it.vector * arrowVisualScale) }
+        val windSamples = ArrowSampling.sample(windArrows, t).map { it.copy(vector = it.vector * arrowVisualScale) }
+        val gravitySamples = ArrowSampling.sample(gravityArrows, t).map { it.copy(vector = it.vector * arrowVisualScale) }
         val structuralConnections = structural.activeConnections()
         return SceneFrame(
             connections = structuralConnections,
@@ -135,7 +146,10 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
             camera = camera.evaluate(t, scene),
             sphereRadii = poleSphereRadii,
             meshes = listOf(clothMesh),
-            arrowGroups = listOf(NamedArrowSamples(wind.name ?: "", arrowSamples)),
+            arrowGroups = listOf(
+                NamedArrowSamples(wind.name ?: "", windSamples),
+                NamedArrowSamples(gravity.name ?: "", gravitySamples),
+            ),
             visibleIds = poleIds,
             registry = registry,
             lights = lights,
