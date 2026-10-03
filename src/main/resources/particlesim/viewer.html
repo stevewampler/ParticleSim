@@ -16,13 +16,14 @@
     padding: 4px 8px; border-radius: 4px; display: none; align-items: center; gap: 6px;
   }
   #leftColumn {
-    /* Wraps #leftPanel (outliner + object panel) and #controlPanel so they share the left
-       edge's vertical space via flexbox instead of each being independently `position: fixed`
-       - the latter let a tall object panel (e.g. a group's spring/damper tab, §10.4, with
-       several named forces' fields) grow past controlPanel's own fixed position and visually
-       overlap it, since neither one knew about the other's height. align-items: flex-start
-       keeps each child's width sized to its own content (unlike flexbox's stretch default),
-       matching how they sized independently before this wrapper existed. */
+    /* Wraps #leftPanel (the outliner - §10.3's object panel is its own `position: fixed`
+       flyout now, positioned beside whichever row is selected rather than stacked in this
+       column; see positionObjectPanel) and #controlPanel so they share the left edge's
+       vertical space via flexbox instead of each being independently `position: fixed` -
+       the latter let a tall #leftPanel grow past #controlPanel's own fixed position and
+       visually overlap it, since neither one knew about the other's height. align-items:
+       flex-start keeps each child's width sized to its own content (unlike flexbox's stretch
+       default), matching how they sized independently before this wrapper existed. */
     position: fixed; top: 44px; left: 8px; bottom: 8px; z-index: 1;
     display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
   }
@@ -80,7 +81,23 @@
   #outliner li:hover { background: rgba(255,255,255,0.12); }
   #outliner li.selected { background: rgba(80,140,220,0.4); color: #fff; }
   #outliner .outlinerEmpty { color: #666; font-style: italic; padding: 1px 3px; }
-  #objectPanel { display: none; }
+  /* A flyout, not a block stacked below the outliner (§10.3) - positioned in JS
+     (positionObjectPanel) to line its top edge up with whichever outliner row is selected, so
+     opening e.g. "gravity" near the top of a long FORCES list doesn't require scrolling past
+     everything else to find its fields. `position: fixed` takes it out of #leftPanel's normal
+     flex flow entirely (its left/top come from JS, not flex layout), and `pointer-events: none`
+     while closed keeps it from intercepting clicks/right-clicks on the 3D view it overlaps when
+     there's nothing open. The left accent border is its only visual tether back to the row it
+     belongs to - deliberately not a full connecting line/arrow, which would need to track the
+     row's position continuously rather than just once on open. `transition` on opacity/transform
+     (not `display`, which can't animate) is the actual "slide out" - see the `.open` class below. */
+  #objectPanel {
+    position: fixed; z-index: 2; max-height: calc(100vh - 16px); overflow-y: auto;
+    border-left: 3px solid rgba(80,140,220,0.6);
+    opacity: 0; visibility: hidden; pointer-events: none; transform: translateX(-10px);
+    transition: opacity 140ms ease, transform 140ms ease, visibility 140ms;
+  }
+  #objectPanel.open { opacity: 1; visibility: visible; pointer-events: auto; transform: translateX(0); }
   #objectPanel h4:first-child { margin-top: 0; }
   #objectPanelTitle { color: #fff; font-weight: bold; margin-bottom: 4px; overflow-wrap: break-word; }
   #objectPanel label { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
@@ -1502,14 +1519,16 @@ function clearSelectionIfParticleDestroyed(frame) {
 // --- Outliner & per-object panel (§10.3) --------------------------------------------------
 // A persistent, always-available list of every named group/force/constraint/surface, regardless
 // of what's currently rendered - the answer to "how do I reach an invisible object's settings."
-// Selecting an entry opens a shared panel below the list (§10.3: "selecting an entry opens the
-// same per-object panel a right-click would" - right-click-in-3D itself is still separate,
-// unstarted future work).
+// Selecting an entry - from this list, or via a 3D right-click (§10.3's "selecting an entry
+// opens the same per-object panel a right-click would") - opens the same shared panel, flown
+// out beside whichever outliner row is selected (see positionObjectPanel) rather than stacked
+// in a fixed spot below the whole list.
 //
 // Every entity kind ("groups", "forces", "constraints", "surfaces", "colliders") is a
 // self-registered entity-kind module (see registerEntityKind below): each owns its own outliner
 // list contents and per-object panel body, so a new kind is additive rather than another branch
 // in renderObjectPanel/updateOutliner every other kind already depends on.
+const outlinerEl = document.getElementById("outliner");
 const objectPanelEl = document.getElementById("objectPanel");
 const objectPanelTitleEl = document.getElementById("objectPanelTitle");
 const objectPanelBodyEl = document.getElementById("objectPanelBody");
@@ -2419,6 +2438,35 @@ function updateInspection() {
   if (module && module.updateLive) module.updateLive();
 }
 
+// Lines the panel's top edge up with whichever outliner row is currently selected, so it reads
+// as flying out *from that row* rather than appearing in some fixed spot unrelated to where the
+// person actually clicked. Not every selection has a matching row, though - a particle picked
+// directly in the 3D view (selectedKind "particles") has no outliner entry at all (§10.3:
+// particles aren't individually listed, only groups are) - falls back to the outliner's own top
+// edge in that case, the closest "near where the list lives" anchor available.
+//
+// `left` is a one-time measurement of the outliner's right edge, not the panel's own (the panel
+// is `position: fixed` and starts at `left: 0` before its first placement, which would make its
+// own getBoundingClientRect() useless for finding where it *should* go). `top` is clamped so the
+// panel's top never sits below the point where its max-height would leave less than ~60px to
+// work with - better to overlap the bottom of the selected row slightly than to open a flyout
+// that's almost entirely scrolled-off below the viewport.
+function positionObjectPanel() {
+  let anchorTop = outlinerEl.getBoundingClientRect().top;
+  for (const li of document.querySelectorAll("#outliner li[data-kind]")) {
+    if (li.dataset.kind === selectedKind && li.dataset.name === selectedName) {
+      anchorTop = li.getBoundingClientRect().top;
+      break;
+    }
+  }
+  const left = outlinerEl.getBoundingClientRect().right + 8;
+  const top = Math.min(anchorTop, window.innerHeight - 76);
+  objectPanelEl.style.left = left + "px";
+  objectPanelEl.style.top = top + "px";
+  objectPanelEl.style.maxHeight = (window.innerHeight - top - 8) + "px";
+}
+window.addEventListener("resize", () => { if (selectedKind !== null) positionObjectPanel(); });
+
 function renderObjectPanel() {
   // The body is about to be cleared - drop stale references to nodes that won't exist anymore.
   objectPanelInfoEl = null;
@@ -2431,10 +2479,11 @@ function renderObjectPanel() {
   windVelocityInputs = null;
   windVelocityValueRow = null;
   if (selectedKind === null) {
-    objectPanelEl.style.display = "none";
+    objectPanelEl.classList.remove("open");
     return;
   }
-  objectPanelEl.style.display = "block";
+  positionObjectPanel();
+  objectPanelEl.classList.add("open");
   objectPanelTitleEl.textContent = selectedName;
   objectPanelBodyEl.innerHTML = "";
 

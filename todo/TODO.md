@@ -5265,6 +5265,53 @@ load. Full `./gradlew test -q` suite green throughout.
       point" to sample, same reasoning that interface's own doc comment
       gives). No console errors. Full `./gradlew test -q` suite green.
 
+## Object panel becomes a flyout anchored to the selected outliner row (§10.3, follow-up) — not yet phased
+- [x] **The per-object panel used to be one fixed block stacked below the
+      entire outliner** — selecting `gravity` near the top of a long
+      `FORCES` list (or any entry at all, really) opened its fields in a
+      shared panel appended after every other section (Constraints/
+      Surfaces/Colliders/Emitters/Lights), far from the row that was
+      actually clicked (explicit user request: "the object's UI [should]
+      slide out from the panel next to the object's name instead of
+      being displayed at the bottom of the object panel"). Asked the
+      user to pick between two concrete shapes (a side-anchored flyout
+      vs. an inline accordion expanding under the row) since they're
+      materially different implementations — flyout-beside-the-row won.
+      `#objectPanel` (`viewer.html`) is now `position: fixed`, removed
+      from `#leftPanel`'s flex flow entirely; `positionObjectPanel`
+      (called from `renderObjectPanel`, the one function every selection
+      path — outliner click, the `groups` link inside a surface panel,
+      and every 3D right-click pick — already routes through) finds the
+      matching `<li data-kind>`/`data-name` in the DOM and lines the
+      panel's top edge up with it, falling back to the outliner's own
+      top edge for `selectedKind === "particles"` (a 3D-picked particle
+      has no outliner row to anchor to at all). `top` is clamped
+      (`Math.min(anchorTop, innerHeight - 76)`) and paired with a
+      per-open `max-height` so a row near the bottom of a long list
+      still gets a panel that fits the viewport with `overflow-y: auto`
+      rather than one mostly scrolled off-screen. Visibility switched
+      from `display: none/block` (not animatable) to an `.open` class
+      toggling `opacity`/`transform`/`visibility` with a `transition` —
+      the actual "slide out," plus `pointer-events: none` while closed
+      so the flyout's former footprint doesn't swallow clicks/right-
+      clicks on the 3D view it now overlaps. A left accent border is
+      its only visual tether back to the selected row (deliberately not
+      a full connecting line, which would need to track the row's
+      position continuously rather than just once on open).
+      **Verified live in Chrome** (`run-particlesim` skill): `gravity`'s
+      and `bend`'s panels each open flush against their own row, not at
+      a shared fixed spot; a tall `cloth` group panel (spring/damper
+      tab, centroid/avg-speed readout) still opens correctly anchored
+      with no layout overlap; switched to `multiShape` (72-entry
+      `FORCES` list) and selected both a mid-list force
+      (`ball.gravity`, Playwright's own auto-scroll-into-view already
+      exercising the "selected row isn't currently near the top"
+      case) and the last collider (`ball.floor`, after forcing
+      `#leftPanel` to scroll to its very bottom) — both opened correctly
+      positioned next to their row with no clamping artifacts. No
+      console errors. Full `./gradlew test -q` suite green (no Kotlin
+      changed — viewer-only).
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created
