@@ -5116,6 +5116,109 @@ namesakes' re-drop cycle (viewer-loop state with no YAML representation)
 version doesn't read "settled once, then still forever" as a broken
 load. Full `./gradlew test -q` suite green throughout.
 
+## Field-force/surface render toggles made type-driven, a drift fix, default-off arrows, and a browser-driving skill (§10.2/§10.3, follow-up) — not yet phased
+- [x] **Gravity's "show arrows" toggle was scene-specific, not
+      force-type-specific** — the user could click the flag demo's
+      `gravity` force same as `wind`, but only `wind` had an
+      `ArrowRenderer` (`FlagScene`'s own `windArrows`), so gravity's
+      panel opened with no toggle at all. First pass (reverted below)
+      hand-added a `gravityArrows` renderer to `FlagScene` alone — the
+      user pushed back: the UI should be consistent *by force type*
+      across every scene, not patched scene-by-scene, and the same
+      principle should hold for surfaces/groups too.
+      **Generalized at the one call site every scene's frame passes
+      through**, `DebugRenderer.broadcast`: `ArrowSampling.
+      defaultGroupsFor` (new, `Renderer.kt`) auto-samples a default
+      region/resolution for any named `UniformFieldForce` the registry
+      carries that isn't already covered by an explicit `ArrowRenderer`
+      — an explicit one (e.g. `windArrows`, hand-tuned to the gust's
+      full extent) still wins. `defaultSurfaceRenderers` (same file)
+      applies the identical principle to surfaces: a named `Surface`
+      with no explicit `SurfaceRenderer` gets a plain flat-shaded one,
+      closing a real, independently-discovered gap — `MultiShapeScene`
+      registered its flag surface but never meshed it, so the outliner's
+      "show mesh" toggle was present but silently inert. Removed
+      `FlagScene`'s one-off `gravityArrows` now that gravity gets this
+      for free, same as every other scene's field forces, with zero
+      scene-specific code; factored the wind-arrow visual scale into a
+      shared `DEFAULT_ARROW_VISUAL_SCALE` constant. Updated the now-
+      stale "nothing renders unless a renderer targets it" doc comments
+      in `Renderer.kt`/`viewer.html`/`requirements.md` §10.2 to describe
+      the type-driven default.
+      **Verified live in Chrome** (ad hoc Playwright scripts — the
+      `run-particlesim` skill below didn't exist yet): flag demo's
+      gravity toggle appears and correctly shows/hides just gravity's
+      (downward) arrows independent of wind's; switched to
+      `multiShape`, zoomed/orbited to the flag (offset +3.5 in y from
+      the scene's default-framed origin), and watched its surface
+      toggle between a real faceted blue-grey mesh and nothing — a
+      concrete before/after, not just "the checkbox appears."
+- [x] **New skill, `run-particlesim`** (`.claude/skills/run-particlesim/`)
+      — no project skill existed for driving the viewer in a browser;
+      "run the app" previously meant reading `viewer.html` and
+      reasoning about it, or one-off throwaway scripts. `driver.mjs` is
+      a from-scratch Playwright REPL (no `chromium-cli` available in
+      this environment) that a future agent pipes line-delimited
+      commands to over stdin — `launch`/`ss`/`scene`/`click`/`toggle`/
+      `orbit`/`zoom`/`text`/`eval`/`console`/`quit`/`wait` — covering
+      the viewer's actual interaction pattern (outliner entries open
+      per-object panels; toggles are labeled checkboxes). Genuinely
+      headless on Linux or macOS (plain `chromium.launch()` needs no
+      xvfb/display server, unlike an Electron REPL driver).
+      Building it surfaced two real bugs, both fixed and re-verified:
+      multi-word toggle labels (`toggle show arrows`) were getting
+      truncated to their first word by naive argv splitting; and a
+      piped heredoc's commands could race each other, since `readline`
+      fires every `'line'` event before the first async command
+      finishes — fixed with explicit promise-chaining to force strict
+      in-order execution. Then did the required fresh-verification
+      pass: killed everything, re-ran every command block in `SKILL.md`
+      verbatim from a clean shell, and it reproduced exactly as
+      documented, screenshots included. `./gradlew test` also passes
+      (the documented Test command).
+- [x] **Default field-force arrows were visibly following their object**
+      — `defaultGroupsFor`'s region was recomputed from the scene's
+      *live* particle bounding box on every single frame, so a moving/
+      deforming object's gravity arrows (no explicit scene-authored
+      region, unlike wind's) visibly tracked it — exactly backwards,
+      since a field force's value is the same everywhere in space and
+      must not depend on any object's current position (flagged
+      directly by the user: "field-force arrows appear to be attached
+      to an object in a scene... rendering should be independent of any
+      of the objects in the scene"). Fixed by caching the computed
+      region per `Force` instance (`java.util.WeakHashMap`, so a scene
+      switch's discarded forces don't pin memory) instead of
+      recomputing it every call — set once, the first frame that force
+      is seen, then held fixed in world space, the same role
+      `FlagScene`'s hand-picked `windArrows` constant already played.
+      Incidentally also fixes the per-frame bounding-box recompute cost
+      flagged as a minor perf concern for emitter-driven scenes
+      (Sparks/Fire) when the type-driven default first landed. Added a
+      `wait <ms>` command to the `run-particlesim` driver for this
+      verification (screenshotting the same scene a few seconds apart).
+      **Verified live in Chrome**: captured gravity's arrow screenshots
+      6 seconds apart while the flag flapped — arrow origins pixel-
+      identical across that window, confirming they no longer follow
+      the cloth.
+- [x] **Field-force arrows now default to hidden, not shown** — every
+      field force in every scene gets a "show arrows" toggle for free
+      now, with no remaining scene-specific opt-in to gate it, so a
+      scene with several field forces would dump every one of their
+      arrows on screen the moment it loaded, with no way to have asked
+      for that first (explicit follow-up user request). Inverted
+      `hiddenForces` → `shownForces` (checked-into-set-means-shown) in
+      `viewer.html`, the same pattern `shownSurfaceLines` already uses
+      for polylines defaulting off — `addPanelToggle` already supported
+      this via its existing `invert` parameter, so this is the forces
+      panel adopting a convention the surfaces panel had already
+      established, not a new mechanism. An unnamed force's arrows (no
+      outliner entry to ever check) still always draw, unaffected
+      either way, same immunity unnamed surfaces/groups already have
+      from their own hide toggles. **Verified live in Chrome**: the
+      flag scene now loads with no arrows visible; clicking gravity or
+      wind and checking "show arrows" reveals each independently, same
+      toggle behavior as before, just starting from off.
+
 ## N-body orbital demo (§5.2/§9.6, new requirement) — not yet phased
 - [x] **New shape + library scene, `orbital`** — `NBodyGravity` (§5.2)
       already had its own analytic stability proof (`TwoBodyOrbitTest`,
