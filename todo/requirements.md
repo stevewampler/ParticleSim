@@ -880,6 +880,14 @@ it's being built, before its real renderers exist.
 
 **Particle & surface renderers**: `dot`, `sphere` (§10, using the group's
 particles' `radius` by default), or a shaded/wireframe mesh for a surface.
+A named surface with no explicit `SurfaceRenderer` still gets a plain
+flat-shaded default (same "driven by type, not by scene" rule as field-
+force arrows above) rather than leaving the outliner's "show mesh" toggle
+reachable but inert — an explicit renderer (a texture, wireframe, custom
+material) always overrides it. Particles need no such fallback: every
+particle already draws as a dot with no renderer declared at all (§10's
+own `--render-all` baseline), so there's no "named but unrendered" gap
+for groups the way there was for field forces and surfaces.
 
 **Per-particle color**: a scene can additionally send a per-particle
 render-color override — computed server-side (e.g. the campfire worked
@@ -924,7 +932,14 @@ external image onto a mesh's surface.
 - Directional field forces (wind, uniform gravity) render as **arrows**
   sampled on a grid over a region — since a field isn't localized to
   specific particles, its renderer needs a sampling region and resolution
-  rather than just a group target. `[stretch]` streamlines as a denser
+  rather than just a group target. A scene may still declare its own
+  `ArrowRenderer` with a hand-tuned region (e.g. the flag demo's `windArrows`,
+  scoped to the gust rather than just the cloth) — that always wins — but
+  a named field force with no such declaration is no longer unreachable:
+  the engine fills in a default region/resolution derived from the scene's
+  own particle bounds, so the viewer's per-force "show arrows" toggle is
+  driven by the force's *type* (any `UniformFieldForce`) rather than by
+  which scene it happens to be in. `[stretch]` streamlines as a denser
   alternative to discrete arrows.
 - Pairwise forces (spring/damper, §5.1) render as a **line** between the
   two connected particles, optionally colored and/or thickness-mapped to a

@@ -2030,9 +2030,14 @@ registerEntityKind({
   kind: "forces",
   getNames: (registry) => registry.forces,
   // A visibility toggle is only real when this force actually has arrow samples this frame
-  // (latestArrowGroups, populated in applyFrame) - a force with no arrow renderer (e.g. plain
-  // uniform gravity) has nothing here to show or hide, so it keeps the same informational note
-  // as before rather than a checkbox that would silently do nothing.
+  // (latestArrowGroups, populated in applyFrame) - still gated on presence rather than hardcoded
+  // to every force, but in practice every named UniformFieldForce now has an entry here: the
+  // engine's DebugRenderer.broadcast fills in a default sampling region for any one a scene
+  // didn't build its own ArrowRenderer for (ArrowSampling.defaultGroupsFor), so this toggle is
+  // force-type-specific (any field force gets it, e.g. plain uniform gravity) rather than
+  // depending on whether the scene author remembered to wire one up. A force that isn't a field
+  // force at all (a spring, N-body gravity) still has nothing here, keeping the informational
+  // note below instead of a checkbox that would silently do nothing.
   renderPanel: () => {
     const hasArrows = latestArrowGroups.some((g) => g.name === selectedName);
     if (hasArrows) addPanelToggle("show arrows", hiddenForces);

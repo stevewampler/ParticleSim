@@ -2,12 +2,14 @@ package particlesim.debug
 
 import particlesim.collision.Collider
 import particlesim.core.ParticleStore
+import particlesim.render.ArrowSampling
 import particlesim.render.CameraPose
 import particlesim.render.Color
 import particlesim.render.Light
 import particlesim.render.NamedArrowSamples
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
+import particlesim.render.defaultSurfaceRenderers
 
 /**
  * The debug-render-all viewer entry point (§10.2's `--render-all` and, now, the real opt-in
@@ -58,10 +60,24 @@ class DebugRenderer(
         activeScene: String = "",
         lights: List<Light> = emptyList(),
     ) {
+        // Fills in a default-region arrow group (§10.2) for any named UniformFieldForce the
+        // registry carries that arrowGroups didn't already cover - this is the single call site
+        // every scene's broadcast passes through (see DemoScene's generic runner), so it's what
+        // makes the "show arrows" toggle force-type-specific rather than scene-specific: a scene
+        // gets it for free just by naming its field force, with no ArrowRenderer of its own to
+        // build. An explicit arrowGroups entry (e.g. FlagScene's hand-tuned windArrows) still wins.
+        val allArrowGroups = arrowGroups + ArrowSampling.defaultGroupsFor(
+            registry.forces, arrowGroups.map { it.name }.toSet(), store, ids, t,
+        )
+        // Same "force-type specific, not scene specific" principle applied to surfaces: a named
+        // surface the registry carries but meshes didn't cover gets a plain default renderer, so
+        // the outliner's "show mesh" toggle is never a no-op just because a scene named a surface
+        // without wiring a mesh renderer for it.
+        val allMeshes = meshes + defaultSurfaceRenderers(registry.surfaces, meshes.mapNotNull { it.surface.name }.toSet())
         wsServer.broadcastFrame(
             BinaryFrame.encode(
-                t, step, store, ids, connections, camera, lineColors, connectionNames, sphereRadii, particleColors, meshes,
-                arrowGroups, visibleIds, registry, colliders.filter { it.active }, events, availableScenes, activeScene, lights,
+                t, step, store, ids, connections, camera, lineColors, connectionNames, sphereRadii, particleColors, allMeshes,
+                allArrowGroups, visibleIds, registry, colliders.filter { it.active }, events, availableScenes, activeScene, lights,
             ),
         )
     }
