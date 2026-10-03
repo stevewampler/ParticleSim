@@ -1,0 +1,9 @@
+{
+  "name": "run-particlesim-driver",
+  "private": true,
+  "description": "Playwright dependency for the run-particlesim skill's browser driver - not part of the Kotlin build.",
+  "type": "module",
+  "dependencies": {
+    "playwright": "^1.63.0"
+  }
+}
