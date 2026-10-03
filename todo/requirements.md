@@ -936,10 +936,15 @@ external image onto a mesh's surface.
   `ArrowRenderer` with a hand-tuned region (e.g. the flag demo's `windArrows`,
   scoped to the gust rather than just the cloth) — that always wins — but
   a named field force with no such declaration is no longer unreachable:
-  the engine fills in a default region/resolution derived from the scene's
-  own particle bounds, so the viewer's per-force "show arrows" toggle is
-  driven by the force's *type* (any `UniformFieldForce`) rather than by
-  which scene it happens to be in. `[stretch]` streamlines as a denser
+  the engine fills in a default region/resolution, snapshotted once from
+  the scene's particle bounds the first time that force is seen and then
+  held fixed in world space from then on — a field force's value is the
+  same everywhere in space, so its rendered arrows must not visibly
+  follow whatever object the region happened to be sized from as that
+  object moves (the flag waving shouldn't drag gravity's own arrows along
+  with it). This makes the viewer's per-force "show arrows" toggle driven
+  by the force's *type* (any `UniformFieldForce`) rather than by which
+  scene it happens to be in. `[stretch]` streamlines as a denser
   alternative to discrete arrows.
 - Pairwise forces (spring/damper, §5.1) render as a **line** between the
   two connected particles, optionally colored and/or thickness-mapped to a

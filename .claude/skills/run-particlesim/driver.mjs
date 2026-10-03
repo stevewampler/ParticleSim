@@ -149,6 +149,13 @@ const COMMANDS = {
     console.log(consoleErrors.length ? JSON.stringify(consoleErrors) : '(no console errors)');
   },
 
+  // Plain time-based pause (ms) - e.g. to let a running physics scene advance/animate for a
+  // while between two screenshots, with nothing else to poll for.
+  async wait(ms) {
+    await new Promise((r) => setTimeout(r, Number(ms) || 0));
+    console.log('waited', ms, 'ms');
+  },
+
   async quit() {
     if (browser) await browser.close().catch(() => {});
     browser = null; page = null;

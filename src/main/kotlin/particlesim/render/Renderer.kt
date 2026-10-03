@@ -173,14 +173,34 @@ object ArrowSampling {
         return samples
     }
 
+    /** Per-force cache of [defaultGroupsFor]'s computed region, keyed by the [Force] instance's
+     * own identity rather than its name — see that function's own doc comment for why this
+     * exists at all. [java.util.WeakHashMap] rather than a plain map so a replaced scene's
+     * forces (a scene switch, §9.6, builds an entirely fresh `Force` set — [SceneLibrary]'s
+     * factories never reuse an old scene's objects) don't pin memory forever just for having
+     * been seen once; they fall out of the cache the same moment they're no longer reachable
+     * from anywhere else. */
+    private val defaultRegionCache = java.util.WeakHashMap<Force, Pair<Vector3, Vector3>>()
+
     /** Every named [UniformFieldForce] in [forces] that isn't already covered by [explicitNames]
      * (a scene's own hand-declared [ArrowRenderer]s, keyed by force name — e.g. FlagScene's
-     * hand-tuned `windArrows`) gets a default sampling region/resolution derived from [store]'s
-     * current [ids] bounding box, scaled by [DEFAULT_ARROW_VISUAL_SCALE]. This is what makes the
-     * "show arrows" toggle (§10.3) real for *every* field force in *every* scene regardless of
-     * whether that scene's author remembered to build an [ArrowRenderer] for it — the UI is
-     * driven by force type ([UniformFieldForce]), not by what any one scene happens to declare.
-     * An explicit renderer always wins; this only fills the gap for anything left uncovered. */
+     * hand-tuned `windArrows`) gets a default sampling region/resolution, scaled by
+     * [DEFAULT_ARROW_VISUAL_SCALE]. This is what makes the "show arrows" toggle (§10.3) real for
+     * *every* field force in *every* scene regardless of whether that scene's author remembered
+     * to build an [ArrowRenderer] for it — the UI is driven by force type ([UniformFieldForce]),
+     * not by what any one scene happens to declare. An explicit renderer always wins; this only
+     * fills the gap for anything left uncovered.
+     *
+     * The region is computed from [store]'s current [ids] bounding box **only the first time
+     * each force is seen**, then cached and reused on every later call regardless of how [ids]'
+     * positions change afterward (see [defaultRegionCache]). A field force's arrows represent a
+     * value that's the same everywhere in space (§10.2's own framing — "a field isn't localized
+     * to specific particles") — recomputing the bounding box fresh every frame would make the
+     * sampled grid visibly follow whatever object it was derived from as that object moves or
+     * deforms (a waving flag dragging gravity's own arrows around with it), which is exactly
+     * backwards: the one thing a field force's rendering must *not* depend on is any particular
+     * object's current position. Caching is what keeps it fixed in world space instead — the
+     * same role FlagScene's hand-picked `windArrows` region plays by simply being a constant. */
     fun defaultGroupsFor(
         forces: Map<String, Force>,
         explicitNames: Set<String>,
@@ -189,20 +209,23 @@ object ArrowSampling {
         t: Double,
     ): List<NamedArrowSamples> {
         if (ids.isEmpty()) return emptyList()
-        val (regionMin, regionMax) = defaultRegion(store, ids)
-        val resolution = defaultResolution(regionMin, regionMax)
         return forces.mapNotNull { (name, force) ->
             if (name in explicitNames || force !is UniformFieldForce) return@mapNotNull null
+            val (regionMin, regionMax) = defaultRegionCache.getOrPut(force) { defaultRegion(store, ids) }
+            val resolution = defaultResolution(regionMin, regionMax)
             val renderer = ArrowRenderer(force, regionMin, regionMax, resolution)
             val samples = sample(renderer, t).map { it.copy(vector = it.vector * DEFAULT_ARROW_VISUAL_SCALE) }
             NamedArrowSamples(name, samples)
         }
     }
 
-    /** [ids]'s current bounding box (§10.2's default arrow region), expanded by a margin so the
-     * sampled grid doesn't sit exactly on the scene's own particles — at least 25% of each
-     * dimension's own span, floored at 0.3 so a scene with a near-degenerate extent (a single
-     * particle, or one flattened onto a plane) still gets a usable, non-zero-size region. */
+    /** [ids]'s bounding box at the moment this is called (§10.2's default arrow region) —
+     * [defaultGroupsFor] only ever calls this once per force, on whichever frame first needs a
+     * region for it, then holds the result fixed from then on (see that function's own doc
+     * comment on why). Expanded by a margin so the sampled grid doesn't sit exactly on the
+     * scene's own particles — at least 25% of each dimension's own span, floored at 0.3 so a
+     * scene with a near-degenerate extent (a single particle, or one flattened onto a plane)
+     * still gets a usable, non-zero-size region. */
     private fun defaultRegion(store: ParticleStore, ids: List<Int>): Pair<Vector3, Vector3> {
         var min = store.position(ids[0])
         var max = min

@@ -82,6 +82,7 @@ port 8888/8887 listeners (same two `lsof` lines as above).
 | `text [css-sel]` | print innerText of the whole page, or one selector |
 | `eval <js>` | evaluate an expression in the page, print it as JSON |
 | `console` | print any browser console errors seen so far |
+| `wait <ms>` | plain time-based pause - e.g. to let a running scene animate between two screenshots |
 | `quit` | close the browser |
 
 Plain `launch`/`click <text>`/`toggle <label>` cover almost everything -
