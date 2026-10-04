@@ -117,6 +117,33 @@ const COMMANDS = {
     console.log('orbited', dx, dy);
   },
 
+  // Raw pointer gesture primitives, as distinct steps rather than one atomic "drag" command -
+  // §9.4's interactive particle drag (picking, the drag-plane projection, release-velocity
+  // finite difference) all hinge on real pointerdown/pointermove/pointerup sequences with
+  // actual movement between them, and verifying it *feels* right (no jank, release imparts a
+  // real throw) needs screenshots at intermediate points, not just a before/after of one call.
+  // Coordinates are raw page pixels (e.g. from a prior `ss`, visually located) - there's no
+  // particle-id-to-screen-position command, the same "read a screenshot, use what you see"
+  // approach `orbit`/`zoom` were already tuned by.
+  async mousedown(xy) {
+    if (!page) return console.log('ERROR: launch first');
+    const [x, y] = (xy || '').trim().split(/\s+/).map(Number);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    console.log('mousedown', x, y);
+  },
+  async mousemove(xy) {
+    if (!page) return console.log('ERROR: launch first');
+    const [x, y] = (xy || '').trim().split(/\s+/).map(Number);
+    await page.mouse.move(x, y, { steps: 10 });
+    console.log('mousemove', x, y);
+  },
+  async mouseup() {
+    if (!page) return console.log('ERROR: launch first');
+    await page.mouse.up();
+    console.log('mouseup');
+  },
+
   // Zooms via mouse wheel, centered on the canvas (positive = out, negative = in) - matches
   // OrbitControls' own wheel handling, same as a person scrolling over the 3D view.
   async zoom(deltaY) {

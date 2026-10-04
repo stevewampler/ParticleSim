@@ -1241,6 +1241,32 @@ this project has used since Phase 5.
       (live mode just applies whichever message arrived most recently);
       genuinely blocked on the same missing discrete-event channel noted
       throughout Phase 8's recording work, not new to this piece.
+      **Follow-up, 2026-10-04: the real-browser mouse-driven gap above is
+      closed.** The `run-particlesim` skill didn't exist when this was
+      first written; with it, a real pointer gesture (`mousedown`/
+      `mousemove`/`mouseup`, not a synthetic WebSocket message) against
+      the `drag` scene's chain confirms all three things that raw
+      WebSocket testing couldn't: (1) picking is pixel-accurate — the
+      exact dot under the cursor turns red immediately on `mousedown`,
+      every time; (2) the drag plane tracks the cursor naturally with no
+      visible jank across both a small (~20px) and a large (~230px)
+      displacement, the dragged dot's screen position matching the mouse
+      target almost exactly throughout; (3) release imparts a real
+      throw — after a small, non-breaking drag, releasing mid-motion set
+      the *entire* chain swinging in a smooth S-curve wave 300ms later,
+      not just the released particle moving. **Unplanned bonus finding,
+      not a bug**: the large (~230px) displacement exceeded
+      `springBreakThreshold` (0.5) on the two springs adjacent to the
+      dragged particle, snapping them live mid-drag — confirmed the
+      break mechanism (§5.4) and interactive drag compose correctly
+      under real input (broken-off fragments fell away and continued
+      under gravity independently, no console errors, nothing frozen or
+      stuck). What's still genuinely open: replay-exactness (above,
+      blocked on the same missing discrete-event channel) and a true
+      mouse-driven pick landing on a particle still a touch imprecise to
+      set up (particle screen position has to be read off a prior
+      screenshot each time — there's no "pick particle by id" driver
+      command, only raw pixel coordinates).
 - [ ] `[stretch]` Parquet export (post-hoc conversion from Arrow shards,
       for pandas/Spark-style tooling) (§9.2)
 
