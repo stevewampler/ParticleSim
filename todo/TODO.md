@@ -5603,4 +5603,11 @@ load. Full `./gradlew test -q` suite green throughout.
 - [ ] Playback-fork-to-live: resume from nearest checkpoint, deterministic
       fast-forward to the exact target frame, then hand off to live input
       (§9.4, §9.5)
-- [ ] Export Kotlin-authored scene to YAML (§4.3)
+- [ ] ~~Export Kotlin-authored scene to YAML (§4.3)~~ **[STRUCK, 2026-10-04]**
+      — doesn't fit a Kotlin-DSL-only world: `requirements.md` §4 locks
+      scenes to the Kotlin DSL (the YAML front-end itself was removed,
+      see Phase 7's and the YAML-second-pass section's own `[SUPERSEDED]`
+      notes above), so there's no longer a YAML scene format for a
+      Kotlin-authored scene to export *into*. Struck at the user's
+      request rather than left as an open item implying it's still
+      planned.
