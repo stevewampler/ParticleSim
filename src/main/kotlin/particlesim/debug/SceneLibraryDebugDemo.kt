@@ -40,6 +40,7 @@ fun main(args: Array<String>) {
         "poleRope" to { PoleRopeScene() },
         "flagOnRope" to { FlagOnRopeScene() },
         "orbital" to { OrbitalScene() },
+        "bridge" to { BridgeScene() },
     )
     val requestedScene = args.getOrNull(0)
     if (requestedScene != null && requestedScene !in factories) {

@@ -5338,6 +5338,61 @@ load. Full `./gradlew test -q` suite green throughout.
       console errors. Full `./gradlew test -q` suite green (no Kotlin
       changed — viewer-only).
 
+## Bridge-under-load demo (§7/§12.4/§9.6, new requirement) — not yet phased
+- [x] **New shape + library scene, `bridge`** — a deck spanning a gap,
+      pinned only at its two short ends (the "abutments") rather than
+      every edge like `buildTrampoline`'s rim, so it's a simply-
+      supported beam that sags under its own weight and visibly
+      deepens under a load crossing it, not a taut drum skin. Reuses
+      `buildTrampoline`'s mechanism almost entirely - a `Surface` (§7)
+      with structural/shear/bend `MeshSprings`, `FixedPosition`
+      anchors, `SurfaceCollisionSystem` (§12.4) for the load - the real
+      differences are which rows get pinned (the two ends of `rows`,
+      mapped to the span direction, not the whole border) and the
+      load's own tuning: low restitution (0.15) plus heavier
+      compression/extension damping so it settles onto the deck rather
+      than bouncing like the trampoline's ball, started with horizontal
+      velocity and a `Drag` force standing in for rolling friction (no
+      tangential-friction model exists in this engine) so it travels
+      across the span and decelerates, rather than dropping straight
+      down at one point. `particlesim.examples.buildBridge` +
+      `particlesim.debug.BridgeScene`, reachable via the picker or
+      `./gradlew runSceneLibraryDemo --args="bridge"`.
+      `BRIDGE_DT` (`1e-3`) and structural stiffness (1500, between the
+      flag's 200 and the trampoline's 2000) follow §13.1's budget the
+      same way `FLAG_DT`/`TRAMPOLINE_DT` do - see `BRIDGE_DT`'s own doc
+      comment for the exact margin. `BridgeStabilityTest`
+      (`src/test/kotlin/particlesim/examples/`) is the empirical check,
+      covering both a full 8s load crossing (not just the deck at rest
+      - that's when the mesh sees its largest local deformation) and
+      that the two anchored end rows never move at all.
+      Added a scripted camera (`CameraFunction`, §10.1) that tracks the
+      load's position from a fixed elevated offset, rather than reusing
+      the default static `(6,4,8)`-looking-at-origin pose every other
+      non-`flag` scene gets - caught live, not guessed at: the default
+      camera framed this particular deck (long and narrow, unlike
+      every other demo's roughly-square geometry) end-on at close
+      range, with most of the span off-screen past either edge.
+      Re-launches the load across the deck once per 12s cycle (same
+      re-drop-cycle pattern `TrampolineScene`/`BallBounceScene` already
+      use) since the realistic outcome - the load settling into the
+      deck's own sag partway across - would otherwise just sit there
+      with nothing left to watch.
+      **Verified live in Chrome** (`run-particlesim` skill, including
+      the new tracking camera fix): the deck reads clearly as a long,
+      narrow span between two marked abutments with a visible sag
+      deepening as the load arrives and settles into it; the tracking
+      camera keeps both the span's curve and the load in frame
+      throughout a crossing; watched three full 12s cycles pass (fast-
+      forwarded via the viewer's own 4x control to get past them
+      reliably, since this environment's background-tab frame
+      throttling makes a plain real-time `wait` an unreliable way to
+      cross a cycle boundary) with the deck shape and settle point
+      consistent cycle to cycle and no console errors or structural
+      degradation (`structural-springs`/`shear-springs`/`bend-springs`
+      all still present throughout - nothing silently broke off). Full
+      `./gradlew test -q` suite green.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created
