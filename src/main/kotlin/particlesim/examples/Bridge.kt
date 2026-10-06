@@ -31,6 +31,11 @@ import particlesim.surface.Surface
  * `row` maps to the span direction (the gap being crossed, laid out along +Z like
  * [buildTrampoline]'s own `row -> depth` convention), `col` to the deck's width (+X) - so
  * `rows` should be the larger of the two for a bridge-shaped (long, narrow) deck, not square.
+ *
+ * [pinEnds] (default `true`) is what makes this scenario reusable as *just* the deck+load
+ * piece of a larger composition - [buildSuspensionBridge] builds the exact same deck with
+ * `pinEnds = false` and holds it up with suspender springs to its own main cables instead,
+ * rather than duplicating the grid/structural-springs/load/collision construction above.
  */
 data class BridgeScenario(
     val store: ParticleStore,
@@ -75,6 +80,7 @@ fun buildBridge(
     compressionDamping: Double = 1.5,
     extensionDamping: Double = 0.3,
     loadDragCoefficient: Double = 0.6,
+    pinEnds: Boolean = true,
     store: ParticleStore = ParticleStore(),
     groups: Groups = Groups(),
     placement: ShapePlacement = ShapePlacement(),
@@ -121,7 +127,15 @@ fun buildBridge(
     val surface = Surface(triangles, name = placement.name("deck-surface"))
     val gravity = UniformGravity(deckGroup, Vector3(0.0, -9.8, 0.0), name = placement.name("gravity"))
 
-    val abutmentAnchor = FixedPosition.atCurrentPositions(abutmentGroup, store, groups, name = placement.name("abutment-anchor"))
+    // [pinEnds] = false (buildSuspensionBridge's case): the abutment group still exists - a
+    // scene can still use it to mark where the ends are - it just isn't pinned, since
+    // whatever's holding the deck up that way is the caller's responsibility, not this
+    // function's.
+    val abutmentAnchor = if (pinEnds) {
+        FixedPosition.atCurrentPositions(abutmentGroup, store, groups, name = placement.name("abutment-anchor"))
+    } else {
+        null
+    }
 
     // Starts a little above the near (row 0) end and a little above deck height, with a
     // horizontal push toward the far end - low enough restitution/high enough compression
@@ -147,7 +161,7 @@ fun buildBridge(
         store = store,
         groups = groups,
         forces = listOf(gravity, loadGravity, loadDrag, structural, shear, bend),
-        constraints = listOf(abutmentAnchor),
+        constraints = listOfNotNull(abutmentAnchor),
         collisions = SurfaceCollisionSystem(listOf(collisionRule)),
         grid = grid,
         surface = surface,

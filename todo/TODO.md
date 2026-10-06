@@ -5393,6 +5393,90 @@ load. Full `./gradlew test -q` suite green throughout.
       all still present throughout - nothing silently broke off). Full
       `./gradlew test -q` suite green.
 
+## Suspension-bridge-under-load demo (§7/§12.4/§9.6, new requirement) — not yet phased
+- [x] **New shape + library scene, `suspensionBridge`** — composes four
+      existing shape-library pieces by placement (§4.5) rather than
+      inventing new deck/cable/tower machinery: `buildBridge`'s own
+      deck (now with a `pinEnds = false` parameter added so it can be
+      reused unpinned), two `buildRope` main cables (one per side,
+      draped tower-to-tower, `segments = rows - 1` so each cable
+      particle lines up index-for-index above its deck row), and four
+      `buildFlagpole` legs (two per tower location - a real portal-
+      frame tower approximated as two independent legs, no cross-
+      brace). The only genuinely new piece is the suspender
+      `Spring`/`Damper` pairs connecting each cable point to its deck
+      row - tension-only (`compressionStiffness = 0.0`, same "can't
+      push" reasoning `buildRope` already applies to a rope), and
+      deliberately *not* engineering-accurate lengths (every suspender
+      gets the same short rest length, well short of the cables' flat
+      starting height) since computing the lengths that would make the
+      deck come out level requires already knowing the cable's loaded
+      equilibrium shape - circular for a scenario meant to discover
+      that shape by simulating it. `particlesim.examples.
+      SuspensionBridge.kt` + `particlesim.debug.SuspensionBridgeScene`,
+      reachable via the picker or `./gradlew runSceneLibraryDemo
+      --args="suspensionBridge"`. Shares `BRIDGE_DT` with the plain
+      `bridge` scene - the deck underneath is the exact same proven
+      scenario, just unpinned.
+      **Two real instability bugs found via empirical testing, not
+      guessed at - both diagnosed from the load particle's own live
+      readout, not just "it looks wrong":**
+      1. An initial suspender-stiffness/rest-length combination
+         (`400`/`1.2`, a short rest length against a `3.0`-unit flat
+         starting gap) produced a catastrophic first-step force spike -
+         `SuspensionBridgeStabilityTest` caught a 231 m/s max speed
+         immediately. Fixed by picking a gentler combination
+         (`stiffness = 150`, `restLength = 2.4`, `damping = 4.0`,
+         closer to the actual starting gap so the initial transient is
+         mild) rather than reducing `dt` - the budget §13.1 would
+         derive from the suspenders' own `k`/`m` already supported
+         `dt = 1e-3` comfortably; the problem was the transient's
+         *size*, not the integrator's own stability margin.
+      2. Even once stable, the load fell straight through the deck in
+         the browser - its own live group panel showed `centroid` with
+         a y around -45 and dropping, confirmed as genuine free-fall,
+         not a rendering glitch. Root cause: launching the load at
+         `t=0` meant it reached the deck while the suspension
+         structure was still finding its own loaded equilibrium from a
+         flat start, fast enough locally that it could tunnel through
+         a transiently-fast-moving deck triangle between one step and
+         the next (this engine has no continuous collision detection,
+         §12.4's still-open TODO item). Fixed in `SuspensionBridgeScene`
+         by holding the load pinned at its start position (re-applied
+         every step, same mechanism the cycle-reset check already uses)
+         for a `settleSeconds` grace period before ever launching it -
+         a more sensible demo narrative anyway ("let the bridge settle
+         before anything drives onto it"), not just a technical patch.
+      **A third, subtler bug surfaced only after watching several load
+      cycles, not just the first one**: even post-settle, the load
+      gradually drifted sideways off the narrow (5-wide) deck's edge
+      and fell through open space past it - a real emergent effect of
+      an unguarded, flexible suspended deck (the same side-to-side
+      "flutter" tendency real suspension bridges are famously prone to,
+      Tacoma Narrows being the textbook case - not something modeled
+      deliberately, just what falls out of a narrow deck held up
+      asymmetrically by two independently-settling cables). Fixed with
+      three complementary changes rather than one: widened the deck
+      (`cols` 5 → 7, more lateral margin), raised `suspenderDamping`
+      (4.0 → 6.0, more resistance to the sway itself), and raised the
+      load's own `loadDragCoefficient` (0.6 → 1.2, shorter crossing
+      time means less opportunity to accumulate drift). Re-verified
+      across several cycles (not just one) spanning over a minute of
+      sim time - the load's centroid stayed within a few tenths of a
+      unit of the deck's own centerline throughout, never near the new
+      wider edge.
+      **Verified live in Chrome** (`run-particlesim` skill): a wide
+      establishing shot (manual zoom/orbit, overriding the scene's own
+      load-tracking scripted camera) shows the classic suspension-
+      bridge silhouette - two towers, two draped catenary cables,
+      regularly-spaced suspenders, a gently sagging deck with the load
+      resting at its lowest point. No console errors. Full
+      `./gradlew test -q` suite green throughout, including
+      `SuspensionBridgeStabilityTest`'s three checks (no blow-up
+      through a full settle-and-crossing, every tower leg staying
+      exactly fixed, and the cables actually sagging below their own
+      tower-top height once settled).
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created
