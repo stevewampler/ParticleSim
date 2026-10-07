@@ -4,8 +4,10 @@ import particlesim.collision.SurfaceCollisionSystem
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
+import particlesim.expr.ExpressionParser
 import particlesim.physics.Constraint
 import particlesim.physics.Force
+import particlesim.physics.Wind
 import particlesim.surface.Surface
 
 /**
@@ -30,6 +32,15 @@ import particlesim.surface.Surface
  * Z as `deck.grid[r]` - the same index-alignment trick [buildSuspensionBridge]'s own main
  * cables use, which is what makes a hanger just `archLowerChord[r] to deck.grid[r][edge]`
  * rather than a nearest-point search.
+ *
+ * Also carries a crosswind [Wind] force on the deck's own triangles (§7.2) - blowing across the
+ * span (+X, the deck's width direction) rather than along it, the way an actual crosswind would
+ * load a real bridge deck. Barely moves this particular deck (the whole point of "stiff, steel"
+ * - §13.5's energy/momentum framing still holds, a well-engineered structure just doesn't show
+ * it), but it's a real, named [particlesim.physics.UniformFieldForce] all the same - reachable
+ * and inspectable from the outliner, and its "show arrows" toggle (§10.2/§10.3) is real for free
+ * via the engine's type-driven default (`ArrowSampling.defaultGroupsFor`), the same as every
+ * other named field force in this codebase, with no scene-specific wiring needed for it.
  */
 data class ArchBridgeScenario(
     val store: ParticleStore,
@@ -128,10 +139,23 @@ fun buildArchBridge(
         archSides.mapIndexed { i, (_, lower) -> lower[r] to deck.grid[r][if (i == 0) 0 else cols - 1] }
     }
 
+    // A real air density (1.2 kg/m³, same literal value buildFlag's own wind already uses, not
+    // a re-guessed number), gusting across the span rather than along it - a crosswind, the
+    // direction a real bridge deck actually has to resist. Built from a parsed expression
+    // string, not a native Kotlin lambda, so §10.4's live-editing panel has a real formula to
+    // show from the moment the scene loads - the same reasoning buildFlag's own wind already
+    // follows (see that file's own doc comment).
+    val wind = Wind(
+        deck.surface.triangles,
+        ExpressionParser.parseVector("[4.0 + 1.5*sin(t*0.5), 0.0, 0.0]"),
+        density = 1.2,
+        name = placement.name("wind"),
+    )
+
     return ArchBridgeScenario(
         store = store,
         groups = groups,
-        forces = deck.forces,
+        forces = deck.forces + wind,
         constraints = deck.constraints + pylonLegs.flatMap { it.constraints } + archConstraints,
         collisions = deck.collisions,
         deckGrid = deck.grid,

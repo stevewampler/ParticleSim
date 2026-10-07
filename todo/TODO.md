@@ -5606,6 +5606,25 @@ load. Full `./gradlew test -q` suite green throughout.
       back pixel-identical every time, only the load's own position
       differing cycle to cycle as expected. No console errors. Full
       `./gradlew test -q` suite green.
+      **Follow-up, 2026-10-07: added a crosswind.** A named `Wind`
+      (§7.2) on the deck's own triangles, blowing across the span (+X,
+      the deck's width direction - a real crosswind, not blowing along
+      the length the way `buildFlag`'s own wind does) - same real air
+      density (1.2 kg/m³) and "parsed expression, not a native lambda"
+      construction `buildFlag`'s wind already uses, so §10.4's live-
+      editing panel has a real formula to show. Barely moves this
+      particular deck (the whole point of "stiff, steel"), but it's a
+      real, named `UniformFieldForce` all the same - reachable from the
+      outliner, and its "show arrows" toggle is real for free via the
+      engine's type-driven default (no scene-specific `ArrowRenderer`
+      needed, per the earlier §10.2 follow-up work above). **Verified
+      live in Chrome**: opened the `wind` force's panel, confirmed the
+      live `velocity`/`density` readout and expression-source `x`/`y`/`z`
+      inputs populate correctly, toggled "show arrows" on and watched
+      arrows render around the structure. `ArchBridgeStabilityTest`
+      still passes unchanged (wind is far too gentle to threaten a
+      steel deck's own stability margin). No console errors. Full
+      `./gradlew test -q` suite green.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
