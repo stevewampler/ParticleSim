@@ -32,10 +32,19 @@ import particlesim.surface.Surface
  * [buildTrampoline]'s own `row -> depth` convention), `col` to the deck's width (+X) - so
  * `rows` should be the larger of the two for a bridge-shaped (long, narrow) deck, not square.
  *
- * [pinEnds] (default `true`) is what makes this scenario reusable as *just* the deck+load
- * piece of a larger composition - [buildSuspensionBridge] builds the exact same deck with
- * `pinEnds = false` and holds it up with suspender springs to its own main cables instead,
- * rather than duplicating the grid/structural-springs/load/collision construction above.
+ * [pinEnds] (default `true`) and [extraPinnedRows] (default empty) are what make this scenario
+ * reusable as *just* the deck+load piece of a larger composition instead of duplicating the
+ * grid/structural-springs/load/collision construction: [buildSuspensionBridge] builds the same
+ * deck with `pinEnds = false` and holds it up with suspender springs to its own main cables
+ * instead, and [buildTrainTrestle] pins a regular sequence of intermediate rows via
+ * [extraPinnedRows] - one per trestle bent - on top of the usual two end rows, rather than
+ * relying on springs (a bent's own legs are already rigid, so there's nothing compliant for a
+ * spring-based connection to usefully model there the way a suspender's slack cable has).
+ *
+ * `massPerParticle`/the three mesh-spring stiffness-damping pairs are parameters, not baked
+ * into this function, for the same reason: [buildTrainTrestle]'s whole point is a *much* stiffer
+ * "steel" deck than this function's own flag-adjacent defaults, and threading new parameters
+ * through is simpler than a second, nearly-identical deck builder.
  */
 data class BridgeScenario(
     val store: ParticleStore,
@@ -73,6 +82,13 @@ fun buildBridge(
     cols: Int = 5,
     spacing: Double = 0.3,
     deckHeight: Double = 0.0,
+    massPerParticle: Double = 0.05,
+    structuralStiffness: Double = 1500.0,
+    structuralDamping: Double = 3.0,
+    shearStiffness: Double = 750.0,
+    shearDamping: Double = 1.5,
+    bendStiffness: Double = 150.0,
+    bendDamping: Double = 0.4,
     loadMass: Double = 1.5,
     loadRadius: Double = 0.14,
     loadSpeed: Double = 1.8,
@@ -81,11 +97,11 @@ fun buildBridge(
     extensionDamping: Double = 0.3,
     loadDragCoefficient: Double = 0.6,
     pinEnds: Boolean = true,
+    extraPinnedRows: Set<Int> = emptySet(),
     store: ParticleStore = ParticleStore(),
     groups: Groups = Groups(),
     placement: ShapePlacement = ShapePlacement(),
 ): BridgeScenario {
-    val massPerParticle = 0.05
     val deckGroup = placement.name("deck")
     val abutmentGroup = placement.name("abutments")
     val loadGroup = placement.name("load")
@@ -100,26 +116,31 @@ fun buildBridge(
             id
         }
     }
-    // Only the two end rows - the deck's two long edges (c == 0 / c == cols - 1) stay free,
-    // unlike buildTrampoline's whole-rim pin, so the span between the abutments can sag.
+    // The two end rows (if pinEnds) plus any extra intermediate rows a caller names - the
+    // deck's two long edges (c == 0 / c == cols - 1) stay free either way, unlike
+    // buildTrampoline's whole-rim pin, so whatever span exists *between* pinned rows can still
+    // sag.
     for (c in 0 until cols) {
-        groups.add(abutmentGroup, grid[0][c])
-        groups.add(abutmentGroup, grid[rows - 1][c])
+        if (pinEnds) {
+            groups.add(abutmentGroup, grid[0][c])
+            groups.add(abutmentGroup, grid[rows - 1][c])
+        }
+        for (r in extraPinnedRows) groups.add(abutmentGroup, grid[r][c])
     }
 
     val structural = MeshSprings(
         Grid.structuralEdges(grid), store,
-        stiffness = 1500.0, damping = 3.0,
+        stiffness = structuralStiffness, damping = structuralDamping,
         name = placement.name("structural-springs"),
     )
     val shear = MeshSprings(
         Grid.shearEdges(grid), store,
-        stiffness = 750.0, damping = 1.5,
+        stiffness = shearStiffness, damping = shearDamping,
         name = placement.name("shear-springs"),
     )
     val bend = MeshSprings(
         Grid.bendEdges(grid), store,
-        stiffness = 150.0, damping = 0.4,
+        stiffness = bendStiffness, damping = bendDamping,
         name = placement.name("bend-springs"),
     )
 
@@ -127,11 +148,11 @@ fun buildBridge(
     val surface = Surface(triangles, name = placement.name("deck-surface"))
     val gravity = UniformGravity(deckGroup, Vector3(0.0, -9.8, 0.0), name = placement.name("gravity"))
 
-    // [pinEnds] = false (buildSuspensionBridge's case): the abutment group still exists - a
-    // scene can still use it to mark where the ends are - it just isn't pinned, since
-    // whatever's holding the deck up that way is the caller's responsibility, not this
-    // function's.
-    val abutmentAnchor = if (pinEnds) {
+    // [pinEnds] = false and an empty [extraPinnedRows] (buildSuspensionBridge's case): the
+    // abutment group still exists - a scene can still use it to mark where the ends are - it
+    // just isn't pinned, since whatever's holding the deck up that way is the caller's
+    // responsibility, not this function's.
+    val abutmentAnchor = if (pinEnds || extraPinnedRows.isNotEmpty()) {
         FixedPosition.atCurrentPositions(abutmentGroup, store, groups, name = placement.name("abutment-anchor"))
     } else {
         null

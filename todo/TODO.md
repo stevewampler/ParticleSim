@@ -5477,6 +5477,71 @@ load. Full `./gradlew test -q` suite green throughout.
       exactly fixed, and the cables actually sagging below their own
       tower-top height once settled).
 
+## Train-trestle-under-load demo (§7/§12.4/§9.6, new requirement) — not yet phased
+- [x] **New shape + library scene, `trainTrestle`** — a third bridge,
+      deliberately the structural opposite of the first two: a *stiff*
+      steel deck carried by a row of braced bents standing on the
+      ground (supported from below at regular intervals), rather than
+      spanning freely between two end abutments (`bridge`) or hanging
+      from overhead cables (`suspensionBridge`). Generalized
+      `buildBridge` to make this a third reuse instead of a third
+      near-duplicate deck builder: `massPerParticle` and the three
+      mesh-spring stiffness/damping pairs became parameters (previously
+      hardcoded), and a new `extraPinnedRows: Set<Int>` pins an
+      arbitrary set of intermediate rows - one per bent - on top of the
+      usual two end rows. A bent's own two legs are built from
+      `buildFlagpole` (already perfectly rigid - every particle
+      `FixedPosition`-pinned, never touched by a force), so unlike
+      `suspensionBridge`'s cable-to-deck suspenders, a bent needs *no*
+      connecting spring to the deck above it - the deck row directly
+      over each bent is just pinned at its own position too, same rigid
+      effect with none of the spring-tuning risk that nearly sent the
+      suspension bridge's suspenders into a first-step blowup. The
+      "superstructure for strength" is an X-brace lattice between each
+      bent's two legs (`left[i]-right[i+1]`/`right[i]-left[i+1]`
+      zigzag, the classic cross-bracing pattern) - purely a rendering
+      choice (`connections`, no physics force), since both legs are
+      independently rigid already and have no physical need of a brace
+      to stay put. The load is a short *coupled train* - three heavy
+      particles in a line held together by stiff, symmetric
+      `Spring`/`Damper` pairs (resisting push *and* pull, unlike a
+      rope/suspender's tension-only segments) - rather than a single
+      ball, since "train trestle" calls for something that reads as a
+      train, not a ball bouncing across.
+      `particlesim.examples.TrainTrestle.kt` +
+      `particlesim.debug.TrainTrestleScene`, reachable via the picker
+      or `./gradlew runSceneLibraryDemo --args="trainTrestle"`. New
+      `TRAIN_TRESTLE_DT = 5e-4` (reuses `TRAMPOLINE_DT`'s own proven
+      value for a similarly stiff mesh, not an independently re-derived
+      number) for a `massPerParticle`/`structuralStiffness` combination
+      (0.08/6000, "steel plate" vs. `bridge`'s own 0.05/1500) 4x
+      stiffer than the plain bridge deck.
+      **Built on the lesson from `suspensionBridge`'s own spring-based
+      suspenders** (documented above): deliberately chose rigid
+      `FixedPosition` pins over a second spring-coupling system for the
+      bent-to-deck connection, specifically to sidestep that same class
+      of initial-stretch instability risk. It worked - both
+      `TrainTrestleStabilityTest` and the live settle-in-browser check
+      passed cleanly on the first real attempt, no blowup-and-retune
+      cycle needed this time, unlike either previous bridge.
+      `TrainTrestleStabilityTest` covers a full crossing without
+      blow-up, every bent leg staying exactly fixed, and - the
+      trestle-specific check neither other stability test needed - the
+      deck's own mid-span height barely moving under the train's
+      weight (`< 0.15` units), confirming "stiff" is actually true and
+      not just asserted in a doc comment.
+      **Verified live in Chrome** (`run-particlesim` skill): a wide
+      establishing shot shows the classic trestle silhouette - seven
+      evenly-spaced X-braced bents descending to the ground under a
+      flat, barely-deflecting deck, three train cars crossing together.
+      Watched over 9 full re-launch cycles (~98s of sim time, fast-
+      forwarded via the viewer's own 4x control): the structure came
+      back pixel-identical to its early-run screenshot every time - no
+      drift, no degradation, nothing silently broken off
+      (`coupling-0`/`coupling-1` and all 14 bent-leg anchors still
+      present in the outliner throughout). No console errors. Full
+      `./gradlew test -q` suite green.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created
