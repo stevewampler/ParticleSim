@@ -53,12 +53,13 @@ class ArchBridgeScene : DemoScene {
         lights = lights,
     )
 
-    // scenario.archConnections already carries every real spring connection (each side's own
-    // structural/shear/bend lattice, plus the left-right cross-bracing) - rendering those
-    // directly rather than re-deriving a lattice pattern here keeps this view honest about what
-    // the physics actually connects, not just a visual approximation of it. Pylon legs and
-    // hangers are still plain line segments (neither is a spring - see buildArchBridge's own
-    // doc comment on why).
+    // scenario.archConnections/hangerConnections already carry every real spring connection
+    // (each side's own structural/shear/bend lattice, the left-right cross-bracing, and now the
+    // hangers actually holding the deck up - see buildArchBridge's own doc comment) - rendering
+    // those directly rather than re-deriving a lattice pattern here keeps this view honest about
+    // what the physics actually connects, not just a visual approximation of it. Pylon legs are
+    // the one remaining plain line segment (still not a spring - purely static, see
+    // buildFlagpole).
     private val pylonConnections = scenario.pylonLegs.flatMap { it.zipWithNext() }
     private val structureConnections = scenario.archConnections + pylonConnections + scenario.hangerConnections
 

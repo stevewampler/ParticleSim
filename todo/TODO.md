@@ -5681,6 +5681,44 @@ load. Full `./gradlew test -q` suite green throughout.
       `./gradlew test -q` suite green. Real stability tuning (does it
       hold up under the load crossing it for real, does it look right
       over many cycles, etc.) deliberately **not** done this pass.
+      **Follow-up, 2026-10-07: the deck now actually hangs from the
+      arch** - an explicit user request, the "full redesign" step the
+      note directly above said wasn't done yet. `buildBridge`'s
+      `extraPinnedRows` for the hanger rows is gone; those deck rows
+      are now held up *only* by a real tension-only (`compressionStiffness
+      = 0`) `Spring`/`Damper` hanger to the arch's lower chord (the
+      deck's two end rows stay pinned, resting on the abutments, same
+      as `buildBridge`'s own default). Each hanger's `restLength` is
+      measured from the two ends' own as-built positions rather than
+      guessed at - both the arch and the deck already sit in their own
+      designed target shape before anything moves, so the true at-rest
+      gap is just whatever distance already exists between them,
+      meaning every hanger starts at zero stretch with no first-step
+      force spike, sidestepping the specific failure mode that bit
+      `suspensionBridge`'s own hand-guessed suspender length.
+      `ArchBridgeStabilityTest`'s "deck barely deflects" check (true of
+      every earlier bridge in this file, and still true of the plain
+      `trestle`'s own deck) is no longer the right invariant for a deck
+      whose whole point is now depending on something compliant -
+      loosened to a 1.0-unit "doesn't outright collapse" sanity bound
+      and renamed accordingly, rather than quietly deleted.
+      **Verified live in Chrome, and it's not good**: unlike every
+      previous "first attempt, no retuning needed" result in this
+      file, the arch+deck system visibly sags into a significantly
+      lopsided, twisted shape within the first few seconds and stays
+      that way (not actively diverging further by t≈36s, but not
+      remotely holding its designed parabolic silhouette either) - a
+      real, substantial stability problem, not just a graceful minor
+      sag. Nothing crashes or breaks (no console errors, no missing
+      forces - every hanger/cross-brace/arch-spring still present in
+      the outliner the whole time, max speed stays bounded per the
+      stability test), so this reads as the arch's own spring network
+      genuinely being too soft relative to the hung deck's weight to
+      hold its shape, not a numerical blow-up. This is exactly the
+      open item both this entry and the one above already named -
+      recorded here with the actual evidence rather than left as a
+      guess, for whenever stability tuning on this scene actually
+      happens.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

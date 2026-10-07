@@ -72,7 +72,12 @@ class ArchBridgeStabilityTest {
     }
 
     @Test
-    fun `the deck barely deflects under the load, same as the train trestle`() {
+    fun `the deck sags under load but doesn't collapse, now that it actually hangs from the arch`() {
+        // No longer "barely deflects" (that was the pre-hanger, still-independently-pinned
+        // deck's own property, and the trestle's deck still has it) - the deck's whole point
+        // now is that it depends on the arch/hanger system, which has real give. This is just a
+        // sanity bound against outright collapse, not a real tuned tolerance - see
+        // buildArchBridge's own doc comment on why real stability tuning is deferred here.
         val scenario = buildArchBridge()
         val integrator = Integrator()
         val midRow = scenario.deckGrid[scenario.deckGrid.size / 2]
@@ -88,8 +93,8 @@ class ArchBridgeStabilityTest {
 
         val endY = midRow.map { scenario.store.position(it).y }.average()
         assertTrue(
-            abs(endY - startY) < 0.15,
-            "deck mid-span deflected ${abs(endY - startY)} - expected a stiff steel deck to barely move",
+            abs(endY - startY) < 1.0,
+            "deck mid-span deflected ${abs(endY - startY)} - that's more than a sanity bound against outright collapse should allow",
         )
     }
 }
