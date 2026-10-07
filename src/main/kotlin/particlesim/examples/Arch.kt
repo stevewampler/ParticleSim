@@ -8,20 +8,30 @@ import particlesim.physics.Constraint
 import particlesim.physics.FixedPosition
 
 /**
- * A static parabolic arch — [segments] particles tracing a curve from one "springing point"
+ * A parabolic arch — [segments] particles tracing a curve from one "springing point"
  * (ground/pylon level) up to a peak [rise] above it and back down to a second springing point
- * [span] away, pinned in place with [FixedPosition] and never otherwise touched by a force,
- * the same "purely a visual/structural anchor" role [buildFlagpole] plays for a straight pole.
+ * [span] away. Every particle is placed directly on the target parabola at construction
+ * (unlike [buildRope], which starts on a straight line between two anchors and only reaches its
+ * catenary curve by actually sagging under gravity through the integrator) - a real arch is a
+ * *compression* structure that holds its shape through geometry, the structural opposite of a
+ * cable's tension, so starting it pre-shaped rather than letting it sag into place is the more
+ * physically honest choice either way this function gets used.
  *
- * **Rigid by construction, not a settled shape** - unlike [buildRope], which starts on a
- * straight line between two anchors and only reaches its catenary curve by actually sagging
- * under gravity through the integrator, every arch particle is placed directly on the target
- * parabola and pinned there immediately. This is deliberate, not a missed opportunity to reuse
- * [buildRope]: a real arch is a *compression* structure that holds its shape through geometry
- * and rigidity, the structural opposite of a cable's tension - and reusing a tension-only
- * sagging rope for it would also reintroduce exactly the initial-stretch instability risk
- * [buildTrainTrestle]'s own doc comment describes sidestepping by preferring rigid pins over a
- * second spring-coupling system.
+ * [pinEnds] controls how much of that shape is actually held there:
+ * - `true` (the default): every particle is [FixedPosition]-pinned, never otherwise touched by
+ *   a force - purely a visual/structural anchor, the same role [buildFlagpole] plays for a
+ *   straight pole. No [massPerParticle]/stiffness of its own matters here since nothing ever
+ *   moves.
+ * - `false`: only the two springing points (`archIds.first()`/`archIds.last()`) are pinned: the
+ *   rest are free, dynamic particles with [massPerParticle] mass and no spring connecting them
+ *   to each other yet - this function only places and (partially) anchors them, same "purely
+ *   geometric" scope either way. A caller wanting an actually self-supporting dynamic arch (not
+ *   just a cloud of free particles sharing a start shape) needs to add its own structural
+ *   springs/gravity along this chord - [buildArchBridge] does exactly that, connecting each
+ *   side's upper/lower chord pair together with [particlesim.surface.Grid]'s own edge-topology
+ *   helpers (a 2-row grid, upper chord as row 0 and lower as row 1, falls directly out of
+ *   `Grid.structuralEdges`/`shearEdges` without this function needing to know anything about a
+ *   second chord at all).
  *
  * Curves in the local Y-Z plane (X stays 0 relative to [ShapePlacement.offset]) - a scene
  * wanting two parallel arches (either side of a deck, say) builds two instances with different
@@ -43,6 +53,8 @@ fun buildArch(
     rise: Double,
     segments: Int = 20,
     baseHeight: Double = 0.0,
+    pinEnds: Boolean = true,
+    massPerParticle: Double = 1.0,
     // Null by default (not collidable, §12.1), matching ParticleStore.create's own convention -
     // same as buildFlagpole/buildRope.
     particleRadius: Double? = null,
@@ -57,12 +69,20 @@ fun buildArch(
     val archIds = (0..segments).map { i ->
         val u = -1.0 + 2.0 * i / segments // -1 at the near springing point, 0 at the peak, +1 at the far one
         val position = Vector3(0.0, baseHeight + rise * (1.0 - u * u), u * span / 2.0) + placement.offset
-        val id = store.create(position = position, radius = radiusExpr)
+        val id = store.create(position = position, mass = ScalarExpr.of(massPerParticle), radius = radiusExpr)
         groups.add(archGroup, id)
         id
     }
 
-    val constraints = listOf(FixedPosition.atCurrentPositions(archGroup, store, groups, name = placement.name("arch-anchor")))
+    val pinnedGroup = if (pinEnds) {
+        archGroup
+    } else {
+        val endsGroup = placement.name("arch-ends")
+        groups.add(endsGroup, archIds.first())
+        groups.add(endsGroup, archIds.last())
+        endsGroup
+    }
+    val constraints = listOf(FixedPosition.atCurrentPositions(pinnedGroup, store, groups, name = placement.name("arch-anchor")))
 
     return ArchScenario(
         store = store,

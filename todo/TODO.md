@@ -5625,6 +5625,62 @@ load. Full `./gradlew test -q` suite green throughout.
       still passes unchanged (wind is far too gentle to threaten a
       steel deck's own stability margin). No console errors. Full
       `./gradlew test -q` suite green.
+      **Follow-up, 2026-10-07: the arches are dynamic, not static
+      anchors, and the two sides are cross-braced together** - an
+      explicit user request, and an explicit "we'll worry about
+      stability later" on tuning it. Each side's two `buildArch` chords
+      are now built with a new `pinEnds = false` option (only the two
+      springing points stay `FixedPosition`-pinned; the rest are real,
+      massed particles) and wired into a real spring network reusing
+      `particlesim.surface.Grid`'s own edge-topology helpers against a
+      *2-row* grid (`listOf(upperChordIds, lowerChordIds)`) - the exact
+      same `Grid.structuralEdges`/`shearEdges`/`bendEdges` the deck's
+      own many-row mesh already uses, just applied to a 2-row one, so
+      no new edge-generation code was needed: structural edges fall out
+      as each chord's own along-the-curve links plus the vertical
+      struts between the two chords, shear edges as the diagonal
+      lattice bracing already rendered before (now a *real* spring
+      network, not just a line drawing), bend edges as a skip-one
+      stiffener along each chord. New lateral cross-bracing (plain
+      `Spring`/`Damper` struts, `leftChord[r] to rightChord[r]`, both
+      chords, at the same rows a hanger already sits at) ties the left
+      and right arch trusses to each other - the real "portal bracing"
+      role a twin-arch bridge needs once the two sides can move
+      independently, which they couldn't before.
+      The deck itself is unchanged - still pinned directly at every
+      hanger row via `buildBridge`'s own `extraPinnedRows`, so it
+      doesn't yet depend on the arch (via the hangers, still plain
+      rendered connections, not springs) to hold it up. Making the arch
+      dynamic was step one, not a full "the deck now hangs from a
+      flexible arch" redesign in the same pass.
+      Stiffness/damping/mass values (same "steel" category as the
+      deck's own, roughly half its stiffness) are a reasonable first
+      guess, not independently tuned the way every other number in this
+      file's sibling entries was before landing - per the user's own
+      explicit deferral. `ArchBridgeStabilityTest`'s "every arch
+      particle stays fixed" check was narrowed to "every pylon leg and
+      arch springing point stays fixed" (the only particles still
+      genuinely pinned); its "doesn't blow up" check passed unchanged,
+      on the first attempt, with no retuning needed - true luck this
+      time, not a repeat of the earlier pattern (`suspensionBridge`
+      needed real retuning; `trainTrestle`/this scene's own static-arch
+      precedent didn't need any because nothing was dynamic yet).
+      **Also set the wind back to zero** (`[0,0,0]`, from the crosswind
+      above) while the arch's own dynamics are still being worked out -
+      still a real, named, inspectable force, just with nothing to show
+      right now.
+      **Verified live in Chrome**: the dynamic arch's silhouette at
+      t≈5s and t≈9s of sim time was visually indistinguishable from the
+      old fully-static version - no visible sag, collapse, or
+      oscillation at this zoom/time scale. Confirmed every expected new
+      force/constraint/group in the outliner (`arch-left-structural`/
+      `-shear`/`-bend` and their right-side counterparts, 4 per-chord
+      gravities, 22 cross-brace spring/damper pairs, each chord now
+      split into an `.arch` group and a smaller `.arch-ends` one) and
+      `wind`'s live `value: [0, 0, 0]` readout. No console errors. Full
+      `./gradlew test -q` suite green. Real stability tuning (does it
+      hold up under the load crossing it for real, does it look right
+      over many cycles, etc.) deliberately **not** done this pass.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

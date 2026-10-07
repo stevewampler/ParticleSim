@@ -16,7 +16,7 @@ import particlesim.render.SurfaceRenderer
 
 /**
  * §9.6 scene-library demo for [buildArchBridge] - see that function's own doc comment for the
- * rigid-arch/hanger composition. Shares the settle-before-launch pattern
+ * dynamic-arch/cross-brace composition. Shares the settle-before-launch pattern
  * [SuspensionBridgeScene]/[TrainTrestleScene] use and the single-load re-launch cycle
  * [BridgeScene]/[SuspensionBridgeScene] use (not [TrainTrestleScene]'s multi-car train - one
  * demo already covers a coupled train crossing a trestle; this one's own new ground is the
@@ -25,7 +25,11 @@ import particlesim.render.SurfaceRenderer
 class ArchBridgeScene : DemoScene {
     private val scenario = buildArchBridge()
     private val integrator = Integrator()
-    private val settleSeconds = 1.0 // everything but the deck is rigid by construction - nothing to settle
+    // The deck itself is still rigid by construction - nothing to settle there - but the arch's
+    // own spring network (new, see buildArchBridge's own doc comment on why its tuning is
+    // deferred) genuinely does need a moment to find whatever shape it settles into before
+    // anything starts crossing the deck underneath it.
+    private val settleSeconds = 2.0
     private val cycleSeconds = 10.0
     private var cycleStart: Double? = null
     private val scene = SceneQueryImpl(scenario.store, scenario.groups)
@@ -49,18 +53,14 @@ class ArchBridgeScene : DemoScene {
         lights = lights,
     )
 
-    // Each side's two chords, plus a diagonal zigzag lattice between them (upper[i]-lower[i+1]
-    // and lower[i]-upper[i+1] for every rung) - the same "superstructure" rendering-only
-    // treatment TrainTrestleScene's own bent legs use, just curved. Hangers and pylon legs are
-    // plain line segments too.
-    private val archConnections = scenario.archSides.flatMap { (upper, lower) ->
-        val lattice = (0 until minOf(upper.size, lower.size) - 1).flatMap { i ->
-            listOf(upper[i] to lower[i + 1], lower[i] to upper[i + 1])
-        }
-        upper.zipWithNext() + lower.zipWithNext() + lattice
-    }
+    // scenario.archConnections already carries every real spring connection (each side's own
+    // structural/shear/bend lattice, plus the left-right cross-bracing) - rendering those
+    // directly rather than re-deriving a lattice pattern here keeps this view honest about what
+    // the physics actually connects, not just a visual approximation of it. Pylon legs and
+    // hangers are still plain line segments (neither is a spring - see buildArchBridge's own
+    // doc comment on why).
     private val pylonConnections = scenario.pylonLegs.flatMap { it.zipWithNext() }
-    private val structureConnections = archConnections + pylonConnections + scenario.hangerConnections
+    private val structureConnections = scenario.archConnections + pylonConnections + scenario.hangerConnections
 
     private val nonDeckIds = scenario.pylonLegs.flatten() + scenario.archSides.flatMap { (u, l) -> u + l } + scenario.loadId
     private val allIds = scenario.deckGrid.flatten() + nonDeckIds

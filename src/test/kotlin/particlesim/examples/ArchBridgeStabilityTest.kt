@@ -33,10 +33,15 @@ class ArchBridgeStabilityTest {
     }
 
     @Test
-    fun `every arch, pylon, and deck-support particle stays fixed at its anchored position`() {
+    fun `every pylon leg and arch springing point stays fixed at its anchored position`() {
+        // The arch's own interior particles are dynamic now (see buildArchBridge's own doc
+        // comment) - only the pylon legs and each chord's two springing points (archIds.first/
+        // last) are still genuinely pinned, unlike the earlier fully-static arch this test used
+        // to check in its entirety.
         val scenario = buildArchBridge()
         val integrator = Integrator()
-        val rigidIds = scenario.pylonLegs.flatten() + scenario.archSides.flatMap { (u, l) -> u + l }
+        val springingPoints = scenario.archSides.flatMap { (u, l) -> listOf(u.first(), u.last(), l.first(), l.last()) }
+        val rigidIds = scenario.pylonLegs.flatten() + springingPoints
         val startPositions = rigidIds.associateWith { scenario.store.position(it) }
 
         var t = 0.0
