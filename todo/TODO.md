@@ -5542,6 +5542,71 @@ load. Full `./gradlew test -q` suite green throughout.
       present in the outliner throughout). No console errors. Full
       `./gradlew test -q` suite green.
 
+## Arch-bridge-under-load demo (§7/§12.4/§9.6, new requirement) — not yet phased
+- [x] **New shape + library scene, `archBridge`** — a through-arch
+      bridge (user's own reference: a photo of the Sydney Harbour
+      Bridge), a fourth structural pattern again: `buildBridge`'s
+      stiff "steel" deck (`buildTrainTrestle`'s own tuning, reused a
+      third time rather than re-derived) held up by vertical hangers
+      from two parallel arch trusses overhead, rather than standing on
+      bents from below (`trainTrestle`) or hanging from sagging cables
+      (`suspensionBridge`).
+      **New shape, `buildArch`** (`particlesim.examples.Arch.kt`) - a
+      static parabolic curve, every particle placed directly on the
+      target parabola and `FixedPosition`-pinned immediately, the same
+      "purely a visual/structural anchor" role `buildFlagpole` plays
+      for a straight pole. Deliberately *not* built on `buildRope`
+      (which would reach its curve by actually sagging under gravity):
+      a real arch is a **compression** structure that holds its shape
+      through geometry and rigidity, the structural opposite of a
+      cable's tension, and reusing a tension-only sagging rope for it
+      would reintroduce exactly the initial-stretch instability risk
+      `buildTrainTrestle`'s own doc comment already describes
+      sidestepping by preferring rigid pins over a second spring-
+      coupling system - the same reasoning extended to a new shape
+      instead of just a new scene.
+      Each side's arch is two `buildArch` chords (upper/lower, offset
+      by a small gap) laced with diagonal bracing between them - the
+      "superstructure"/lattice-truss look the reference photo shows,
+      built exactly like `buildTrainTrestle`'s own bent-leg lattice,
+      just curved - standing on short `buildFlagpole` pylon legs at
+      each of the four corners. Each chord is built with
+      `segments = rows - 1` so `archIds[r]` sits at the same Z as
+      `deck.grid[r]` - the same index-alignment trick
+      `buildSuspensionBridge`'s own main cables use - which is what
+      makes a **hanger** just `archLowerChord[r] to deck.grid[r][edge]`,
+      a plain rendered line (both ends already rigid - `buildBridge`'s
+      `extraPinnedRows` pins the deck row under every hanger, same
+      mechanism `trainTrestle` uses for its bent-supported rows), not a
+      spring - sidestepping the suspension bridge's own suspender-
+      tuning risk by construction rather than careful retuning.
+      `particlesim.examples.ArchBridge.kt` +
+      `particlesim.debug.ArchBridgeScene`, reachable via the picker or
+      `./gradlew runSceneLibraryDemo --args="archBridge"`. New
+      `ARCH_BRIDGE_DT = TRAIN_TRESTLE_DT` (no new budget to derive -
+      same deck stiffness category, just held up differently). Single-
+      ball re-launch cycle like `bridge`/`suspensionBridge`, not
+      `trainTrestle`'s coupled train - the train-crossing idea already
+      has its own demo; this one's new ground is the arch.
+      `ArchBridgeStabilityTest` covers a full load crossing without
+      blow-up, every arch/pylon particle staying exactly fixed, the
+      arch peak height matching its configured `pylonHeight + archRise`
+      (a sanity check on `buildArch`'s own parabola math, not just "did
+      it blow up"), and the deck barely deflecting under load - all
+      four passed on the first real attempt, no blowup-and-retune cycle
+      at all this time, continuing the trend `trainTrestle` started by
+      avoiding spring-based support connections entirely.
+      **Verified live in Chrome** (`run-particlesim` skill): a wide
+      establishing shot (manual zoom/orbit) was immediately,
+      strikingly close to the reference photo's own silhouette - two
+      lattice-truss arches with visible upper/lower chord zigzag
+      bracing, hangers descending to a flat deck, the load resting
+      mid-span. Watched over 9 full re-launch cycles (~96s of sim
+      time, fast-forwarded via 4x): the arch/pylon/deck structure came
+      back pixel-identical every time, only the load's own position
+      differing cycle to cycle as expected. No console errors. Full
+      `./gradlew test -q` suite green.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

@@ -43,6 +43,7 @@ fun main(args: Array<String>) {
         "bridge" to { BridgeScene() },
         "suspensionBridge" to { SuspensionBridgeScene() },
         "trainTrestle" to { TrainTrestleScene() },
+        "archBridge" to { ArchBridgeScene() },
     )
     val requestedScene = args.getOrNull(0)
     if (requestedScene != null && requestedScene !in factories) {
