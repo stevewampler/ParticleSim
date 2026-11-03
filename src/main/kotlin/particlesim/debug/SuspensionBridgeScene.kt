@@ -2,7 +2,7 @@ package particlesim.debug
 
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
-import particlesim.examples.BRIDGE_DT
+import particlesim.examples.SUSPENSION_BRIDGE_DT
 import particlesim.examples.buildSuspensionBridge
 import particlesim.physics.Integrator
 import particlesim.render.CameraFunction
@@ -15,35 +15,25 @@ import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
 
 /**
- * §9.6 scene-library demo for [buildSuspensionBridge] - see that function's own doc comment for
- * the tower/cable/suspender composition and the "suspenders aren't engineering-accurate
- * lengths" approximation. Shares [BRIDGE_DT] (the deck underneath is the exact same
- * [particlesim.examples.buildBridge] scenario, just unpinned) and the load re-launch cycle
- * with [BridgeScene].
+ * §9.6 scene-library demo for [buildSuspensionBridge] - an old rope bridge (plank walkway on
+ * sagging foot ropes, handrails, vertical ropes, wooden posts), after the "old ropebridge low
+ * poly" Sketchfab model; see that function's doc comment for the credit.
+ *
+ * The load is held at its start for [settleSeconds] while the ropes take up their own small
+ * stretch under gravity (the bridge is built already in its hanging shape, so this is short),
+ * then launched across and re-launched every [cycleSeconds].
  */
 class SuspensionBridgeScene : DemoScene {
     internal val scenario = buildSuspensionBridge()
     private val integrator = Integrator()
-    private val cycleSeconds = 12.0
-    // Held at its start position (re-pinned every step, same mechanism as the cycle-reset
-    // check below, just unconditional until this elapses) rather than launched from t=0, like
-    // BridgeScene's load is - the suspension structure's own initial settling (cables/deck
-    // finding their loaded equilibrium from a flat start) moves fast enough in the first
-    // second or so that the load could tunnel straight through a transiently fast-moving deck
-    // triangle between one step and the next (this engine has no continuous collision
-    // detection, §12.4's still-open TODO item) - caught live, not guessed at: an earlier
-    // version launched immediately and the load fell through the deck and kept falling,
-    // confirmed via the load's own live readout (centroid y around -45 and dropping) rather
-    // than a blind guess from how the camera looked. Letting the bridge settle before anything
-    // crosses it is also just a more sensible demo narrative than driving onto one still
-    // mid-collapse.
-    private val settleSeconds = 3.0
+    private val settleSeconds = 2.0
+    private val cycleSeconds = 10.0
     private var cycleStart: Double? = null
     private val scene = SceneQueryImpl(scenario.store, scenario.groups)
 
-    private val deckMesh = SurfaceRenderer(
-        scenario.deckSurface, wireframe = false,
-        material = Material(color = Color(0.42, 0.28, 0.16), roughness = 0.9),
+    private val walkwayMesh = SurfaceRenderer(
+        scenario.walkwaySurface, wireframe = false,
+        material = Material(color = Color(0.45, 0.33, 0.22), roughness = 0.95),
     )
     private val lights = listOf(
         Light.Ambient(color = Color(0.6, 0.65, 0.75), intensity = 0.4, name = "ambient-fill"),
@@ -55,36 +45,36 @@ class SuspensionBridgeScene : DemoScene {
     private val registry = SceneRegistry.build(
         forces = scenario.forces,
         constraints = scenario.constraints,
-        surfaces = listOf(scenario.deckSurface),
+        surfaces = listOf(scenario.walkwaySurface),
         groups = scenario.groups,
         lights = lights,
     )
 
-    // Towers/cables/suspenders have no mesh of their own (unlike the deck) - rendered as plain
-    // lines, same mechanism PoleRopeScene's pole+rope already use, just with more pieces
-    // flattened together into one connections list.
-    private val structureConnections = scenario.towerLegs.flatMap { it.zipWithNext() } +
-        scenario.cableLeft.zipWithNext() + scenario.cableRight.zipWithNext() + scenario.suspenderConnections
-    private val nonDeckIds = scenario.towerLegs.flatten() + scenario.cableLeft + scenario.cableRight + scenario.loadId
-    private val allIds = scenario.deckGrid.flatten() + nonDeckIds
-    // Deck particles are mesh-only (visibleIds excludes them, same convention
-    // buildBridge/buildTrampoline's own scenes use) - towers/cables draw as their default dots
-    // at each joint, the load gets its own sphere like BridgeScene's.
+    private val rope = Color(0.78, 0.62, 0.4)
+    private val wood = Color(0.36, 0.26, 0.17)
+    private val postConnections = scenario.posts.flatMap { it.zipWithNext() }
+    private val ropeConnections = scenario.footRopes.flatMap { it.zipWithNext() } +
+        scenario.handrails.flatMap { it.zipWithNext() } + scenario.verticalConnections
+    private val structureConnections = postConnections + ropeConnections
+    private val lineColors = postConnections.associateWith { wood } + ropeConnections.associateWith { rope }
+
+    private val nonWalkwayIds = scenario.posts.flatten() + scenario.handrails.flatten().distinct() + scenario.loadId
+    private val allIds = (scenario.walkway.flatten() + nonWalkwayIds).distinct()
     private val sphereRadii = mapOf(scenario.loadId to 0.14)
-    private val visibleIds = nonDeckIds.toSet()
+    // Walkway particles are mesh-only (the planks already show them).
+    private val visibleIds = nonWalkwayIds.toSet()
     // Bridge structure particles start hidden (the "show particles" toggle on each group's panel
     // brings them back); only the load stays visible by default.
     private val hiddenByDefaultGroups = groupsHiddenByDefaultExcept(scenario.groups, listOf(scenario.loadId))
 
-    // A wider, higher offset than BridgeScene's own tracking camera - there's more to fit in
-    // frame here (two towers rising above the deck, cables draped between them), not just the
-    // deck and its load.
+    // Follows the load from above and to one side, looking along the bridge so its sag and
+    // handrails read clearly.
     private val camera = CameraFunction { _, s ->
         val loadPos = s.position(scenario.loadId)
-        CameraPose(position = loadPos + Vector3(6.5, 3.2, -2.5), lookAt = loadPos)
+        CameraPose(position = loadPos + Vector3(4.5, 2.6, -3.5), lookAt = loadPos + Vector3(0.0, 0.3, 0.5))
     }
 
-    override val dt = BRIDGE_DT
+    override val dt = SUSPENSION_BRIDGE_DT
     override val store: ParticleStore = scenario.store
 
     override fun ids(): List<Int> = allIds
@@ -110,8 +100,9 @@ class SuspensionBridgeScene : DemoScene {
     override fun frame(t: Double): SceneFrame = SceneFrame(
         camera = camera.evaluate(t, scene),
         connections = structureConnections,
+        lineColors = lineColors,
         sphereRadii = sphereRadii,
-        meshes = listOf(deckMesh),
+        meshes = listOf(walkwayMesh),
         visibleIds = visibleIds,
         hiddenByDefaultGroups = hiddenByDefaultGroups,
         registry = registry,
