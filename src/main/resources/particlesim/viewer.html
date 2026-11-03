@@ -685,6 +685,7 @@ function applyFrame(frame) {
   frame.particles.forEach((p) => byId.set(p.id, p));
   const sphereRadii = new Map(frame.spheres.map((s) => [s.id, s.radius]));
   const particleColorMap = new Map(frame.particleColors.map((c) => [c.id, c]));
+  seedHiddenGroupsFromFrame(frame);
   latestVisibleIds = frame.visibleIds;
   latestById = byId;
   latestMeshes = frame.meshes;
@@ -1234,9 +1235,13 @@ function decodeFrame(buffer) {
     lights[i] = { kind, color: { r, g, b }, intensity, position };
   }
 
+  // Groups whose "show particles" toggle starts unchecked for this scene - seeded into
+  // hiddenGroups once per scene load (see seedHiddenGroupsFromFrame), never re-applied after.
+  const hiddenByDefaultGroups = readNameList();
+
   return {
     t, step, particles, connections, camera: cam, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
-    colliders, events, availableScenes, activeScene, lights,
+    colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups,
   };
 }
 
@@ -1277,6 +1282,8 @@ function resetViewerStateForSceneChange(sceneName) {
   selectedKind = null;
   selectedName = null;
   hiddenGroups.clear();
+  hiddenGroupsSeeded = false;
+  hiddenGroupsSeedScene = sceneName;
   hiddenSurfaces.clear();
   shownForces.clear();
   shownSurfaceLines.clear();
@@ -1557,6 +1564,21 @@ let particleRadiusSourceRow = null; // radius's counterpart to the above
 // particle/mesh draws only if the server permits it *and* nothing here hides it - see applyFrame.
 const hiddenGroups = new Set();
 const hiddenSurfaces = new Set();
+
+// A scene's hiddenByDefaultGroups are only a starting state: copied into hiddenGroups once per
+// scene load, after which the person's own checkbox clicks own it. resetViewerStateForSceneChange
+// runs on click, before the server has actually switched, so a frame or two from the *old* scene
+// can still arrive - hence waiting for a frame whose activeScene is the one requested (null =
+// the very first frame of the session, whatever scene that is).
+let hiddenGroupsSeeded = false;
+let hiddenGroupsSeedScene = null;
+function seedHiddenGroupsFromFrame(frame) {
+  if (hiddenGroupsSeeded) return;
+  if (hiddenGroupsSeedScene !== null && frame.activeScene !== hiddenGroupsSeedScene) return;
+  for (const name of frame.hiddenByDefaultGroups) hiddenGroups.add(name);
+  hiddenGroupsSeeded = true;
+  if (selectedKind === "groups") renderObjectPanel();
+}
 
 // §10.3's per-surface polyline toggle: names of surfaces whose connections (structural/shear/
 // bend spring lines, or any other connection whose endpoints happen to be an edge of this

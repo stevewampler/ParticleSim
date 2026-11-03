@@ -369,6 +369,19 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `hidden-by-default group names round-trip, defaulting to empty`() {
+        val store = ParticleStore()
+        val none = BinaryFrame.decode(BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList()))
+        assertEquals(emptySet(), none.hiddenByDefaultGroups)
+
+        val hidden = setOf("deck", "tower-left.pole")
+        val decoded = BinaryFrame.decode(
+            BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), hiddenByDefaultGroups = hidden),
+        )
+        assertEquals(hidden, decoded.hiddenByDefaultGroups)
+    }
+
+    @Test
     fun `round-trips a named force's arrow samples`() {
         val store = ParticleStore()
         val samples = listOf(

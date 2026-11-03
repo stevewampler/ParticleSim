@@ -98,6 +98,7 @@ fun main(args: Array<String>) {
                 availableScenes = library.sceneNames,
                 activeScene = library.activeName,
                 lights = frame.lights,
+                hiddenByDefaultGroups = frame.hiddenByDefaultGroups,
             )
         } catch (e: Exception) {
             System.err.println("scene loop error on '${library.activeName}': $e")

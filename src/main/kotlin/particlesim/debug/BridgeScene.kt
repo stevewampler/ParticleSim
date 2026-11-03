@@ -22,7 +22,7 @@ import particlesim.render.SurfaceRenderer
  * it sitting wherever it comes to rest forever.
  */
 class BridgeScene : DemoScene {
-    private val scenario = buildBridge()
+    internal val scenario = buildBridge()
     private val integrator = Integrator()
     private val cycleSeconds = 12.0
     private var cycleStart = 0.0
@@ -66,6 +66,9 @@ class BridgeScene : DemoScene {
     private val abutmentIds = scenario.groups.membersOf("abutments")
     private val sphereRadii = abutmentIds.associateWith { 0.04 } + (scenario.loadId to 0.14)
     private val visibleIds = abutmentIds + scenario.loadId
+    // Bridge structure particles start hidden (the "show particles" toggle on each group's panel
+    // brings them back); only the load stays visible by default.
+    private val hiddenByDefaultGroups = groupsHiddenByDefaultExcept(scenario.groups, listOf(scenario.loadId))
 
     override val dt = BRIDGE_DT
     override val store: ParticleStore = scenario.store
@@ -98,6 +101,7 @@ class BridgeScene : DemoScene {
         sphereRadii = sphereRadii,
         meshes = listOf(deckMesh),
         visibleIds = visibleIds,
+        hiddenByDefaultGroups = hiddenByDefaultGroups,
         registry = registry,
         lights = lights,
     )

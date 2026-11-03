@@ -139,6 +139,12 @@ import kotlin.math.roundToInt
  *                every scene built before this field existed, and the viewer falls back to its
  *                own hardcoded default lighting rather than going dark, see Light's own doc
  *                comment)
+ * i32  hiddenByDefaultGroupCount; hiddenByDefaultGroupCount * { i32 nameLen, nameLen UTF-8 bytes }
+ *                (groups whose particles the viewer starts with "show particles" unchecked when
+ *                this scene loads - a default only, seeded into the viewer's own per-group
+ *                toggle state once per scene load, so a person can still check the box to show
+ *                them again; unlike visibleIds, which removes dots outright. Empty for every
+ *                scene that doesn't ask for it.)
  * ```
  *
  * The event section is §9.1's discrete-event channel ([SimEvent]) — everything above it in this
@@ -303,6 +309,7 @@ object BinaryFrame {
         availableScenes: List<String> = emptyList(),
         activeScene: String = "",
         lights: List<Light> = emptyList(),
+        hiddenByDefaultGroups: Set<String> = emptySet(),
     ): ByteBuffer {
         val fieldEntries = collectEditableFields(registry)
         val emitterEntries = collectEmitterEntries(registry, t)
@@ -333,7 +340,8 @@ object BinaryFrame {
             COLLIDER_HEADER_SIZE + colliders.sumOf { colliderEntrySize(it) } +
             EVENT_HEADER_SIZE + events.sumOf { eventEntrySize(it) } +
             nameListSize(availableScenes) + stringSize(activeScene) +
-            LIGHT_HEADER_SIZE + lights.size * LIGHT_ENTRY_SIZE
+            LIGHT_HEADER_SIZE + lights.size * LIGHT_ENTRY_SIZE +
+            nameListSize(hiddenByDefaultGroups)
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
         buffer.putDouble(t)
@@ -504,6 +512,7 @@ object BinaryFrame {
             buffer.putDouble(light.intensity)
             putVector(buffer, position)
         }
+        putNameList(buffer, hiddenByDefaultGroups)
 
         buffer.flip()
         return buffer
@@ -630,9 +639,10 @@ object BinaryFrame {
                 else -> error("unknown light kind byte: $kind")
             }
         }
+        val hiddenByDefaultGroups = getNameList(buf).toSet()
         return DecodedFrame(
             t, step, particles, connections, camera, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
-            colliders, events, availableScenes, activeScene, lights,
+            colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups,
         )
     }
 
@@ -998,4 +1008,5 @@ data class DecodedFrame(
     val availableScenes: List<String> = emptyList(),
     val activeScene: String = "",
     val lights: List<Light> = emptyList(),
+    val hiddenByDefaultGroups: Set<String> = emptySet(),
 )

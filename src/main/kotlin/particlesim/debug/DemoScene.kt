@@ -42,6 +42,10 @@ data class SceneFrame(
      * [particlesim.render.Light]'s own doc comment. */
     val lights: List<Light> = emptyList(),
     val visibleIds: Set<Int>? = null,
+    /** Groups whose particles the viewer starts with "show particles" unchecked when this scene
+     * loads - unlike [visibleIds], only a default: a person can still check the box in the
+     * group's panel to show them. See [BinaryFrame]'s layout doc. */
+    val hiddenByDefaultGroups: Set<String> = emptySet(),
     val registry: SceneRegistry = SceneRegistry.build(),
     val colliders: List<Collider> = emptyList(),
     val events: List<SimEvent> = emptyList(),
@@ -167,4 +171,15 @@ fun applyEmitterMessage(message: SceneControlMessage, emitters: List<Emitter>): 
         }
         else -> false
     }
+}
+
+/**
+ * Every group in [groups] that contains none of [keepVisible] - for a scene that wants all of
+ * its structure's particles hidden by default ([SceneFrame.hiddenByDefaultGroups]) except, say,
+ * the load crossing it. The viewer hides a particle if it belongs to *any* hidden group, so a
+ * group holding even one kept particle has to stay shown.
+ */
+fun groupsHiddenByDefaultExcept(groups: particlesim.core.Groups, keepVisible: Collection<Int>): Set<String> {
+    val keep = keepVisible.toSet()
+    return groups.names().filter { name -> groups.membersOf(name).none { it in keep } }.toSet()
 }

@@ -23,7 +23,7 @@ import particlesim.render.SurfaceRenderer
  * stiffer) and the re-launch cycle every bridge scene in this library uses.
  */
 class TrainTrestleScene : DemoScene {
-    private val scenario = buildTrainTrestle()
+    internal val scenario = buildTrainTrestle()
     private val integrator = Integrator()
     private val settleSeconds = 1.0 // the deck itself is nearly rigid - far less to settle than a hung cable system
     private val cycleSeconds = 10.0
@@ -70,6 +70,9 @@ class TrainTrestleScene : DemoScene {
     private val allIds = scenario.deckGrid.flatten() + nonDeckIds
     private val sphereRadii = scenario.trainIds.associateWith { 0.16 }
     private val visibleIds = nonDeckIds.toSet()
+    // Bridge structure particles start hidden (the "show particles" toggle on each group's panel
+    // brings them back); only the load stays visible by default.
+    private val hiddenByDefaultGroups = groupsHiddenByDefaultExcept(scenario.groups, scenario.trainIds)
 
     // Tracks the lead car, same "follow a particle's position" shape BridgeScene/
     // SuspensionBridgeScene's own cameras already use - closer and lower than the suspension
@@ -120,6 +123,7 @@ class TrainTrestleScene : DemoScene {
         sphereRadii = sphereRadii,
         meshes = listOf(deckMesh),
         visibleIds = visibleIds,
+        hiddenByDefaultGroups = hiddenByDefaultGroups,
         registry = registry,
         lights = lights,
     )

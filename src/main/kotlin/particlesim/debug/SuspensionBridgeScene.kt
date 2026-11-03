@@ -22,7 +22,7 @@ import particlesim.render.SurfaceRenderer
  * with [BridgeScene].
  */
 class SuspensionBridgeScene : DemoScene {
-    private val scenario = buildSuspensionBridge()
+    internal val scenario = buildSuspensionBridge()
     private val integrator = Integrator()
     private val cycleSeconds = 12.0
     // Held at its start position (re-pinned every step, same mechanism as the cycle-reset
@@ -72,6 +72,9 @@ class SuspensionBridgeScene : DemoScene {
     // at each joint, the load gets its own sphere like BridgeScene's.
     private val sphereRadii = mapOf(scenario.loadId to 0.14)
     private val visibleIds = nonDeckIds.toSet()
+    // Bridge structure particles start hidden (the "show particles" toggle on each group's panel
+    // brings them back); only the load stays visible by default.
+    private val hiddenByDefaultGroups = groupsHiddenByDefaultExcept(scenario.groups, listOf(scenario.loadId))
 
     // A wider, higher offset than BridgeScene's own tracking camera - there's more to fit in
     // frame here (two towers rising above the deck, cables draped between them), not just the
@@ -110,6 +113,7 @@ class SuspensionBridgeScene : DemoScene {
         sphereRadii = sphereRadii,
         meshes = listOf(deckMesh),
         visibleIds = visibleIds,
+        hiddenByDefaultGroups = hiddenByDefaultGroups,
         registry = registry,
         lights = lights,
     )

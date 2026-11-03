@@ -20,7 +20,7 @@ import particlesim.render.SurfaceRenderer
  * the credit). Same settle-then-launch single-load cycle as [ArchBridgeScene].
  */
 class CableStayedBridgeScene : DemoScene {
-    private val scenario = buildCableStayedBridge()
+    internal val scenario = buildCableStayedBridge()
     private val integrator = Integrator()
     private val settleSeconds = 2.0
     private val cycleSeconds = 10.0
@@ -56,6 +56,9 @@ class CableStayedBridgeScene : DemoScene {
     private val sphereRadii = mapOf(scenario.loadId to 0.15)
     private val particleColors = towerIds.associateWith { towerRed }
     private val visibleIds = nonDeckIds.toSet()
+    // Bridge structure particles start hidden (the "show particles" toggle on each group's panel
+    // brings them back); only the load stays visible by default.
+    private val hiddenByDefaultGroups = groupsHiddenByDefaultExcept(scenario.groups, listOf(scenario.loadId))
 
     // Follows the load from a raised three-quarter view, pulled back far enough to keep the
     // tower top in frame as the load passes under it.
@@ -95,6 +98,7 @@ class CableStayedBridgeScene : DemoScene {
         particleColors = particleColors,
         meshes = listOf(deckMesh),
         visibleIds = visibleIds,
+        hiddenByDefaultGroups = hiddenByDefaultGroups,
         registry = registry,
         lights = lights,
     )

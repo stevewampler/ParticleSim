@@ -59,6 +59,7 @@ class DebugRenderer(
         availableScenes: List<String> = emptyList(),
         activeScene: String = "",
         lights: List<Light> = emptyList(),
+        hiddenByDefaultGroups: Set<String> = emptySet(),
     ) {
         // Fills in a default-region arrow group (§10.2) for any named UniformFieldForce the
         // registry carries that arrowGroups didn't already cover - this is the single call site
@@ -78,6 +79,7 @@ class DebugRenderer(
             BinaryFrame.encode(
                 t, step, store, ids, connections, camera, lineColors, connectionNames, sphereRadii, particleColors, allMeshes,
                 allArrowGroups, visibleIds, registry, colliders.filter { it.active }, events, availableScenes, activeScene, lights,
+                hiddenByDefaultGroups,
             ),
         )
     }

@@ -23,7 +23,7 @@ import particlesim.render.SurfaceRenderer
  * arch, not a second train).
  */
 class ArchBridgeScene : DemoScene {
-    private val scenario = buildArchBridge()
+    internal val scenario = buildArchBridge()
     private val integrator = Integrator()
     // The arch and hung deck are dynamic, so they need a moment to settle the few centimetres
     // into their loaded shape before anything starts crossing the deck.
@@ -66,6 +66,9 @@ class ArchBridgeScene : DemoScene {
     private val allIds = scenario.deckGrid.flatten() + nonDeckIds
     private val sphereRadii = mapOf(scenario.loadId to 0.15)
     private val visibleIds = nonDeckIds.toSet()
+    // Bridge structure particles start hidden (the "show particles" toggle on each group's panel
+    // brings them back); only the load stays visible by default.
+    private val hiddenByDefaultGroups = groupsHiddenByDefaultExcept(scenario.groups, listOf(scenario.loadId))
 
     // Tracks the load from a fixed elevated offset, same "follow a particle's position" shape
     // every other bridge scene's own camera already uses - pulled back further than
@@ -105,6 +108,7 @@ class ArchBridgeScene : DemoScene {
         sphereRadii = sphereRadii,
         meshes = listOf(deckMesh),
         visibleIds = visibleIds,
+        hiddenByDefaultGroups = hiddenByDefaultGroups,
         registry = registry,
         lights = lights,
     )
