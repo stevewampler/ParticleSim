@@ -240,38 +240,13 @@ fun buildArchBridge(
         }
     }
 
-    // Floor beams: a shallow triangulated cross-girder under the deck at every hanger row,
-    // spanning edge hanger to edge hanger - the job a real arch bridge's cross-girders do. A
-    // deck hung only at its edges is otherwise a flat sheet of springs spanning its full width,
-    // a membrane with almost no bending stiffness, and its centreline sags badly between the
-    // hangers. Each beam is a bottom chord of particles [floorBeamDepth] below the deck's
-    // interior columns, tied to the deck row above by verticals and X-diagonals (the outermost
-    // bottom-chord particles run diagonally up to the deck-edge particles, where the hangers
-    // attach), so the deck row and its beam form one Pratt-style truss across the width.
-    // Depth matters more than stiffness here: a shallower (0.25) beam with lighter particles
-    // snapped through - top and bottom chords pulled level with each other - partway through
-    // a run and left the deck sagging ~0.5 at mid-span, no matter how stiff its springs were.
-    val floorBeamGroup = placement.name("floor-beams")
-    val floorBeamEdges = ArrayList<Grid.Edge>()
-    for (r in hangerRows) {
-        val top = deck.grid[r]
-        val bottom = (1 until cols - 1).associateWith { c ->
-            val id = store.create(position = store.position(top[c]) + Vector3(0.0, -floorBeamDepth, 0.0), mass = ScalarExpr.of(floorBeamMassPerParticle))
-            groups.add(floorBeamGroup, id)
-            id
-        }
-        for (c in 1 until cols - 1) floorBeamEdges += Grid.Edge(top[c], bottom.getValue(c))
-        for (c in 1 until cols - 2) floorBeamEdges += Grid.Edge(bottom.getValue(c), bottom.getValue(c + 1))
-        floorBeamEdges += Grid.Edge(top[0], bottom.getValue(1))
-        floorBeamEdges += Grid.Edge(top[cols - 1], bottom.getValue(cols - 2))
-        for (c in 1 until cols - 2) {
-            floorBeamEdges += Grid.Edge(top[c], bottom.getValue(c + 1))
-            floorBeamEdges += Grid.Edge(top[c + 1], bottom.getValue(c))
-        }
-    }
-    val floorBeamForces = listOf(
-        MeshSprings(floorBeamEdges, store, stiffness = floorBeamStiffness, damping = floorBeamDamping, name = placement.name("floor-beams")),
-        UniformGravity(floorBeamGroup, Vector3(0.0, -9.8, 0.0), name = placement.name("floor-beam-gravity")),
+    // Floor beams under the deck at every hanger row, carrying the deck's width out to the
+    // edge hangers - see buildFloorBeams for why an edge-hung deck needs them.
+    val floorBeams = buildFloorBeams(
+        deck.grid, hangerRows,
+        depth = floorBeamDepth, massPerParticle = floorBeamMassPerParticle,
+        stiffness = floorBeamStiffness, damping = floorBeamDamping,
+        store = store, groups = groups, placement = placement,
     )
 
     // Lateral bracing: turns the two planar arch trusses into one triangulated space truss.
@@ -320,7 +295,7 @@ fun buildArchBridge(
     return ArchBridgeScenario(
         store = store,
         groups = groups,
-        forces = deck.forces + wind + archForces + archGravities + crossBraceForces + hangerSprings + hangerDampers + floorBeamForces,
+        forces = deck.forces + wind + archForces + archGravities + crossBraceForces + hangerSprings + hangerDampers + floorBeams.forces,
         constraints = deck.constraints + pylonLegs.flatMap { it.constraints } + archConstraints,
         collisions = deck.collisions,
         deckGrid = deck.grid,
@@ -329,7 +304,7 @@ fun buildArchBridge(
         archSides = archSides,
         archConnections = archConnections + (crossBraceRungs + crossBraceDiagonals).map { it.a to it.b },
         hangerConnections = hangerConnections,
-        floorBeamConnections = floorBeamEdges.map { it.a to it.b },
+        floorBeamConnections = floorBeams.connections,
         loadId = deck.loadId,
         loadStart = deck.loadStart,
         loadStartVelocity = deck.loadStartVelocity,
