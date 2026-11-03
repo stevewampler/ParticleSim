@@ -72,6 +72,19 @@ class CableStayedBridgeStabilityTest {
     }
 
     @Test
+    fun `floor beams don't swing along the road`() {
+        // Without the longitudinal bracing between neighbouring beams each beam hung off its
+        // own deck row like a pendulum and swung ~0.1 along the road during a crossing.
+        val scenario = buildCableStayedBridge()
+        val start = scenario.floorBeamIds.associateWith { scenario.store.position(it) }
+        var maxAlongRoad = 0.0
+        run(scenario, seconds = 8.0, launchAt = 1.0) {
+            for (id in scenario.floorBeamIds) maxAlongRoad = maxOf(maxAlongRoad, abs(scenario.store.position(id).z - start.getValue(id).z))
+        }
+        assertTrue(maxAlongRoad < 0.03, "floor beam swung $maxAlongRoad along the road")
+    }
+
+    @Test
     fun `the tower stays fixed`() {
         val scenario = buildCableStayedBridge()
         val ids = scenario.towerLegs.flatten()

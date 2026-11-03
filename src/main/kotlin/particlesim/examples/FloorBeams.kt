@@ -24,6 +24,10 @@ import particlesim.surface.Grid
  * lengths come from the as-built positions ([MeshSprings]' own convention), so every member
  * starts at zero strain.
  *
+ * Neighbouring beams are also braced to each other along the road (a bottom stringer plus an X
+ * of diagonals up to the deck under every interior column) - without that, each beam is only a
+ * truss across the road and swings forward and back along it like a pendulum.
+ *
  * **Depth matters more than stiffness.** On the arch bridge a shallow (0.25) beam with light
  * (0.03) particles snapped through partway through a run - top and bottom chords pulled level
  * with each other - and left the deck sagging ~0.5 at mid-span no matter how stiff its springs
@@ -54,7 +58,9 @@ fun buildFloorBeams(
     val group = placement.name("floor-beams")
     val edges = ArrayList<Grid.Edge>()
     val beamIds = ArrayList<Int>()
-    for (r in beamRows) {
+    val bottoms = ArrayList<Map<Int, Int>>()
+    val sortedRows = beamRows.sorted()
+    for (r in sortedRows) {
         val top = deckGrid[r]
         val bottom = (1 until cols - 1).associateWith { c ->
             val id = store.create(position = store.position(top[c]) + Vector3(0.0, -depth, 0.0), mass = ScalarExpr.of(massPerParticle))
@@ -69,6 +75,24 @@ fun buildFloorBeams(
         for (c in 1 until cols - 2) {
             edges += Grid.Edge(top[c], bottom.getValue(c + 1))
             edges += Grid.Edge(top[c + 1], bottom.getValue(c))
+        }
+        bottoms += bottom
+    }
+
+    // Longitudinal bracing between neighbouring beams. Each beam on its own is only a truss
+    // *across* the road - nothing stops it swinging forward and back along the road like a
+    // pendulum hanging off its deck row. So between every pair of neighbouring beams, under
+    // every interior column, a bottom stringer ties the two beams' bottom chords together and
+    // an X of diagonals runs from each bottom particle up to the other beam's deck particle,
+    // triangulating the vertical plane along the road as well.
+    for (i in 0 until sortedRows.size - 1) {
+        val (rA, rB) = sortedRows[i] to sortedRows[i + 1]
+        for (c in 1 until cols - 1) {
+            val bottomA = bottoms[i].getValue(c)
+            val bottomB = bottoms[i + 1].getValue(c)
+            edges += Grid.Edge(bottomA, bottomB)
+            edges += Grid.Edge(bottomA, deckGrid[rB][c])
+            edges += Grid.Edge(bottomB, deckGrid[rA][c])
         }
     }
 
