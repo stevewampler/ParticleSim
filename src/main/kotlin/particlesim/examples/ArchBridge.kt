@@ -44,10 +44,11 @@ import particlesim.surface.Surface
  * **The deck now actually hangs from the arch.** Only the deck's two end rows stay
  * [FixedPosition]-pinned (resting on the abutments, same as [buildBridge]'s own default) -
  * every intermediate hanger row that used to be pinned directly via `extraPinnedRows` is now
- * held up *only* by real tension-only [Spring]/[Damper] hangers to the arch's lower chord - a
- * fan of them per side per hanger row (one to the deck edge, plus inclined ones to every deck
- * column on that side's half), since a deck hung only at its edges is a flat spring membrane
- * that sags badly along its centreline.
+ * held up *only* by a real tension-only, vertical [Spring]/[Damper] hanger per side from the
+ * arch's lower chord to the deck edge. A triangulated floor beam (cross-girder) under the deck
+ * at each hanger row carries the load across the deck's width to those edge hangers, since a
+ * deck hung only at its edges is otherwise a flat spring membrane that sags badly along its
+ * centreline.
  * Each hanger's `restLength` is measured from the two ends' own just-built positions
  * (`(archPosition - deckPosition).length()`), not guessed at the way [buildSuspensionBridge]'s
  * own suspenders originally were - since both the arch and the deck are already placed in their
@@ -90,6 +91,9 @@ data class ArchBridgeScenario(
      * this file's own class doc comment), not just rendered lines, but still exposed as plain
      * pairs here since that's all [particlesim.debug.ArchBridgeScene] needs to draw them. */
     val hangerConnections: List<Pair<Int, Int>>,
+    /** Every floor-beam (cross-girder) spring connection under the deck, as plain pairs for
+     * rendering, same as [archConnections]. */
+    val floorBeamConnections: List<Pair<Int, Int>>,
     val loadId: Int,
     val loadStart: Vector3,
     val loadStartVelocity: Vector3,
@@ -120,6 +124,10 @@ fun buildArchBridge(
     hangerStiffness: Double = 3000.0,
     hangerDamping: Double = 4.0,
     hangerStrideRows: Int = 2,
+    floorBeamDepth: Double = 0.45,
+    floorBeamMassPerParticle: Double = 0.08,
+    floorBeamStiffness: Double = 6000.0,
+    floorBeamDamping: Double = 8.0,
     loadMass: Double = 1.8,
     loadRadius: Double = 0.15,
     loadSpeed: Double = 2.0,
@@ -209,39 +217,62 @@ fun buildArchBridge(
         UniformGravity("${placement.name(side)}.arch", Vector3(0.0, -9.8, 0.0), name = placement.name("$side-gravity"))
     }
 
-    // A fan of hangers per side per hanger row, all from that row's lower-chord point down to
-    // the deck: one straight down to the deck's own edge particle on that side, plus inclined
-    // ones to every deck column on that side's half (the centre column gets one from each
-    // side). Edge-only hangers left the deck spanning its full width between them as a flat
-    // sheet of springs - a membrane with almost no bending stiffness, so its centreline sagged
-    // badly even with the arch above holding firm. The inclined hangers make each hanger row's
-    // cross-section a set of triangles (arch point, deck column, deck column), the job a real
-    // arch bridge's cross-girders do.
-    //
-    // Every hanger is tension-only (compressionStiffness = 0, a hanger can't push, same
-    // reasoning buildRope's own compression-free segments use) - the deck is no longer
-    // independently pinned at these rows at all, so this is what's actually holding it up.
-    // restLength is measured from the two ends' own as-built positions (see this file's own
-    // class doc comment on why that - not a guessed constant - is what keeps the initial
-    // transient gentle).
+    // One vertical hanger per side per hanger row, from that row's lower-chord point straight
+    // down to the deck's own edge particle on the same side (each arch sits directly above its
+    // deck edge, so these are exactly vertical) - a real tension-only (compressionStiffness = 0,
+    // a hanger can't push, same reasoning buildRope's own compression-free segments use) spring,
+    // since the deck is no longer independently pinned at this row at all: this is what's
+    // actually holding it up. restLength is measured from the two ends' own as-built positions
+    // (see this file's own class doc comment on why that - not a guessed constant - is what
+    // keeps the initial transient gentle).
     val hangerSprings = ArrayList<Spring>()
     val hangerDampers = ArrayList<Damper>()
     val hangerConnections = ArrayList<Pair<Int, Int>>()
-    val centreCol = cols / 2
     for (r in hangerRows) {
         archSides.forEachIndexed { i, (_, lower) ->
             val archId = lower[r]
+            val deckId = deck.grid[r][if (i == 0) 0 else cols - 1]
             val side = if (i == 0) "left" else "right"
-            val deckCols = if (i == 0) 0..centreCol else (cols - 1 - centreCol until cols)
-            for (c in deckCols) {
-                val deckId = deck.grid[r][c]
-                val restLength = (store.position(archId) - store.position(deckId)).length()
-                hangerSprings += Spring(archId, deckId, restLength = restLength, stiffness = hangerStiffness, compressionStiffness = 0.0, name = placement.name("hanger-$side-$r-$c"))
-                hangerDampers += Damper(archId, deckId, damping = hangerDamping, name = placement.name("hanger-$side-damper-$r-$c"))
-                hangerConnections += archId to deckId
-            }
+            val restLength = (store.position(archId) - store.position(deckId)).length()
+            hangerSprings += Spring(archId, deckId, restLength = restLength, stiffness = hangerStiffness, compressionStiffness = 0.0, name = placement.name("hanger-$side-$r"))
+            hangerDampers += Damper(archId, deckId, damping = hangerDamping, name = placement.name("hanger-$side-damper-$r"))
+            hangerConnections += archId to deckId
         }
     }
+
+    // Floor beams: a shallow triangulated cross-girder under the deck at every hanger row,
+    // spanning edge hanger to edge hanger - the job a real arch bridge's cross-girders do. A
+    // deck hung only at its edges is otherwise a flat sheet of springs spanning its full width,
+    // a membrane with almost no bending stiffness, and its centreline sags badly between the
+    // hangers. Each beam is a bottom chord of particles [floorBeamDepth] below the deck's
+    // interior columns, tied to the deck row above by verticals and X-diagonals (the outermost
+    // bottom-chord particles run diagonally up to the deck-edge particles, where the hangers
+    // attach), so the deck row and its beam form one Pratt-style truss across the width.
+    // Depth matters more than stiffness here: a shallower (0.25) beam with lighter particles
+    // snapped through - top and bottom chords pulled level with each other - partway through
+    // a run and left the deck sagging ~0.5 at mid-span, no matter how stiff its springs were.
+    val floorBeamGroup = placement.name("floor-beams")
+    val floorBeamEdges = ArrayList<Grid.Edge>()
+    for (r in hangerRows) {
+        val top = deck.grid[r]
+        val bottom = (1 until cols - 1).associateWith { c ->
+            val id = store.create(position = store.position(top[c]) + Vector3(0.0, -floorBeamDepth, 0.0), mass = ScalarExpr.of(floorBeamMassPerParticle))
+            groups.add(floorBeamGroup, id)
+            id
+        }
+        for (c in 1 until cols - 1) floorBeamEdges += Grid.Edge(top[c], bottom.getValue(c))
+        for (c in 1 until cols - 2) floorBeamEdges += Grid.Edge(bottom.getValue(c), bottom.getValue(c + 1))
+        floorBeamEdges += Grid.Edge(top[0], bottom.getValue(1))
+        floorBeamEdges += Grid.Edge(top[cols - 1], bottom.getValue(cols - 2))
+        for (c in 1 until cols - 2) {
+            floorBeamEdges += Grid.Edge(top[c], bottom.getValue(c + 1))
+            floorBeamEdges += Grid.Edge(top[c + 1], bottom.getValue(c))
+        }
+    }
+    val floorBeamForces = listOf(
+        MeshSprings(floorBeamEdges, store, stiffness = floorBeamStiffness, damping = floorBeamDamping, name = placement.name("floor-beams")),
+        UniformGravity(floorBeamGroup, Vector3(0.0, -9.8, 0.0), name = placement.name("floor-beam-gravity")),
+    )
 
     // Lateral bracing: turns the two planar arch trusses into one triangulated space truss.
     // Plain rungs alone (left[r] to right[r]) leave every bay between two rungs a rectangle,
@@ -289,7 +320,7 @@ fun buildArchBridge(
     return ArchBridgeScenario(
         store = store,
         groups = groups,
-        forces = deck.forces + wind + archForces + archGravities + crossBraceForces + hangerSprings + hangerDampers,
+        forces = deck.forces + wind + archForces + archGravities + crossBraceForces + hangerSprings + hangerDampers + floorBeamForces,
         constraints = deck.constraints + pylonLegs.flatMap { it.constraints } + archConstraints,
         collisions = deck.collisions,
         deckGrid = deck.grid,
@@ -298,6 +329,7 @@ fun buildArchBridge(
         archSides = archSides,
         archConnections = archConnections + (crossBraceRungs + crossBraceDiagonals).map { it.a to it.b },
         hangerConnections = hangerConnections,
+        floorBeamConnections = floorBeamEdges.map { it.a to it.b },
         loadId = deck.loadId,
         loadStart = deck.loadStart,
         loadStartVelocity = deck.loadStartVelocity,

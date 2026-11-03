@@ -59,9 +59,10 @@ class ArchBridgeScene : DemoScene {
     // the one remaining plain line segment (still not a spring - purely static, see
     // buildFlagpole).
     private val pylonConnections = scenario.pylonLegs.flatMap { it.zipWithNext() }
-    private val structureConnections = scenario.archConnections + pylonConnections + scenario.hangerConnections
+    private val structureConnections = scenario.archConnections + pylonConnections + scenario.hangerConnections + scenario.floorBeamConnections
 
-    private val nonDeckIds = scenario.pylonLegs.flatten() + scenario.archSides.flatMap { (u, l) -> u + l } + scenario.loadId
+    private val floorBeamIds = scenario.floorBeamConnections.flatMap { listOf(it.first, it.second) }.distinct() - scenario.deckGrid.flatten().toSet()
+    private val nonDeckIds = scenario.pylonLegs.flatten() + scenario.archSides.flatMap { (u, l) -> u + l } + floorBeamIds + scenario.loadId
     private val allIds = scenario.deckGrid.flatten() + nonDeckIds
     private val sphereRadii = mapOf(scenario.loadId to 0.15)
     private val visibleIds = nonDeckIds.toSet()

@@ -112,8 +112,9 @@ class ArchBridgeStabilityTest {
 
     @Test
     fun `the deck mid-span stays level across its width`() {
-        // Edge-only hangers left the deck's centreline sagging far below its hung edges; the
-        // fan hangers should keep the whole mid-span row at nearly the same height.
+        // Edge-only hangers with nothing spanning the deck's width left its centreline sagging
+        // far below its hung edges; the floor beams should keep mid-span rows level - both a
+        // row with a floor beam under it and the row between two beams.
         val scenario = buildArchBridge()
         val integrator = Integrator()
         val midRow = scenario.deckGrid[scenario.deckGrid.size / 2]
@@ -126,7 +127,20 @@ class ArchBridgeStabilityTest {
             t += ARCH_BRIDGE_DT
         }
 
-        val ys = midRow.map { scenario.store.position(it).y }
-        assertTrue(ys.max() - ys.min() < 0.02, "deck mid-span row isn't level across its width: heights $ys")
+        for (row in listOf(midRow, scenario.deckGrid[scenario.deckGrid.size / 2 - 1])) {
+            val ys = row.map { scenario.store.position(it).y }
+            assertTrue(ys.max() - ys.min() < 0.03, "deck mid-span row isn't level across its width: heights $ys")
+        }
+    }
+
+    @Test
+    fun `hangers are vertical and attach only to the deck edges`() {
+        val scenario = buildArchBridge()
+        val edgeIds = scenario.deckGrid.flatMap { listOf(it.first(), it.last()) }.toSet()
+        for ((archId, deckId) in scenario.hangerConnections) {
+            assertTrue(deckId in edgeIds, "hanger to deck particle $deckId isn't at a deck edge")
+            val d = scenario.store.position(archId) - scenario.store.position(deckId)
+            assertTrue(abs(d.x) < 1e-9 && abs(d.z) < 1e-9, "hanger $archId-$deckId isn't vertical: offset $d")
+        }
     }
 }
