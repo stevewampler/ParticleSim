@@ -32,17 +32,22 @@ import particlesim.surface.Surface
  * the vertical struts between the two chords, `Grid.shearEdges` as the diagonal lattice bracing
  * between them, with no new edge-generation code needed for either.
  *
- * **Lateral cross-bracing ties the two sides together** - plain [Spring]/[Damper] struts
- * between corresponding points of the left and right arches (`leftChord[r] to rightChord[r]`,
- * both chords), at the same rows [hangerStrideRows] already places a hanger at. Without them
- * the two arch trusses would have no structural reason to stay in sync with each other at all
- * once they're free to move independently - the real "portal bracing" a twin-arch bridge needs
- * for exactly this reason.
+ * **Lateral bracing ties the two sides into one space truss** - rungs between corresponding
+ * points of the left and right arches at every row (both chords), X-diagonals across every bay
+ * in the upper and lower chord planes, and sway-frame X-diagonals (each side's upper chord to
+ * the other side's lower chord) at every row. An earlier version had only rungs, at hanger rows
+ * only: every bay between them was then an untriangulated rectangle, a mechanism that let the
+ * two arches rack sideways together and twist out of plane until the whole arch folded down
+ * onto the deck under its own weight. Fully triangulated, the arch holds its designed shape to
+ * within a few centimetres.
  *
  * **The deck now actually hangs from the arch.** Only the deck's two end rows stay
  * [FixedPosition]-pinned (resting on the abutments, same as [buildBridge]'s own default) -
  * every intermediate hanger row that used to be pinned directly via `extraPinnedRows` is now
- * held up *only* by a real tension-only [Spring]/[Damper] hanger to the arch's lower chord.
+ * held up *only* by real tension-only [Spring]/[Damper] hangers to the arch's lower chord - a
+ * fan of them per side per hanger row (one to the deck edge, plus inclined ones to every deck
+ * column on that side's half), since a deck hung only at its edges is a flat spring membrane
+ * that sags badly along its centreline.
  * Each hanger's `restLength` is measured from the two ends' own just-built positions
  * (`(archPosition - deckPosition).length()`), not guessed at the way [buildSuspensionBridge]'s
  * own suspenders originally were - since both the arch and the deck are already placed in their
@@ -53,11 +58,10 @@ import particlesim.surface.Surface
  * stiffness; this is a separate, cheaper way to avoid a large initial *displacement* from
  * equilibrium in the first place).
  *
- * Stability tuning for the arch's own new spring network (and now the hangers that actually
- * depend on it) is explicitly deferred (per the user's own framing, not this function's usual
- * "tune empirically before shipping" habit) - the stiffness/damping/mass values below are a
- * reasonable first guess in the same "steel" category as the deck's own, not independently
- * verified the way every other number in this file's siblings was before landing.
+ * Stiffness/damping/mass values are in the same "steel" category as the deck's own and run at
+ * the deck's own [TRAIN_TRESTLE_DT]; with the arch fully triangulated and the deck fan-hung,
+ * the whole structure settles to within a few centimetres of its as-built shape (~0.15 with the load on it) and stays there
+ * through a load crossing ([ArchBridgeStabilityTest] pins this down).
  *
  * Also carries a crosswind [Wind] force on the deck's own triangles (§7.2), currently zeroed
  * out (velocity `[0,0,0]`) while the arch's own dynamics are still being worked out - still a
@@ -77,7 +81,7 @@ data class ArchBridgeScenario(
     /** One entry per side, each a `(upperChordIds, lowerChordIds)` pair. */
     val archSides: List<Pair<List<Int>, List<Int>>>,
     /** Every arch spring connection (each side's own structural/shear/bend lattice, plus the
-     * left-to-right cross-bracing) as plain pairs, for rendering as line segments (see
+     * left-to-right rungs and bracing diagonals) as plain pairs, for rendering as line segments (see
      * [particlesim.debug.ArchBridgeScene]) - recomputed once here rather than read back from
      * the `MeshSprings`/`Spring` objects themselves since none of them are breakable, so the
      * connection list never actually changes frame to frame. */
@@ -92,8 +96,8 @@ data class ArchBridgeScenario(
 )
 
 /** Shares [TRAIN_TRESTLE_DT] - the deck is the exact same stiffness category ("steel"), just
- * held up differently, so there's no new stability budget to re-derive. Not re-derived for the
- * arch's own new dynamics either, per this file's own doc comment on why. */
+ * held up differently, so there's no new stability budget to re-derive. Verified for the arch's own
+ * dynamics too by [ArchBridgeStabilityTest]. */
 const val ARCH_BRIDGE_DT = TRAIN_TRESTLE_DT
 
 fun buildArchBridge(
@@ -205,44 +209,72 @@ fun buildArchBridge(
         UniformGravity("${placement.name(side)}.arch", Vector3(0.0, -9.8, 0.0), name = placement.name("$side-gravity"))
     }
 
-    // One hanger per side per hanger row, from that row's lower-chord point straight down to
-    // the deck's own edge particle on the same side - a real tension-only (compressionStiffness
-    // = 0, a hanger can't push, same reasoning buildRope's own compression-free segments use)
-    // spring now, since the deck is no longer independently pinned at this row at all: this is
-    // what's actually holding it up. restLength is measured from the two ends' own as-built
-    // positions (see this file's own class doc comment on why that - not a guessed constant -
-    // is what keeps the initial transient gentle).
+    // A fan of hangers per side per hanger row, all from that row's lower-chord point down to
+    // the deck: one straight down to the deck's own edge particle on that side, plus inclined
+    // ones to every deck column on that side's half (the centre column gets one from each
+    // side). Edge-only hangers left the deck spanning its full width between them as a flat
+    // sheet of springs - a membrane with almost no bending stiffness, so its centreline sagged
+    // badly even with the arch above holding firm. The inclined hangers make each hanger row's
+    // cross-section a set of triangles (arch point, deck column, deck column), the job a real
+    // arch bridge's cross-girders do.
+    //
+    // Every hanger is tension-only (compressionStiffness = 0, a hanger can't push, same
+    // reasoning buildRope's own compression-free segments use) - the deck is no longer
+    // independently pinned at these rows at all, so this is what's actually holding it up.
+    // restLength is measured from the two ends' own as-built positions (see this file's own
+    // class doc comment on why that - not a guessed constant - is what keeps the initial
+    // transient gentle).
     val hangerSprings = ArrayList<Spring>()
     val hangerDampers = ArrayList<Damper>()
     val hangerConnections = ArrayList<Pair<Int, Int>>()
+    val centreCol = cols / 2
     for (r in hangerRows) {
         archSides.forEachIndexed { i, (_, lower) ->
             val archId = lower[r]
-            val deckId = deck.grid[r][if (i == 0) 0 else cols - 1]
             val side = if (i == 0) "left" else "right"
-            val restLength = (store.position(archId) - store.position(deckId)).length()
-            hangerSprings += Spring(archId, deckId, restLength = restLength, stiffness = hangerStiffness, compressionStiffness = 0.0, name = placement.name("hanger-$side-$r"))
-            hangerDampers += Damper(archId, deckId, damping = hangerDamping, name = placement.name("hanger-$side-damper-$r"))
-            hangerConnections += archId to deckId
+            val deckCols = if (i == 0) 0..centreCol else (cols - 1 - centreCol until cols)
+            for (c in deckCols) {
+                val deckId = deck.grid[r][c]
+                val restLength = (store.position(archId) - store.position(deckId)).length()
+                hangerSprings += Spring(archId, deckId, restLength = restLength, stiffness = hangerStiffness, compressionStiffness = 0.0, name = placement.name("hanger-$side-$r-$c"))
+                hangerDampers += Damper(archId, deckId, damping = hangerDamping, name = placement.name("hanger-$side-damper-$r-$c"))
+                hangerConnections += archId to deckId
+            }
         }
     }
 
-    // Lateral cross-bracing: ties the left and right arch trusses together at every hanger row,
-    // both chords - without this the two sides would have no structural connection to each
-    // other at all once the arch is free to move, the real "portal bracing" role in a twin-arch
-    // bridge. A plain horizontal strut (both chords sit at the same height on either side at
-    // any given row), restLength = the known X separation (2*halfWidth) rather than measured
-    // back from positions, since it's the same for every row by construction.
+    // Lateral bracing: turns the two planar arch trusses into one triangulated space truss.
+    // Plain rungs alone (left[r] to right[r]) leave every bay between two rungs a rectangle,
+    // which is a mechanism - the arches can rack sideways together and twist out of plane with
+    // nothing resisting it, which is exactly how this bridge used to fold up under its own
+    // weight. So every bay gets triangles in all three bracing planes:
+    // - **Upper and lower chord planes** (the real bridge's top/bottom wind bracing): a 2-row
+    //   grid of `listOf(leftChord, rightChord)` again falls straight out of Grid's helpers -
+    //   the rungs are the `c`-direction structural edges (row-to-row, i.e. left-to-right), and
+    //   `shearEdges` gives the X-diagonals across each bay. The along-chord structural edges
+    //   are skipped, since each side's own arch lattice above already has them.
+    // - **Sway frames** (the cross-section at each row): X-diagonals from each side's upper
+    //   chord to the other side's lower chord, so the rectangle formed by the two upper/lower
+    //   pairs at a row can't shear into a parallelogram either.
+    // Rest lengths come from the as-built positions (MeshSprings' own convention), so every
+    // brace starts at zero strain.
     val (leftUpper, leftLower) = archSides[0]
     val (rightUpper, rightLower) = archSides[1]
-    val crossBraceSprings = ArrayList<Spring>()
-    val crossBraceDampers = ArrayList<Damper>()
-    for (r in hangerRows) {
-        for ((leftId, rightId, chordName) in listOf(Triple(leftUpper[r], rightUpper[r], "upper"), Triple(leftLower[r], rightLower[r], "lower"))) {
-            crossBraceSprings += Spring(leftId, rightId, restLength = halfWidth * 2.0, stiffness = crossBraceStiffness, name = placement.name("cross-brace-$chordName-$r"))
-            crossBraceDampers += Damper(leftId, rightId, damping = crossBraceDamping, name = placement.name("cross-brace-$chordName-damper-$r"))
-        }
+    val crossBraceRungs = ArrayList<Grid.Edge>()
+    val crossBraceDiagonals = ArrayList<Grid.Edge>()
+    for ((left, right) in listOf(leftUpper to rightUpper, leftLower to rightLower)) {
+        val plane = listOf(left, right)
+        crossBraceRungs += left.indices.map { r -> Grid.Edge(left[r], right[r]) }
+        crossBraceDiagonals += Grid.shearEdges(plane)
     }
+    for (r in leftUpper.indices) {
+        crossBraceDiagonals += Grid.Edge(leftUpper[r], rightLower[r])
+        crossBraceDiagonals += Grid.Edge(leftLower[r], rightUpper[r])
+    }
+    val crossBraceForces = listOf(
+        MeshSprings(crossBraceRungs, store, stiffness = crossBraceStiffness, damping = crossBraceDamping, name = placement.name("cross-brace-rungs")),
+        MeshSprings(crossBraceDiagonals, store, stiffness = crossBraceStiffness, damping = crossBraceDamping, name = placement.name("cross-brace-diagonals")),
+    )
 
     // Set to zero for now (velocity [0,0,0]) while the arch's own dynamics are still being
     // worked out - still a real, named, inspectable field force (§10.2's "show arrows" toggle
@@ -257,14 +289,14 @@ fun buildArchBridge(
     return ArchBridgeScenario(
         store = store,
         groups = groups,
-        forces = deck.forces + wind + archForces + archGravities + crossBraceSprings + crossBraceDampers + hangerSprings + hangerDampers,
+        forces = deck.forces + wind + archForces + archGravities + crossBraceForces + hangerSprings + hangerDampers,
         constraints = deck.constraints + pylonLegs.flatMap { it.constraints } + archConstraints,
         collisions = deck.collisions,
         deckGrid = deck.grid,
         deckSurface = deck.surface,
         pylonLegs = pylonLegs.map { it.poleIds },
         archSides = archSides,
-        archConnections = archConnections + crossBraceSprings.map { it.particleA to it.particleB },
+        archConnections = archConnections + (crossBraceRungs + crossBraceDiagonals).map { it.a to it.b },
         hangerConnections = hangerConnections,
         loadId = deck.loadId,
         loadStart = deck.loadStart,

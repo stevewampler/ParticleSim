@@ -72,29 +72,61 @@ class ArchBridgeStabilityTest {
     }
 
     @Test
-    fun `the deck sags under load but doesn't collapse, now that it actually hangs from the arch`() {
-        // No longer "barely deflects" (that was the pre-hanger, still-independently-pinned
-        // deck's own property, and the trestle's deck still has it) - the deck's whole point
-        // now is that it depends on the arch/hanger system, which has real give. This is just a
-        // sanity bound against outright collapse, not a real tuned tolerance - see
-        // buildArchBridge's own doc comment on why real stability tuning is deferred here.
+    fun `the arch and deck hold their designed shape through a load crossing`() {
+        // Regression for the arch folding down onto the deck: with only rungs between the two
+        // arch trusses (no bracing diagonals) and hangers only at the deck edges, the arch peak
+        // dropped by more than its own rise and the deck centreline sagged ~0.5. Fully
+        // triangulated, every arch/deck particle stays within ~0.15 of where it was built, even with the load on it.
+        val scenario = buildArchBridge()
+        val integrator = Integrator()
+        val structureIds = scenario.archSides.flatMap { (u, l) -> u + l } + scenario.deckGrid.flatten()
+        val start = structureIds.associateWith { scenario.store.position(it) }
+
+        var t = 0.0
+        val settleSteps = (1.0 / ARCH_BRIDGE_DT).toInt()
+        val steps = (8.0 / ARCH_BRIDGE_DT).toInt()
+        var maxDisplacement = 0.0
+        var maxLateral = 0.0
+        for (i in 0 until steps) {
+            if (i < settleSteps) {
+                scenario.store.setPosition(scenario.loadId, scenario.loadStart)
+                scenario.store.setVelocity(scenario.loadId, particlesim.core.Vector3.ZERO)
+            } else if (i == settleSteps) {
+                scenario.store.setVelocity(scenario.loadId, scenario.loadStartVelocity)
+            }
+            integrator.step(scenario.store, scenario.groups, scenario.forces, scenario.constraints, t, ARCH_BRIDGE_DT)
+            scenario.collisions.resolve(scenario.store, scenario.groups, t, ARCH_BRIDGE_DT)
+            t += ARCH_BRIDGE_DT
+            if (i % 100 == 0) {
+                for (id in structureIds) {
+                    val d = scenario.store.position(id) - start.getValue(id)
+                    maxDisplacement = maxOf(maxDisplacement, d.length())
+                    maxLateral = maxOf(maxLateral, abs(d.x))
+                }
+            }
+        }
+
+        assertTrue(maxDisplacement < 0.25, "arch/deck particle moved $maxDisplacement from its built position - the structure is collapsing")
+        assertTrue(maxLateral < 0.05, "arch/deck particle drifted $maxLateral sideways - the two arch trusses are racking")
+    }
+
+    @Test
+    fun `the deck mid-span stays level across its width`() {
+        // Edge-only hangers left the deck's centreline sagging far below its hung edges; the
+        // fan hangers should keep the whole mid-span row at nearly the same height.
         val scenario = buildArchBridge()
         val integrator = Integrator()
         val midRow = scenario.deckGrid[scenario.deckGrid.size / 2]
-        val startY = midRow.map { scenario.store.position(it).y }.average()
 
         var t = 0.0
-        val steps = (6.0 / ARCH_BRIDGE_DT).toInt()
+        val steps = (3.0 / ARCH_BRIDGE_DT).toInt()
         repeat(steps) {
             integrator.step(scenario.store, scenario.groups, scenario.forces, scenario.constraints, t, ARCH_BRIDGE_DT)
             scenario.collisions.resolve(scenario.store, scenario.groups, t, ARCH_BRIDGE_DT)
             t += ARCH_BRIDGE_DT
         }
 
-        val endY = midRow.map { scenario.store.position(it).y }.average()
-        assertTrue(
-            abs(endY - startY) < 1.0,
-            "deck mid-span deflected ${abs(endY - startY)} - that's more than a sanity bound against outright collapse should allow",
-        )
+        val ys = midRow.map { scenario.store.position(it).y }
+        assertTrue(ys.max() - ys.min() < 0.02, "deck mid-span row isn't level across its width: heights $ys")
     }
 }

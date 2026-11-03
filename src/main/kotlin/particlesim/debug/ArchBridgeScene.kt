@@ -25,10 +25,8 @@ import particlesim.render.SurfaceRenderer
 class ArchBridgeScene : DemoScene {
     private val scenario = buildArchBridge()
     private val integrator = Integrator()
-    // The deck itself is still rigid by construction - nothing to settle there - but the arch's
-    // own spring network (new, see buildArchBridge's own doc comment on why its tuning is
-    // deferred) genuinely does need a moment to find whatever shape it settles into before
-    // anything starts crossing the deck underneath it.
+    // The arch and hung deck are dynamic, so they need a moment to settle the few centimetres
+    // into their loaded shape before anything starts crossing the deck.
     private val settleSeconds = 2.0
     private val cycleSeconds = 10.0
     private var cycleStart: Double? = null
@@ -54,8 +52,8 @@ class ArchBridgeScene : DemoScene {
     )
 
     // scenario.archConnections/hangerConnections already carry every real spring connection
-    // (each side's own structural/shear/bend lattice, the left-right cross-bracing, and now the
-    // hangers actually holding the deck up - see buildArchBridge's own doc comment) - rendering
+    // (each side's own structural/shear/bend lattice, the left-right rungs and bracing diagonals, and
+    // the hangers actually holding the deck up - see buildArchBridge's own doc comment) - rendering
     // those directly rather than re-deriving a lattice pattern here keeps this view honest about
     // what the physics actually connects, not just a visual approximation of it. Pylon legs are
     // the one remaining plain line segment (still not a spring - purely static, see
