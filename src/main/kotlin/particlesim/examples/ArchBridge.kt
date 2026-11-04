@@ -5,14 +5,12 @@ import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
-import particlesim.expr.ExpressionParser
 import particlesim.physics.Constraint
 import particlesim.physics.Damper
 import particlesim.physics.Force
 import particlesim.physics.MeshSprings
 import particlesim.physics.Spring
 import particlesim.physics.UniformGravity
-import particlesim.physics.Wind
 import particlesim.surface.Grid
 import particlesim.surface.Surface
 
@@ -64,10 +62,8 @@ import particlesim.surface.Surface
  * the whole structure settles to within a few centimetres of its as-built shape (~0.15 with the load on it) and stays there
  * through a load crossing ([ArchBridgeStabilityTest] pins this down).
  *
- * Also carries a crosswind [Wind] force on the deck's own triangles (§7.2), currently zeroed
- * out (velocity `[0,0,0]`) while the arch's own dynamics are still being worked out - still a
- * real, named, inspectable force (its "show arrows" toggle still works), just with nothing to
- * show right now.
+ * The deck carries [buildBridge]'s own wind force - the flag's gusting crosswind
+ * ([FLAG_WIND_VELOCITY]) on the deck triangles.
  */
 data class ArchBridgeScenario(
     val store: ParticleStore,
@@ -282,20 +278,10 @@ fun buildArchBridge(
         MeshSprings(crossBraceDiagonals, store, stiffness = crossBraceStiffness, damping = crossBraceDamping, name = placement.name("cross-brace-diagonals")),
     )
 
-    // Set to zero for now (velocity [0,0,0]) while the arch's own dynamics are still being
-    // worked out - still a real, named, inspectable field force (§10.2's "show arrows" toggle
-    // still works, just with nothing to show), same construction buildFlag's own wind uses.
-    val wind = Wind(
-        deck.surface.triangles,
-        ExpressionParser.parseVector("[0.0, 0.0, 0.0]"),
-        density = 1.2,
-        name = placement.name("wind"),
-    )
-
     return ArchBridgeScenario(
         store = store,
         groups = groups,
-        forces = deck.forces + wind + archForces + archGravities + crossBraceForces + hangerSprings + hangerDampers + floorBeams.forces,
+        forces = deck.forces + archForces + archGravities + crossBraceForces + hangerSprings + hangerDampers + floorBeams.forces,
         constraints = deck.constraints + pylonLegs.flatMap { it.constraints } + archConstraints,
         collisions = deck.collisions,
         deckGrid = deck.grid,

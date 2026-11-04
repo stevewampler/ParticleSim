@@ -6,11 +6,13 @@ import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
+import particlesim.expr.ExpressionParser
 import particlesim.physics.Constraint
 import particlesim.physics.Drag
 import particlesim.physics.Force
 import particlesim.physics.MeshSprings
 import particlesim.physics.UniformGravity
+import particlesim.physics.Wind
 import particlesim.surface.Grid
 import particlesim.surface.Surface
 
@@ -88,6 +90,10 @@ fun buildSuspensionBridge(
     loadRadius: Double = 0.14,
     loadSpeed: Double = 3.5,
     loadDragCoefficient: Double = 0.4,
+    /** Wind velocity expression (§7.2) on the planks and the side netting - the flag's gusting
+     * crosswind by default; `null` for no wind force at all. */
+    windVelocity: String? = FLAG_WIND_VELOCITY,
+    windDensity: Double = 1.2,
     store: ParticleStore = ParticleStore(),
     groups: Groups = Groups(),
     placement: ShapePlacement = ShapePlacement(),
@@ -208,6 +214,14 @@ fun buildSuspensionBridge(
     }
     val sideNetting = Surface(nettingTriangles)
 
+    // Wind on the planks and the side netting: the netting is the bridge's only surface facing
+    // a crosswind (the planks lie flat, so they mostly feel the gusts' vertical component), so
+    // it's what lets the wind actually push the bridge sideways - much as a real netted rope
+    // bridge catches it.
+    val wind = windVelocity?.let {
+        Wind(plankTriangles + nettingTriangles, ExpressionParser.parseVector(it), density = windDensity, name = placement.name("wind"))
+    }
+
     val collisionRules = listOf(walkwaySurface, sideNetting).map { surface ->
         SurfaceCollisionRule(
             group = loadGroup,
@@ -221,7 +235,8 @@ fun buildSuspensionBridge(
     return SuspensionBridgeScenario(
         store = store,
         groups = groups,
-        forces = forces + listOf(
+        forces = forces + listOfNotNull(
+            wind,
             UniformGravity(loadGroup, Vector3(0.0, -9.8, 0.0), name = placement.name("load-gravity")),
             Drag(loadGroup, coefficient = loadDragCoefficient, name = placement.name("load-drag")),
         ),

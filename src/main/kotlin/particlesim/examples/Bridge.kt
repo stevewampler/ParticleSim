@@ -6,12 +6,14 @@ import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
+import particlesim.expr.ExpressionParser
 import particlesim.physics.Constraint
 import particlesim.physics.Drag
 import particlesim.physics.FixedPosition
 import particlesim.physics.Force
 import particlesim.physics.MeshSprings
 import particlesim.physics.UniformGravity
+import particlesim.physics.Wind
 import particlesim.surface.Grid
 import particlesim.surface.Surface
 
@@ -98,6 +100,10 @@ fun buildBridge(
     loadDragCoefficient: Double = 0.6,
     pinEnds: Boolean = true,
     extraPinnedRows: Set<Int> = emptySet(),
+    /** Wind velocity expression on the deck's triangles (§7.2) - the flag's gusting crosswind by
+     * default; `null` for no wind force at all. */
+    windVelocity: String? = FLAG_WIND_VELOCITY,
+    windDensity: Double = 1.2,
     store: ParticleStore = ParticleStore(),
     groups: Groups = Groups(),
     placement: ShapePlacement = ShapePlacement(),
@@ -147,6 +153,12 @@ fun buildBridge(
     val triangles = Grid.triangles(grid)
     val surface = Surface(triangles, name = placement.name("deck-surface"))
     val gravity = UniformGravity(deckGroup, Vector3(0.0, -9.8, 0.0), name = placement.name("gravity"))
+    // Wind pushes along each triangle's normal only, so on a flat deck it acts mostly through
+    // the gusts' small vertical component and through any tilt or twist of the deck - a flat
+    // plate edge-on to a crosswind barely feels it, as in reality.
+    val wind = windVelocity?.let {
+        Wind(triangles, ExpressionParser.parseVector(it), density = windDensity, name = placement.name("wind"))
+    }
 
     // [pinEnds] = false and an empty [extraPinnedRows] (buildSuspensionBridge's case): the
     // abutment group still exists - a scene can still use it to mark where the ends are - it
@@ -181,7 +193,7 @@ fun buildBridge(
     return BridgeScenario(
         store = store,
         groups = groups,
-        forces = listOf(gravity, loadGravity, loadDrag, structural, shear, bend),
+        forces = listOfNotNull(gravity, loadGravity, loadDrag, structural, shear, bend, wind),
         constraints = listOfNotNull(abutmentAnchor),
         collisions = SurfaceCollisionSystem(listOf(collisionRule)),
         grid = grid,

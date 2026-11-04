@@ -54,6 +54,11 @@ data class FlagScenario(
  */
 const val FLAG_DT = 1e-3
 
+/** The flag's gusting wind velocity (m/s), as an expression string - also the default wind on
+ * every bridge scene's deck/walkway ([buildBridge], [buildSuspensionBridge]). Mostly a crosswind
+ * along +x (6 ± 2), with small vertical and along-span gust components. */
+const val FLAG_WIND_VELOCITY = "[6.0 + 2.0*sin(t*0.7), 0.3*sin(t*1.3), 0.8*cos(t*0.9)]"
+
 fun buildFlag(
     rows: Int = 8,
     cols: Int = 14,
@@ -116,7 +121,7 @@ fun buildFlag(
     // front-ends already prove this evaluates bit-identically to the lambda form it replaces.
     val wind = Wind(
         triangles,
-        ExpressionParser.parseVector("[6.0 + 2.0*sin(t*0.7), 0.3*sin(t*1.3), 0.8*cos(t*0.9)]"),
+        ExpressionParser.parseVector(FLAG_WIND_VELOCITY),
         density = 1.2,
         name = placement.name("wind"),
     )

@@ -31,7 +31,8 @@ class SuspensionBridgeStabilityTest {
 
     @Test
     fun `the rope bridge holds its hanging shape through a load crossing`() {
-        val s = buildSuspensionBridge()
+        // In calm air - the wind's own (deliberate) sway is checked separately below.
+        val s = buildSuspensionBridge(windVelocity = null)
         val ids = s.walkway.flatten() + s.handrails.flatten()
         val start = ids.associateWith { s.store.position(it) }
         var maxDisplacement = 0.0
@@ -64,7 +65,7 @@ class SuspensionBridgeStabilityTest {
 
     @Test
     fun `the walkway and handrails sag between the posts`() {
-        val s = buildSuspensionBridge(sag = 0.6, railHeight = 1.0)
+        val s = buildSuspensionBridge(sag = 0.6, railHeight = 1.0, windVelocity = null)
         run(s, seconds = 2.0)
         val midWalkway = s.store.position(s.walkway[s.walkway.size / 2][0]).y
         val endWalkway = s.store.position(s.walkway[0][0]).y
@@ -72,6 +73,24 @@ class SuspensionBridgeStabilityTest {
         val rail = s.handrails[0]
         val midRail = s.store.position(rail[rail.size / 2]).y
         assertTrue(abs(midRail - midWalkway - 1.0) < 0.15, "handrail ($midRail) isn't about railHeight above the walkway ($midWalkway) at mid-span")
+    }
+
+    @Test
+    fun `the crosswind sways the bridge sideways without throwing it around`() {
+        // The side netting faces the flag's +x crosswind, so the walkway should visibly swing
+        // downwind - but stay a sway, not a flail.
+        val s = buildSuspensionBridge()
+        val mid = s.walkway[s.walkway.size / 2]
+        val startX = mid.map { s.store.position(it).x }
+        var maxDownwind = 0.0
+        var maxSpeed = 0.0
+        run(s, seconds = 8.0) {
+            maxDownwind = maxOf(maxDownwind, mid.indices.maxOf { s.store.position(mid[it]).x - startX[it] })
+            for (id in s.walkway.flatten()) maxSpeed = maxOf(maxSpeed, s.store.velocity(id).length())
+        }
+        assertTrue(maxDownwind > 0.2, "walkway only swung $maxDownwind downwind - the wind isn't reaching the netting")
+        assertTrue(maxDownwind < 1.0, "walkway swung $maxDownwind downwind - far more than a sway")
+        assertTrue(maxSpeed < 10.0, "walkway reached $maxSpeed m/s in the wind")
     }
 
     @Test
