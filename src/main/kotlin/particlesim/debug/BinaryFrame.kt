@@ -133,7 +133,9 @@ import kotlin.math.roundToInt
  *                           than a new sentinel)
  * i32  lightCount
  * lightCount * { u8 kind (0=ambient, 1=directional, 2=point), f64 r, g, b, f64 intensity,
- *                f64 px, py, pz }
+ *                f64 px, py, pz, i32 nameLen, nameLen UTF-8 bytes }
+ *                (the name - empty for an unnamed light - ties this entry to its outliner/panel
+ *                entry, e.g. so a light's panel can toggle drawing a point light as a ball)
  *                (§10.2's `[stretch]` "Lighting & materials" — px/py/pz is unused (still sent,
  *                always zero) for an ambient light, which has no position; an empty list is
  *                every scene built before this field existed, and the viewer falls back to its
@@ -340,7 +342,7 @@ object BinaryFrame {
             COLLIDER_HEADER_SIZE + colliders.sumOf { colliderEntrySize(it) } +
             EVENT_HEADER_SIZE + events.sumOf { eventEntrySize(it) } +
             nameListSize(availableScenes) + stringSize(activeScene) +
-            LIGHT_HEADER_SIZE + lights.size * LIGHT_ENTRY_SIZE +
+            LIGHT_HEADER_SIZE + lights.sumOf { LIGHT_ENTRY_SIZE + stringSize(it.name ?: "") } +
             nameListSize(hiddenByDefaultGroups)
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
@@ -511,6 +513,7 @@ object BinaryFrame {
             buffer.putDouble(light.color.r); buffer.putDouble(light.color.g); buffer.putDouble(light.color.b)
             buffer.putDouble(light.intensity)
             putVector(buffer, position)
+            putString(buffer, light.name ?: "")
         }
         putNameList(buffer, hiddenByDefaultGroups)
 
@@ -632,10 +635,11 @@ object BinaryFrame {
             val color = Color(buf.double, buf.double, buf.double)
             val intensity = buf.double
             val position = getVector(buf)
+            val name = getString(buf).ifEmpty { null }
             when (kind) {
-                AMBIENT_LIGHT_KIND -> Light.Ambient(color, intensity)
-                DIRECTIONAL_LIGHT_KIND -> Light.Directional(position, color, intensity)
-                POINT_LIGHT_KIND -> Light.Point(position, color, intensity)
+                AMBIENT_LIGHT_KIND -> Light.Ambient(color, intensity, name)
+                DIRECTIONAL_LIGHT_KIND -> Light.Directional(position, color, intensity, name)
+                POINT_LIGHT_KIND -> Light.Point(position, color, intensity, name)
                 else -> error("unknown light kind byte: $kind")
             }
         }

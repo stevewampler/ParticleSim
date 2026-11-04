@@ -333,6 +333,19 @@ const customLights = [];
 const customLightsGroup = new THREE.Group();
 scene.add(customLightsGroup);
 
+// A point light drawn as a small ball at its position, in its own color - opt-in per named light
+// via the "show light" toggle in that light's panel (names in shownLightBalls, cleared on scene
+// change like the other per-object toggles). Unlit (MeshBasicMaterial), so the ball reads as the
+// light's own color rather than being shaded by the very light it marks. Pooled by light index,
+// alongside customLights.
+const LIGHT_BALL_RADIUS = 0.08;
+const lightBallGeometry = new THREE.SphereGeometry(LIGHT_BALL_RADIUS, 16, 12);
+const lightBalls = [];
+const lightBallsGroup = new THREE.Group();
+scene.add(lightBallsGroup);
+const shownLightBalls = new Set();
+let latestLights = [];
+
 // --- Camera: scripted (engine-evaluated, §10.1) vs. manual (viewer-local orbit) -----------
 // Both drive the *same* camera object; only one writes to it on any given frame, decided by
 // cameraMode, so they never fight each other. OrbitControls stays enabled at all times so its
@@ -860,6 +873,15 @@ function applyFrame(frame) {
   while (customLights.length > frame.lights.length) {
     customLightsGroup.remove(customLights.pop());
   }
+  latestLights = frame.lights;
+  while (lightBalls.length < frame.lights.length) {
+    const ball = new THREE.Mesh(lightBallGeometry, new THREE.MeshBasicMaterial());
+    lightBallsGroup.add(ball);
+    lightBalls.push(ball);
+  }
+  while (lightBalls.length > frame.lights.length) {
+    lightBallsGroup.remove(lightBalls.pop());
+  }
   frame.lights.forEach((decl, i) => {
     let light = customLights[i];
     // A pooled slot's THREE.Light type can't be changed in place - swap the object itself when
@@ -878,6 +900,13 @@ function applyFrame(frame) {
     light.color.setRGB(decl.color.r, decl.color.g, decl.color.b);
     light.intensity = decl.intensity;
     if (decl.kind !== "ambient") light.position.set(decl.position.x, decl.position.y, decl.position.z);
+
+    const ball = lightBalls[i];
+    ball.visible = decl.kind === "point" && decl.name !== "" && shownLightBalls.has(decl.name);
+    if (ball.visible) {
+      ball.position.set(decl.position.x, decl.position.y, decl.position.z);
+      ball.material.color.setRGB(decl.color.r, decl.color.g, decl.color.b);
+    }
   });
 
   // Arrow-sampled field forces (§10.2), grouped by source force. §10.3's per-force visibility
@@ -1243,8 +1272,9 @@ function decodeFrame(buffer) {
     const b = view.getFloat64(offset, true); offset += 8;
     const intensity = view.getFloat64(offset, true); offset += 8;
     const position = readVec();
+    const name = readString(); // "" for an unnamed light
     const kind = kindByte === 0 ? "ambient" : kindByte === 1 ? "directional" : "point";
-    lights[i] = { kind, color: { r, g, b }, intensity, position };
+    lights[i] = { kind, color: { r, g, b }, intensity, position, name };
   }
 
   // Groups whose "show particles" toggle starts unchecked for this scene - seeded into
@@ -1299,6 +1329,7 @@ function resetViewerStateForSceneChange(sceneName) {
   hiddenSurfaces.clear();
   shownForces.clear();
   shownSurfaceLines.clear();
+  shownLightBalls.clear();
   updateSelectionHighlight();
   renderObjectPanel();
   // applyFrame only ever writes the camera when frame.camera is non-null (§10.1's scripted
@@ -2214,6 +2245,11 @@ registerEntityKind({
   kind: "lights",
   getNames: (registry) => registry.lights,
   renderPanel: () => {
+    // Only a point light has a single position worth marking (ambient has none; a directional
+    // light's "position" is just where its parallel rays come from).
+    if (latestLights.some((l) => l.name === selectedName && l.kind === "point")) {
+      addPanelToggle("show light", shownLightBalls, true);
+    }
     currentFieldInputs = {};
     renderEditableFields("light", selectedName, currentFieldInputs);
   },

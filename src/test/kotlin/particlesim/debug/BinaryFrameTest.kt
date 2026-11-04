@@ -382,6 +382,19 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `light names round-trip, and an unnamed light stays unnamed`() {
+        val store = ParticleStore()
+        val lights = listOf(
+            Light.Point(position = Vector3(0.0, 3.0, 0.0), color = Color(1.0, 0.85, 0.6), intensity = 45.0, name = "bounce-highlight"),
+            Light.Ambient(color = Color(0.5, 0.5, 0.5), intensity = 0.4),
+        )
+        val decoded = BinaryFrame.decode(
+            BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), lights = lights),
+        )
+        assertEquals(listOf("bounce-highlight", null), decoded.lights.map { it.name })
+    }
+
+    @Test
     fun `round-trips a named force's arrow samples`() {
         val store = ParticleStore()
         val samples = listOf(
