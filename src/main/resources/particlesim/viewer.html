@@ -350,6 +350,11 @@ const lightBallsGroup = new THREE.Group();
 scene.add(lightBallsGroup);
 const shownLightBalls = new Set();
 let latestLights = [];
+// Named lights a person has switched off with the "on" checkbox in the light's panel - viewer-only
+// (lights affect rendering, never physics), so it never crosses the wire and the light's own
+// color/intensity are left untouched, coming back exactly as they were when switched on again.
+// Cleared on scene change like the other per-object toggles.
+const disabledLights = new Set();
 
 // --- Camera: scripted (engine-evaluated, §10.1) vs. manual (viewer-local orbit) -----------
 // Both drive the *same* camera object; only one writes to it on any given frame, decided by
@@ -912,6 +917,7 @@ function applyFrame(frame) {
     }
     light.color.setRGB(decl.color.r, decl.color.g, decl.color.b);
     light.intensity = decl.intensity;
+    light.visible = !(decl.name !== "" && disabledLights.has(decl.name));
     if (decl.kind !== "ambient") light.position.set(decl.position.x, decl.position.y, decl.position.z);
 
     const shown = decl.name !== "" && shownLightBalls.has(decl.name);
@@ -1355,6 +1361,7 @@ function resetViewerStateForSceneChange(sceneName) {
   shownForces.clear();
   shownSurfaceLines.clear();
   shownLightBalls.clear();
+  disabledLights.clear();
   updateSelectionHighlight();
   renderObjectPanel();
   // applyFrame only ever writes the camera when frame.camera is non-null (§10.1's scripted
@@ -2270,6 +2277,7 @@ registerEntityKind({
   kind: "lights",
   getNames: (registry) => registry.lights,
   renderPanel: () => {
+    addPanelToggle("on", disabledLights);
     // Point lights draw as a ball, directional lights as an arrow along their rays (see
     // lightBalls/lightArrows); an ambient light has no position or direction to show.
     if (latestLights.some((l) => l.name === selectedName && (l.kind === "point" || l.kind === "directional"))) {
