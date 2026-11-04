@@ -1,5 +1,7 @@
 package particlesim.debug
 
+import particlesim.physics.DragConstraint
+
 /**
  * §9.6's scene library and switching mechanism: holds a named catalog of [DemoScene] factories
  * and exactly one live [scene] at a time, built from whichever factory was most recently
@@ -13,10 +15,23 @@ package particlesim.debug
  * class, not any individual scene, knows about the library or the currently active name) and
  * forwards everything else to the active scene's own [DemoScene.handleControl] - the "one
  * dispatch/reset path, not one per scene" requirement from §9.6.
+ *
+ * **Interactive drag (§9.4) lives here too, for every scene.** [dragQueue]'s messages are
+ * drained once per physics step in [advanceOneStep], and the active [DragConstraint] is applied
+ * right after the scene's own [DemoScene.step] - exactly where an [particlesim.physics.Integrator]
+ * applies its constraints (at the end of the step), so this matches passing the constraint into
+ * the scene's own integrator call without every scene having to know about dragging. Any live
+ * particle can be dragged, including ones a scene pins: the drag wins while held, and the
+ * scene's own pin puts the particle back the step after release. One small difference from a
+ * scene-internal drag: a scene's collision passes that read [particlesim.physics.Constraint.pinnedIds]
+ * (particle-particle/self collision) see the dragged particle as free rather than pinned, which
+ * only changes how a collision with it splits the impulse - its position is overwritten by the
+ * drag right afterward either way.
  */
 class SceneLibrary(
     private val factories: Map<String, () -> DemoScene>,
     defaultSceneName: String,
+    private val dragQueue: DragMessageQueue = DragMessageQueue(),
 ) {
     init {
         require(defaultSceneName in factories) { "no such scene: $defaultSceneName" }
@@ -49,6 +64,10 @@ class SceneLibrary(
         scene = newScene
         t = 0.0
         step = 0L
+        // A drag in progress belonged to the outgoing scene's particles; any still-queued drag
+        // messages did too.
+        activeDrag = null
+        dragQueue.drainAll()
         return true
     }
 
@@ -64,9 +83,32 @@ class SceneLibrary(
 
     /** Advances the active scene by exactly its own [DemoScene.dt] and increments [t]/[step] to
      * match - the runner calls this in a loop, never touching a scene's clock directly. */
+    private var activeDrag: DragConstraint? = null
+
+    /** The particle currently being dragged, if any. */
+    val draggedParticleId: Int? get() = activeDrag?.particleId
+
     fun advanceOneStep() {
+        handleDragMessages()
         scene.step(t)
+        // Re-checked after the step, not just at drag_start: emitter/expiry scenes (sparks,
+        // fire) and §10.4's delete-particle can remove the dragged particle mid-drag.
+        activeDrag?.let { drag -> if (scene.store.contains(drag.particleId)) drag.applyTo(scene.store) else activeDrag = null }
         t += scene.dt
         step++
+    }
+
+    private fun handleDragMessages() {
+        for (message in dragQueue.drainAll()) {
+            when (message) {
+                is DragMessage.Start ->
+                    activeDrag = if (scene.store.contains(message.particleId)) DragConstraint(message.particleId, message.target) else null
+                is DragMessage.Move -> activeDrag?.updateTarget(message.target, scene.dt)
+                is DragMessage.End -> {
+                    activeDrag?.let { if (scene.store.contains(it.particleId)) scene.store.setVelocity(it.particleId, it.releaseVelocity()) }
+                    activeDrag = null
+                }
+            }
+        }
     }
 }

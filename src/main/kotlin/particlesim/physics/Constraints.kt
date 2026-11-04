@@ -140,7 +140,12 @@ class DragConstraint(val particleId: Int, initialTarget: Vector3) : Constraint {
         lastDt = dt
     }
 
-    override fun applyPosition(store: ParticleStore, groups: Groups, t: Double) {
+    override fun applyPosition(store: ParticleStore, groups: Groups, t: Double) = applyTo(store)
+
+    /** [applyPosition] without the [Groups]/time it never uses - for a caller that applies the
+     * drag outside an [particlesim.physics.Integrator] step (the scene library's generic drag,
+     * which runs it right after a scene's own step, where the integrator would have). */
+    fun applyTo(store: ParticleStore) {
         store.setPosition(particleId, currentTarget)
         store.setVelocity(particleId, Vector3.ZERO)
     }

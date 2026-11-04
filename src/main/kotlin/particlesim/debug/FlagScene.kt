@@ -7,7 +7,6 @@ import particlesim.core.Vector3
 import particlesim.examples.FLAG_DT
 import particlesim.examples.buildFlag
 import particlesim.physics.Constraint
-import particlesim.physics.DragConstraint
 import particlesim.physics.Integrator
 import particlesim.physics.Wind
 import particlesim.render.ArrowRenderer
@@ -26,12 +25,10 @@ import kotlin.math.sin
 
 /**
  * §9.6 scene-library wrapping of [FlagDebugDemo]'s worked example - see that file's own doc
- * comment for the camera/drag/renderer/live-editing reasoning, all unchanged here. [dragQueue]
- * is handed in (not owned) by the runner, since it's the process-wide shared queue every scene
- * would drain from if it supported dragging - see [DemoScene]'s own doc comment for why a scene
- * drains it itself, inside [step], rather than the runner draining it once per frame.
+ * comment for the camera/renderer/live-editing reasoning, all unchanged here. Dragging is handled
+ * generically for every scene by [SceneLibrary], not here.
  */
-class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
+class FlagScene : DemoScene {
     private val scenario = buildFlag(rows = 8, cols = 14)
     private val structural = scenario.meshSprings[0]
     private val wind = scenario.forces.filterIsInstance<Wind>().single()
@@ -92,7 +89,6 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
     )
 
     private val integrator = Integrator()
-    private var activeDrag: DragConstraint? = null
     private val allIds = scenario.grid.flatten()
 
     override val dt = FLAG_DT
@@ -109,24 +105,7 @@ class FlagScene(private val dragQueue: DragMessageQueue) : DemoScene {
     }
 
     override fun step(t: Double) {
-        for (message in dragQueue.drainAll()) {
-            when (message) {
-                is DragMessage.Start -> {
-                    // The pole edge is already FixedPosition-constrained — dragging it would
-                    // just fight that constraint, same reasoning as DragDebugDemo excluding its
-                    // own pinned anchor.
-                    if ("pole" !in scenario.groups.groupsOf(message.particleId)) {
-                        activeDrag = DragConstraint(message.particleId, message.target)
-                    }
-                }
-                is DragMessage.Move -> activeDrag?.updateTarget(message.target, dt)
-                is DragMessage.End -> {
-                    activeDrag?.let { scenario.store.setVelocity(it.particleId, it.releaseVelocity()) }
-                    activeDrag = null
-                }
-            }
-        }
-        val constraints: List<Constraint> = activeDrag?.let { scenario.constraints + it } ?: scenario.constraints
+        val constraints: List<Constraint> = scenario.constraints
         integrator.step(scenario.store, scenario.groups, scenario.forces, constraints, t, dt)
         selfCollisions.resolve(scenario.store, scenario.groups, constraints)
     }

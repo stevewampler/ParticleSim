@@ -27,13 +27,13 @@ package particlesim.debug
 fun main(args: Array<String>) {
     val viewerInput = ViewerInput()
     val factories = linkedMapOf<String, () -> DemoScene>(
-        "flag" to { FlagScene(viewerInput.dragQueue) },
+        "flag" to { FlagScene() },
         "ballBounce" to { BallBounceScene() },
         "trampoline" to { TrampolineScene() },
         "sparks" to { SparksScene() },
         "fire" to { FireScene() },
         "fluid" to { FluidScene() },
-        "drag" to { DragScene(viewerInput.dragQueue) },
+        "drag" to { DragScene() },
         "particleCollision" to { ParticleCollisionScene() },
         "spatialGrid" to { SpatialGridScene() },
         "multiShape" to { MultiShapeScene() },
@@ -53,7 +53,7 @@ fun main(args: Array<String>) {
         )
         return
     }
-    val library = SceneLibrary(factories = factories, defaultSceneName = requestedScene ?: "flag")
+    val library = SceneLibrary(factories = factories, defaultSceneName = requestedScene ?: "flag", dragQueue = viewerInput.dragQueue)
 
     val renderer = DebugRenderer(onTextMessage = viewerInput::onTextMessage)
     renderer.start()

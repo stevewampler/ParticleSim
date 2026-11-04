@@ -8,7 +8,6 @@ import particlesim.lifecycle.DestructionSystem
 import particlesim.physics.Constraint
 import particlesim.physics.Damper
 import particlesim.physics.Drag
-import particlesim.physics.DragConstraint
 import particlesim.physics.FixedPosition
 import particlesim.physics.Force
 import particlesim.physics.Integrator
@@ -26,10 +25,10 @@ import particlesim.render.SceneRegistry
  * discards this whole instance and constructs a fresh one from its factory, so the hand-rolled
  * "rebuild every var from scratch" [SceneControlMessage.Restart] branch the standalone demo
  * needed is gone entirely - `store`/`groups`/`anchorId`/`fixedConstraints` go back to being
- * simple properties, only `ids`/`springs`/`dampers`/`forces`/`activeDrag` stay mutable, and only
+ * simple properties, only `ids`/`springs`/`dampers`/`forces` stay mutable, and only
  * because [DeleteParticle]/a mid-run break can prune them within *this* instance's lifetime.
  */
-class DragScene(private val dragQueue: DragMessageQueue) : DemoScene {
+class DragScene : DemoScene {
     private val linkCount = 12
     private val spacing = 0.4
     private val mass = 0.2
@@ -80,7 +79,6 @@ class DragScene(private val dragQueue: DragMessageQueue) : DemoScene {
     private val fixedConstraints = listOf(FixedPosition("anchor", store.position(anchorId), name = "anchor"))
     private val destruction = DestructionSystem()
     private val integrator = Integrator()
-    private var activeDrag: DragConstraint? = null
     private val events = mutableListOf<SimEvent>()
 
     override val dt = 1e-3
@@ -100,7 +98,6 @@ class DragScene(private val dragQueue: DragMessageQueue) : DemoScene {
                     val danglingSet = result.danglingForces.toSet()
                     forces = forces.filter { it !in danglingSet }
                     springs = springs.filter { it !in danglingSet }
-                    if (activeDrag?.particleId in destroyedSet) activeDrag = null
                     for (id in result.destroyedIds) events += SimEvent.ParticleDestroyed(id)
                 }
             }
@@ -110,25 +107,7 @@ class DragScene(private val dragQueue: DragMessageQueue) : DemoScene {
     }
 
     override fun step(t: Double) {
-        for (message in dragQueue.drainAll()) {
-            when (message) {
-                is DragMessage.Start -> {
-                    // store.contains guards against a real race, not just defensively: scene
-                    // control messages drain once per *frame*, drag messages drain once per
-                    // physics *step* inside this same frame - a queued drag_start can still
-                    // arrive already targeting an id this frame's delete just removed.
-                    if (message.particleId != anchorId && store.contains(message.particleId)) {
-                        activeDrag = DragConstraint(message.particleId, message.target)
-                    }
-                }
-                is DragMessage.Move -> activeDrag?.updateTarget(message.target, dt)
-                is DragMessage.End -> {
-                    activeDrag?.let { if (store.contains(it.particleId)) store.setVelocity(it.particleId, it.releaseVelocity()) }
-                    activeDrag = null
-                }
-            }
-        }
-        val constraints: List<Constraint> = activeDrag?.let { fixedConstraints + it } ?: fixedConstraints
+        val constraints: List<Constraint> = fixedConstraints
         // §5.4's break check is once-per-physics-step, not once-per-frame - handled here, inside
         // step, so a spring that snaps partway through a frame's several steps stops
         // contributing force for the rest of them rather than a stale reference lingering.

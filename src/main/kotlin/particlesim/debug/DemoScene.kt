@@ -59,12 +59,10 @@ data class SceneFrame(
  * particle store never change identity across its lifetime, unlike `ids()`, which some scenes -
  * e.g. an emitter-driven one - need to recompute every frame as particles spawn/die).
  *
- * Deliberately has no drag hook: [DragMessage.Move]'s target-velocity estimate is dt-sensitive
- * (`DragConstraint.updateTarget`) and needs draining at physics-step cadence, the same cadence
- * [step] already runs at - not once per rendered frame, which could be several steps behind. A
- * scene that supports dragging (see `FlagScene`) is handed the shared `DragMessageQueue`
- * directly by the runner and drains it itself from inside [step], rather than the runner
- * draining it once per frame and losing that per-step granularity.
+ * Deliberately has no drag hook: every scene supports interactive drag (§9.4) without knowing
+ * about it - [SceneLibrary.advanceOneStep] drains the drag queue at physics-step cadence (which
+ * [DragMessage.Move]'s dt-sensitive release-velocity estimate needs) and applies the drag
+ * constraint right after [step], where an integrator would. See [SceneLibrary]'s doc comment.
  *
  * [handleControl] defaults to doing nothing: a scene ignoring a message type it has no use for
  * (most scenes have no colliders to remove) is the correct outcome, the same as the `{}` no-op
