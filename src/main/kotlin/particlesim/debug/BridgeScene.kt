@@ -28,16 +28,10 @@ class BridgeScene : DemoScene {
     private var cycleStart = 0.0
     private val scene = SceneQueryImpl(scenario.store, scenario.groups)
 
-    // Tracks the load across the span from a fixed offset (elevated, off to one side) rather
-    // than a static pose - the default (6,4,8)-looking-at-origin camera frames a long, narrow
-    // deck end-on at close range (most of it off-screen past either end); following the load
-    // keeps the span's own curve and the load's crossing both in frame throughout, the same
-    // "orbit/follow via a CameraFunction" mechanism FlagScene's own scripted camera uses, just
-    // following a particle's position (§10.1) instead of orbiting a fixed lookAt.
-    private val camera = CameraFunction { _, s ->
-        val loadPos = s.position(scenario.loadId)
-        CameraPose(position = loadPos + Vector3(4.5, 2.2, -1.8), lookAt = loadPos)
-    }
+    // A fixed overview of the whole structure as built - deliberately not following the load
+    // (orbit/pan/zoom with the mouse to look around).
+    private val overview = overviewCameraPose(scenario.store, scenario.grid.flatten() + scenario.loadId)
+    private val camera = CameraFunction { _, _ -> overview }
 
     // Weathered-plank brown, low roughness reserved for the trampoline's fabric sheen (§10.2) -
     // a deck should read as matte wood, not satin. Same "prove lights are configurable, don't

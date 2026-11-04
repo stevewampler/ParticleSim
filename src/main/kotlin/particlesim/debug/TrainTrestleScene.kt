@@ -74,13 +74,10 @@ class TrainTrestleScene : DemoScene {
     // brings them back); only the load stays visible by default.
     private val hiddenByDefaultGroups = groupsHiddenByDefaultExcept(scenario.groups, scenario.trainIds)
 
-    // Tracks the lead car, same "follow a particle's position" shape BridgeScene/
-    // SuspensionBridgeScene's own cameras already use - closer and lower than the suspension
-    // bridge's own offset, since this structure doesn't tower as high.
-    private val camera = CameraFunction { _, s ->
-        val leadPos = s.position(scenario.trainIds.first())
-        CameraPose(position = leadPos + Vector3(5.5, 2.6, -2.2), lookAt = leadPos)
-    }
+    // A fixed overview of the whole structure as built - deliberately not following the load
+    // (orbit/pan/zoom with the mouse to look around).
+    private val overview = overviewCameraPose(scenario.store, allIds)
+    private val camera = CameraFunction { _, _ -> overview }
 
     override val dt = TRAIN_TRESTLE_DT
     override val store: ParticleStore = scenario.store

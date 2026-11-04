@@ -102,7 +102,13 @@
   }
   #objectPanel.open { opacity: 1; visibility: visible; pointer-events: auto; transform: translateX(0); }
   #objectPanel h4:first-child { margin-top: 0; }
-  #objectPanelTitle { color: #fff; font-weight: bold; margin-bottom: 4px; overflow-wrap: break-word; }
+  #objectPanelHeader { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 4px; }
+  #objectPanelTitle { flex: 1 1 auto; min-width: 0; color: #fff; font-weight: bold; overflow-wrap: break-word; }
+  #objectPanelClose {
+    flex: 0 0 auto; margin: -2px -4px 0 0; padding: 0 6px; font: 16px/1.2 monospace;
+    color: #aaa; background: none; border: none; border-radius: 3px; cursor: pointer;
+  }
+  #objectPanelClose:hover { color: #fff; background: rgba(255,255,255,0.15); }
   #objectPanel label { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
   #objectPanel .noRenderer { color: #888; font-style: italic; }
   #objectPanel .objectInfo { color: #9f9; margin-top: 2px; }
@@ -165,7 +171,10 @@
       <div id="outlinerLights"></div>
     </div>
     <div id="objectPanel">
-      <div id="objectPanelTitle"></div>
+      <div id="objectPanelHeader">
+        <div id="objectPanelTitle"></div>
+        <button id="objectPanelClose" type="button" title="Close (Esc)" aria-label="Close panel">×</button>
+      </div>
       <div id="objectPanelBody"></div>
     </div>
   </div>
@@ -1649,6 +1658,23 @@ function selectObject(kind, name) {
   renderObjectPanel();
 }
 
+// Three ways to close the per-object panel: its × button, Escape (from anywhere except a text
+// field, where Escape just leaves the field), or clicking the already-selected outliner row again.
+function closeObjectPanel() {
+  if (selectedKind === null) return;
+  selectObject(null, null);
+}
+document.getElementById("objectPanelClose").addEventListener("click", closeObjectPanel);
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  const el = document.activeElement;
+  if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") && el.type !== "checkbox") {
+    el.blur();
+    return;
+  }
+  closeObjectPanel();
+});
+
 // A group's member count alone doesn't explain why toggling it might do nothing visually - most
 // (or all) of its members could already be excluded from dot-drawing entirely by the server's own
 // visibleIds (e.g. FlagDebugDemo's cloth particles, mesh-only since the mesh already shows them).
@@ -1804,7 +1830,9 @@ function renderNameList(container, kind, names) {
     item.textContent = name;
     item.dataset.kind = kind;
     item.dataset.name = name;
-    item.addEventListener("click", () => selectObject(kind, name));
+    item.addEventListener("click", () => {
+      if (selectedKind === kind && selectedName === name) closeObjectPanel(); else selectObject(kind, name);
+    });
     list.appendChild(item);
   }
   container.appendChild(list);

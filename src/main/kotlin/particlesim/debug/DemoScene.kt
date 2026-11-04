@@ -2,6 +2,7 @@ package particlesim.debug
 
 import particlesim.collision.Collider
 import particlesim.core.ParticleStore
+import particlesim.core.Vector3
 import particlesim.lifecycle.Emitter
 import particlesim.lifecycle.EmitterCapPolicy
 import particlesim.physics.Constraint
@@ -180,4 +181,27 @@ fun applyEmitterMessage(message: SceneControlMessage, emitters: List<Emitter>): 
 fun groupsHiddenByDefaultExcept(groups: particlesim.core.Groups, keepVisible: Collection<Int>): Set<String> {
     val keep = keepVisible.toSet()
     return groups.names().filter { name -> groups.membersOf(name).none { it in keep } }.toSet()
+}
+
+/**
+ * A fixed camera pose that frames every particle in [ids] where it sits right now - meant to be
+ * computed once at scene construction, so it frames the whole structure as built (a bridge and
+ * its load at the start) rather than following anything as it moves. Looks at the centre of the
+ * particles' bounding box from [direction] (an elevated three-quarter view by default), far
+ * enough back that the box's bounding sphere fits the viewer's 60° vertical field of view.
+ */
+fun overviewCameraPose(
+    store: ParticleStore,
+    ids: Collection<Int>,
+    direction: Vector3 = Vector3(1.0, 0.6, -0.8),
+): CameraPose {
+    require(ids.isNotEmpty()) { "nothing to frame" }
+    val positions = ids.map { store.position(it) }
+    val min = Vector3(positions.minOf { it.x }, positions.minOf { it.y }, positions.minOf { it.z })
+    val max = Vector3(positions.maxOf { it.x }, positions.maxOf { it.y }, positions.maxOf { it.z })
+    val center = (min + max) * 0.5
+    val radius = maxOf((max - min).length() * 0.5, 0.5)
+    // sin(30°) = 0.5: a sphere of this radius just fits a 60° field of view at 2r.
+    val distance = radius / 0.5
+    return CameraPose(position = center + direction.normalized() * distance, lookAt = center)
 }

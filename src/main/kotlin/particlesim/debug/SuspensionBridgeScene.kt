@@ -67,12 +67,10 @@ class SuspensionBridgeScene : DemoScene {
     // brings them back); only the load stays visible by default.
     private val hiddenByDefaultGroups = groupsHiddenByDefaultExcept(scenario.groups, listOf(scenario.loadId))
 
-    // Follows the load from above and to one side, looking along the bridge so its sag and
-    // handrails read clearly.
-    private val camera = CameraFunction { _, s ->
-        val loadPos = s.position(scenario.loadId)
-        CameraPose(position = loadPos + Vector3(4.5, 2.6, -3.5), lookAt = loadPos + Vector3(0.0, 0.3, 0.5))
-    }
+    // A fixed overview of the whole structure as built - deliberately not following the load
+    // (orbit/pan/zoom with the mouse to look around).
+    private val overview = overviewCameraPose(scenario.store, allIds)
+    private val camera = CameraFunction { _, _ -> overview }
 
     override val dt = SUSPENSION_BRIDGE_DT
     override val store: ParticleStore = scenario.store

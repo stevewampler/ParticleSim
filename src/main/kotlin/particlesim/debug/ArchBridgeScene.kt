@@ -70,14 +70,10 @@ class ArchBridgeScene : DemoScene {
     // brings them back); only the load stays visible by default.
     private val hiddenByDefaultGroups = groupsHiddenByDefaultExcept(scenario.groups, listOf(scenario.loadId))
 
-    // Tracks the load from a fixed elevated offset, same "follow a particle's position" shape
-    // every other bridge scene's own camera already uses - pulled back further than
-    // TrainTrestleScene's own offset, since the arch itself rises well above deck height and
-    // needs to stay in frame too, not just the load and the deck immediately around it.
-    private val camera = CameraFunction { _, s ->
-        val loadPos = s.position(scenario.loadId)
-        CameraPose(position = loadPos + Vector3(7.0, 4.0, -3.0), lookAt = loadPos)
-    }
+    // A fixed overview of the whole structure as built - deliberately not following the load
+    // (orbit/pan/zoom with the mouse to look around).
+    private val overview = overviewCameraPose(scenario.store, allIds)
+    private val camera = CameraFunction { _, _ -> overview }
 
     override val dt = ARCH_BRIDGE_DT
     override val store: ParticleStore = scenario.store

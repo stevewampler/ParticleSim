@@ -60,12 +60,10 @@ class CableStayedBridgeScene : DemoScene {
     // brings them back); only the load stays visible by default.
     private val hiddenByDefaultGroups = groupsHiddenByDefaultExcept(scenario.groups, listOf(scenario.loadId))
 
-    // Follows the load from a raised three-quarter view, pulled back far enough to keep the
-    // tower top in frame as the load passes under it.
-    private val camera = CameraFunction { _, s ->
-        val loadPos = s.position(scenario.loadId)
-        CameraPose(position = loadPos + Vector3(7.0, 4.0, -4.0), lookAt = loadPos + Vector3(0.0, 1.0, 0.0))
-    }
+    // A fixed overview of the whole structure as built - deliberately not following the load
+    // (orbit/pan/zoom with the mouse to look around).
+    private val overview = overviewCameraPose(scenario.store, allIds)
+    private val camera = CameraFunction { _, _ -> overview }
 
     override val dt = CABLE_STAYED_BRIDGE_DT
     override val store: ParticleStore = scenario.store
