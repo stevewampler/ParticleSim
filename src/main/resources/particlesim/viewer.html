@@ -93,6 +93,9 @@
      (not `display`, which can't animate) is the actual "slide out" - see the `.open` class below. */
   #objectPanel {
     position: fixed; z-index: 2; max-height: calc(100vh - 16px); overflow-y: auto;
+    /* Wider than the outliner's 220px cap (shared rule above), so readouts like a group's
+       "centroid: (x, y, z)" fit on one line instead of wrapping; still bounded by the window. */
+    max-width: min(380px, calc(100vw - 32px));
     border-left: 3px solid rgba(80,140,220,0.6);
     opacity: 0; visibility: hidden; pointer-events: none; transform: translateX(-10px);
     transition: opacity 140ms ease, transform 140ms ease, visibility 140ms;
