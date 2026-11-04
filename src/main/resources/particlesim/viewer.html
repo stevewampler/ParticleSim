@@ -333,14 +333,19 @@ const customLights = [];
 const customLightsGroup = new THREE.Group();
 scene.add(customLightsGroup);
 
-// A point light drawn as a small ball at its position, in its own color - opt-in per named light
-// via the "show light" toggle in that light's panel (names in shownLightBalls, cleared on scene
-// change like the other per-object toggles). Unlit (MeshBasicMaterial), so the ball reads as the
-// light's own color rather than being shaded by the very light it marks. Pooled by light index,
-// alongside customLights.
+// A light marker, opt-in per named light via the "show light" toggle in that light's panel
+// (names in shownLightBalls, cleared on scene change like the other per-object toggles), drawn in
+// the light's own color. Pooled by light index, alongside customLights.
+// - Point light: a small unlit (MeshBasicMaterial) ball at its position, so it reads as the
+//   light's own color rather than being shaded by the very light it marks.
+// - Directional light: an arrow from its position to its target - the origin, three.js's default
+//   DirectionalLight target, which this viewer never moves - showing the direction its parallel
+//   rays travel. Not a ball: a directional light isn't *at* its position, the position only sets
+//   the direction.
 const LIGHT_BALL_RADIUS = 0.08;
 const lightBallGeometry = new THREE.SphereGeometry(LIGHT_BALL_RADIUS, 16, 12);
 const lightBalls = [];
+const lightArrows = [];
 const lightBallsGroup = new THREE.Group();
 scene.add(lightBallsGroup);
 const shownLightBalls = new Set();
@@ -882,6 +887,14 @@ function applyFrame(frame) {
   while (lightBalls.length > frame.lights.length) {
     lightBallsGroup.remove(lightBalls.pop());
   }
+  while (lightArrows.length < frame.lights.length) {
+    const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(), 1);
+    lightBallsGroup.add(arrow);
+    lightArrows.push(arrow);
+  }
+  while (lightArrows.length > frame.lights.length) {
+    lightBallsGroup.remove(lightArrows.pop());
+  }
   frame.lights.forEach((decl, i) => {
     let light = customLights[i];
     // A pooled slot's THREE.Light type can't be changed in place - swap the object itself when
@@ -901,11 +914,23 @@ function applyFrame(frame) {
     light.intensity = decl.intensity;
     if (decl.kind !== "ambient") light.position.set(decl.position.x, decl.position.y, decl.position.z);
 
+    const shown = decl.name !== "" && shownLightBalls.has(decl.name);
     const ball = lightBalls[i];
-    ball.visible = decl.kind === "point" && decl.name !== "" && shownLightBalls.has(decl.name);
+    ball.visible = shown && decl.kind === "point";
     if (ball.visible) {
       ball.position.set(decl.position.x, decl.position.y, decl.position.z);
       ball.material.color.setRGB(decl.color.r, decl.color.g, decl.color.b);
+    }
+    const arrow = lightArrows[i];
+    const from = new THREE.Vector3(decl.position.x, decl.position.y, decl.position.z);
+    const length = from.length();
+    arrow.visible = shown && decl.kind === "directional" && length > 1e-6;
+    if (arrow.visible) {
+      arrow.position.copy(from);
+      arrow.setDirection(from.clone().negate().normalize());
+      const head = Math.min(0.6, length * 0.15);
+      arrow.setLength(length, head, head * 0.5);
+      arrow.setColor(new THREE.Color(decl.color.r, decl.color.g, decl.color.b));
     }
   });
 
@@ -2245,9 +2270,9 @@ registerEntityKind({
   kind: "lights",
   getNames: (registry) => registry.lights,
   renderPanel: () => {
-    // Only a point light has a single position worth marking (ambient has none; a directional
-    // light's "position" is just where its parallel rays come from).
-    if (latestLights.some((l) => l.name === selectedName && l.kind === "point")) {
+    // Point lights draw as a ball, directional lights as an arrow along their rays (see
+    // lightBalls/lightArrows); an ambient light has no position or direction to show.
+    if (latestLights.some((l) => l.name === selectedName && (l.kind === "point" || l.kind === "directional"))) {
       addPanelToggle("show light", shownLightBalls, true);
     }
     currentFieldInputs = {};
