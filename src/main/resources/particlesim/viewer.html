@@ -169,6 +169,8 @@
       <div id="outlinerEmitters"></div>
       <h4>lights</h4>
       <div id="outlinerLights"></div>
+      <h4>connections</h4>
+      <div id="outlinerConnections"></div>
     </div>
     <div id="objectPanel">
       <div id="objectPanelHeader">
@@ -498,6 +500,142 @@ function styleDot(dot, customColor, dragged) {
 const lineMaterial = new THREE.LineBasicMaterial({ vertexColors: true });
 let lines = new THREE.LineSegments(new THREE.BufferGeometry(), lineMaterial);
 
+// --- Connection styles (§10.2): lit cylinders, optional joint spheres ------------------------
+// A connection carrying a style (frame.connectionStyles[c.styleIndex]) draws as that style says;
+// one without draws as a plain line exactly as before. Cylinders are one InstancedMesh per style
+// name (a unit Y-axis cylinder scaled/rotated per instance), so a scene with a thousand truss
+// members is still one draw call per style, and MeshStandardMaterial means the scene's lights
+// shade them. Per-instance color carries a colorBy result (e.g. break proximity) when the
+// connection has one, else the style's own color.
+//
+// A person can restyle any style live from its panel (the "connections" outliner section):
+// connectionStyleOverrides holds viewer-only edits by style name, hiddenConnectionStyles the
+// ones switched off - both cleared on scene change, like every other per-object toggle.
+// Low-poly on purpose: a scene can have a thousand-plus members (the arch truss), and 8 sides
+// still reads as round once lit. Open-ended cylinders - joints/neighbours cover the ends.
+const cylinderGeometry = new THREE.CylinderGeometry(1, 1, 1, 8, 1, true);
+const jointGeometry = new THREE.SphereGeometry(1, 8, 6);
+const connectionStyleMeshes = new Map(); // style name -> { cylinders, joints, connections, jointIds }
+const connectionStyleGroup = new THREE.Group();
+const connectionStyleOverrides = new Map(); // style name -> { shape?, radius?, color?, joints? }
+const hiddenConnectionStyles = new Set();
+let latestConnectionStyles = new Map(); // style name -> effective (override-applied) style, this frame
+let latestDeclaredConnectionStyles = new Map(); // style name -> the scene's own style, this frame
+const _cylUp = new THREE.Vector3(0, 1, 0);
+const _cylA = new THREE.Vector3();
+const _cylB = new THREE.Vector3();
+const _cylDir = new THREE.Vector3();
+const _cylQuat = new THREE.Quaternion();
+const _cylScale = new THREE.Vector3();
+const _cylMatrix = new THREE.Matrix4();
+const _cylColor = new THREE.Color();
+
+function effectiveConnectionStyle(style) {
+  const override = connectionStyleOverrides.get(style.name);
+  return override ? { ...style, ...override } : style;
+}
+
+function instancedPool(existing, geometry, material, needed) {
+  if (existing && existing.instanceMatrix.count >= needed) return existing;
+  if (existing) {
+    connectionStyleGroup.remove(existing);
+    existing.dispose();
+  }
+  const capacity = Math.max(16, needed * 2);
+  const mesh = new THREE.InstancedMesh(geometry, material, capacity);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.frustumCulled = false; // instances move every frame; the base bounds would be stale
+  connectionStyleGroup.add(mesh);
+  return mesh;
+}
+
+function styleMaterial(style) {
+  // White base so per-instance color is the whole color; opacity < 1 needs blending on.
+  return new THREE.MeshStandardMaterial({
+    color: 0xffffff, roughness: style.roughness, metalness: 0.0,
+    transparent: style.opacity < 1, opacity: style.opacity,
+  });
+}
+
+// buckets: style name -> { style, items: [{ a, b, color, forceName }] } (a/b are particle states)
+function updateConnectionStyleMeshes(buckets) {
+  for (const [name, entry] of connectionStyleMeshes) {
+    if (!buckets.has(name)) {
+      if (entry.cylinders) entry.cylinders.count = 0;
+      if (entry.joints) entry.joints.count = 0;
+    }
+  }
+  for (const [name, { style, items }] of buckets) {
+    let entry = connectionStyleMeshes.get(name);
+    if (!entry) {
+      entry = { cylinders: null, joints: null, material: styleMaterial(style), connections: [], jointIds: [] };
+      connectionStyleMeshes.set(name, entry);
+    }
+    entry.material.roughness = style.roughness;
+    entry.material.opacity = style.opacity;
+    entry.material.transparent = style.opacity < 1;
+
+    entry.cylinders = instancedPool(entry.cylinders, cylinderGeometry, entry.material, items.length);
+    entry.connections = items;
+    items.forEach((item, i) => {
+      _cylA.set(item.a.x, item.a.y, item.a.z);
+      _cylB.set(item.b.x, item.b.y, item.b.z);
+      _cylDir.subVectors(_cylB, _cylA);
+      const length = _cylDir.length();
+      if (length > 1e-9) _cylQuat.setFromUnitVectors(_cylUp, _cylDir.multiplyScalar(1 / length)); else _cylQuat.identity();
+      _cylScale.set(style.radius, length, style.radius);
+      _cylMatrix.compose(_cylA.add(_cylB).multiplyScalar(0.5), _cylQuat, _cylScale);
+      entry.cylinders.setMatrixAt(i, _cylMatrix);
+      entry.cylinders.setColorAt(i, _cylColor.setRGB(item.color.r, item.color.g, item.color.b));
+    });
+    entry.cylinders.count = items.length;
+    entry.cylinders.instanceMatrix.needsUpdate = true;
+    if (entry.cylinders.instanceColor) entry.cylinders.instanceColor.needsUpdate = true;
+    entry.cylinders.userData.connectionStyleName = name;
+
+    // Joint spheres: one per distinct endpoint, so bends in a rope/cable stay continuous.
+    const jointStates = new Map();
+    if (style.joints) {
+      for (const item of items) {
+        jointStates.set(item.a.id, { p: item.a, color: item.color });
+        jointStates.set(item.b.id, { p: item.b, color: item.color });
+      }
+    }
+    entry.joints = instancedPool(entry.joints, jointGeometry, entry.material, jointStates.size);
+    entry.jointIds = [...jointStates.keys()];
+    let j = 0;
+    for (const { p, color } of jointStates.values()) {
+      _cylScale.set(style.radius, style.radius, style.radius);
+      _cylMatrix.compose(_cylA.set(p.x, p.y, p.z), _cylQuat.identity(), _cylScale);
+      entry.joints.setMatrixAt(j, _cylMatrix);
+      entry.joints.setColorAt(j, _cylColor.setRGB(color.r, color.g, color.b));
+      j++;
+    }
+    entry.joints.count = jointStates.size;
+    entry.joints.instanceMatrix.needsUpdate = true;
+    if (entry.joints.instanceColor) entry.joints.instanceColor.needsUpdate = true;
+    entry.joints.userData.connectionStyleName = name;
+  }
+}
+
+// What a cylinder/joint hit means: the connection (for its force name) and the particle nearest
+// the hit point (for drag), or null for anything that isn't a styled-connection instance.
+function resolveConnectionHit(hit) {
+  const name = hit.object.userData.connectionStyleName;
+  if (name === undefined || hit.instanceId === undefined) return null;
+  const entry = connectionStyleMeshes.get(name);
+  if (!entry) return null;
+  if (hit.object === entry.joints) {
+    const id = entry.jointIds[hit.instanceId];
+    return id === undefined ? null : { styleName: name, forceName: "", particleId: id };
+  }
+  const item = entry.connections[hit.instanceId];
+  if (!item) return null;
+  const da = (item.a.x - hit.point.x) ** 2 + (item.a.y - hit.point.y) ** 2 + (item.a.z - hit.point.z) ** 2;
+  const db = (item.b.x - hit.point.x) ** 2 + (item.b.y - hit.point.y) ** 2 + (item.b.z - hit.point.z) ** 2;
+  return { styleName: name, forceName: item.forceName, particleId: da <= db ? item.a.id : item.b.id };
+}
+
 // --- Color legend (§10.3) -----------------------------------------------------------------
 // "Whenever a colorBy gradient is active anywhere in the scene" - there's no explicit per-
 // connection tag on the wire saying *which* colorBy produced a color (BinaryFrame's connections
@@ -519,6 +657,7 @@ function updateColorLegend(frame) {
   statusBarLegendEl.classList.toggle("active", active);
 }
 scene.add(lines);
+scene.add(connectionStyleGroup);
 
 // §10.2 surface meshes (shaded solid or wireframe) and arrow-sampled field forces — pooled
 // like dots/lines, grown/shrunk to match each frame's declared count rather than rebuilt from
@@ -804,14 +943,37 @@ function applyFrame(frame) {
   // A connection owned by a surface (see surfaceEdgeOwner above) additionally needs that
   // surface checked into shownSurfaceLines - an unowned connection (e.g. a rope/pole segment,
   // or an attachment spring between two different shapes) is never gated by this at all.
-  const segments = frame.connections
-    .filter((c) => {
-      const key = c.a < c.b ? `${c.a}-${c.b}` : `${c.b}-${c.a}`;
-      const owner = surfaceEdgeOwner.get(key);
-      return !owner || shownSurfaceLines.has(owner);
-    })
-    .map((c) => [byId.get(c.a), byId.get(c.b), c.color])
-    .filter(([a, b]) => a && b);
+  //
+  // §10.2 connection styles: a styled connection takes its style's shape/color (a colorBy color,
+  // i.e. anything but the default line color, still wins per connection); cylinder-shaped ones
+  // are bucketed by style name for the instanced meshes instead of joining the line buffer.
+  latestConnectionStyles = new Map();
+  latestDeclaredConnectionStyles = new Map();
+  for (const style of frame.connectionStyles) {
+    latestDeclaredConnectionStyles.set(style.name, style);
+    latestConnectionStyles.set(style.name, effectiveConnectionStyle(style));
+  }
+  const cylinderBuckets = new Map();
+  const segments = [];
+  for (const c of frame.connections) {
+    const key = c.a < c.b ? `${c.a}-${c.b}` : `${c.b}-${c.a}`;
+    const owner = surfaceEdgeOwner.get(key);
+    if (owner && !shownSurfaceLines.has(owner)) continue;
+    const a = byId.get(c.a);
+    const b = byId.get(c.b);
+    if (!a || !b) continue;
+    const declared = c.styleIndex >= 0 ? frame.connectionStyles[c.styleIndex] : null;
+    const style = declared ? latestConnectionStyles.get(declared.name) : null;
+    if (style && hiddenConnectionStyles.has(style.name)) continue;
+    const color = style && isDefaultLineColor(c.color) ? style.color : c.color;
+    if (style && style.shape === "cylinder") {
+      if (!cylinderBuckets.has(style.name)) cylinderBuckets.set(style.name, { style, items: [] });
+      cylinderBuckets.get(style.name).items.push({ a, b, color, forceName: c.forceName });
+    } else {
+      segments.push([a, b, color]);
+    }
+  }
+  updateConnectionStyleMeshes(cylinderBuckets);
   const positions = new Float32Array(segments.length * 6);
   const colors = new Float32Array(segments.length * 6);
   segments.forEach(([a, b, color], i) => {
@@ -1145,7 +1307,8 @@ function decodeFrame(buffer) {
     const g = view.getFloat64(offset, true); offset += 8;
     const bl = view.getFloat64(offset, true); offset += 8;
     const forceName = readString(); // "" = not tagged back to a named Spring/Damper/MeshSprings
-    connections[i] = { a, b, color: { r, g, b: bl }, forceName };
+    const styleIndex = view.getInt32(offset, true); offset += 4; // -1 = unstyled
+    connections[i] = { a, b, color: { r, g, b: bl }, forceName, styleIndex };
   }
   const hasCamera = view.getUint8(offset); offset += 1;
   const cam = hasCamera ? { position: readVec(), lookAt: readVec(), up: readVec() } : null;
@@ -1312,9 +1475,25 @@ function decodeFrame(buffer) {
   // hiddenGroups once per scene load (see seedHiddenGroupsFromFrame), never re-applied after.
   const hiddenByDefaultGroups = readNameList();
 
+  // §10.2 connection styles, indexed by each connection's styleIndex.
+  const connectionStyleCount = view.getInt32(offset, true); offset += 4;
+  const connectionStyles = new Array(connectionStyleCount);
+  for (let i = 0; i < connectionStyleCount; i++) {
+    const name = readString();
+    const shape = view.getUint8(offset) === 1 ? "cylinder" : "line"; offset += 1;
+    const radius = view.getFloat64(offset, true); offset += 8;
+    const r = view.getFloat64(offset, true); offset += 8;
+    const g = view.getFloat64(offset, true); offset += 8;
+    const b = view.getFloat64(offset, true); offset += 8;
+    const roughness = view.getFloat64(offset, true); offset += 8;
+    const opacity = view.getFloat64(offset, true); offset += 8;
+    const joints = view.getUint8(offset) === 1; offset += 1;
+    connectionStyles[i] = { name, shape, radius, color: { r, g, b }, roughness, opacity, joints };
+  }
+
   return {
     t, step, particles, connections, camera: cam, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
-    colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups,
+    colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles,
   };
 }
 
@@ -1362,6 +1541,8 @@ function resetViewerStateForSceneChange(sceneName) {
   shownSurfaceLines.clear();
   shownLightBalls.clear();
   disabledLights.clear();
+  connectionStyleOverrides.clear();
+  hiddenConnectionStyles.clear();
   updateSelectionHighlight();
   renderObjectPanel();
   // applyFrame only ever writes the camera when frame.camera is non-null (§10.1's scripted
@@ -1705,6 +1886,8 @@ function registrySignature(registry) {
     // edit on) the panel every single frame a named light exists, since at least one of its
     // fields changes essentially continuously once anything is editing it.
     lights: registry.lights,
+    // Not in the registry - collected from the frame by applyFrame (which runs first).
+    connections: [...latestConnectionStyles.keys()],
   });
 }
 
@@ -2273,6 +2456,93 @@ registerEntityKind({
 // "no editable fields" fallback note to show. "color" reuses the generic x/y/z vector-field
 // input (renderEditableFields already renders FieldValue.Vector that way) rather than a color
 // picker - see Light.editableFields's own doc comment for why.
+// §10.2 connection styles - one entry per style name in this frame (see connectionStyleMeshes).
+// Every edit is a viewer-only override (connectionStyleOverrides), never sent to the engine.
+function colorToHex(c) {
+  const to = (v) => Math.round(Math.min(1, Math.max(0, v)) * 255).toString(16).padStart(2, "0");
+  return "#" + to(c.r) + to(c.g) + to(c.b);
+}
+function hexToColor(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 };
+}
+registerEntityKind({
+  kind: "connections",
+  getNames: () => [...latestConnectionStyles.keys()],
+  renderPanel: () => {
+    addPanelToggle("show", hiddenConnectionStyles);
+    const style = latestConnectionStyles.get(selectedName);
+    if (!style) return;
+    const name = selectedName;
+    // Applies immediately to latestConnectionStyles too, so a panel re-render right after an
+    // edit (shape change, reset) already reflects it rather than waiting for the next frame.
+    const refreshEffective = () => {
+      const declared = latestDeclaredConnectionStyles.get(name);
+      if (declared) latestConnectionStyles.set(name, effectiveConnectionStyle(declared));
+    };
+    const setOverride = (patch) => {
+      connectionStyleOverrides.set(name, { ...(connectionStyleOverrides.get(name) || {}), ...patch });
+      refreshEffective();
+    };
+
+    const row = (labelText, input) => {
+      const label = document.createElement("label");
+      label.append(document.createTextNode(labelText + " "), input);
+      objectPanelBodyEl.appendChild(label);
+      return input;
+    };
+
+    const shape = document.createElement("select");
+    for (const value of ["cylinder", "line"]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      shape.appendChild(option);
+    }
+    shape.value = style.shape;
+    shape.addEventListener("change", () => { setOverride({ shape: shape.value }); renderObjectPanel(); });
+    row("shape:", shape);
+
+    const color = document.createElement("input");
+    color.type = "color";
+    color.value = colorToHex(style.color);
+    color.addEventListener("input", () => setOverride({ color: hexToColor(color.value) }));
+    row("color:", color);
+
+    if (style.shape === "cylinder") {
+      // Thickness is a cylinder's radius; a plain WebGL line is always 1px, so lines get no
+      // thickness control rather than one that silently does nothing.
+      const radius = document.createElement("input");
+      radius.type = "number";
+      radius.min = "0.001";
+      radius.step = "0.005";
+      radius.value = String(style.radius);
+      radius.style.width = "6em";
+      radius.addEventListener("change", () => {
+        const value = parseFloat(radius.value);
+        if (Number.isFinite(value) && value > 0) setOverride({ radius: value });
+      });
+      row("radius:", radius);
+
+      const joints = document.createElement("input");
+      joints.type = "checkbox";
+      joints.checked = style.joints;
+      joints.addEventListener("change", () => setOverride({ joints: joints.checked }));
+      const jointsLabel = document.createElement("label");
+      jointsLabel.append(joints, document.createTextNode(" joints"));
+      objectPanelBodyEl.appendChild(jointsLabel);
+    }
+
+    if (connectionStyleOverrides.has(name)) {
+      const reset = document.createElement("button");
+      reset.type = "button";
+      reset.textContent = "reset to scene's style";
+      reset.addEventListener("click", () => { connectionStyleOverrides.delete(name); refreshEffective(); renderObjectPanel(); });
+      objectPanelBodyEl.appendChild(reset);
+    }
+  },
+});
+
 registerEntityKind({
   kind: "lights",
   getNames: (registry) => registry.lights,
@@ -2736,9 +3006,11 @@ function pointerToNdc(event) {
 // triangle — so pairing them positionally (not searching for a matching dot object) is exact,
 // not a guess, and works even for a vertex that has no dot of its own (§10.2 mesh-only render).
 function pickParticle() {
-  const hits = raycaster.intersectObjects([...dots.children, ...meshObjects]);
+  const hits = raycaster.intersectObjects([...dots.children, ...meshObjects, ...connectionStyleGroup.children]);
   if (hits.length === 0) return null;
   const hit = hits[0];
+  const connectionHit = resolveConnectionHit(hit);
+  if (connectionHit) return { particleId: connectionHit.particleId, point: hit.point };
   if (hit.object.userData.particleId !== undefined) {
     return { particleId: hit.object.userData.particleId, point: hit.point };
   }
@@ -2848,9 +3120,16 @@ renderer.domElement.addEventListener("contextmenu", (event) => {
   // noise, not something the user can aim at, and it was silently stealing right-clicks aimed at
   // the surface (reported as "selecting the flag selects the wind instead"). A solid hit is always
   // the more specific target, so arrows are only considered when nothing solid was hit at all.
-  const solidHits = raycaster.intersectObjects([...dots.children, ...meshObjects]);
+  const solidHits = raycaster.intersectObjects([...dots.children, ...meshObjects, ...connectionStyleGroup.children]);
   if (solidHits.length > 0) {
     const hit = solidHits[0];
+    // A styled cylinder/joint: its force's panel if it's tagged to one, else its style's panel.
+    const connectionHit = resolveConnectionHit(hit);
+    if (connectionHit) {
+      if (connectionHit.forceName) selectObject("forces", connectionHit.forceName);
+      else selectObject("connections", connectionHit.styleName);
+      return;
+    }
     if (hit.object.userData.particleId !== undefined) {
       selectObject("particles", String(hit.object.userData.particleId));
       return;

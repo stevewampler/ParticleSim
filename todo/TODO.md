@@ -5720,6 +5720,45 @@ load. Full `./gradlew test -q` suite green throughout.
       guess, for whenever stability tuning on this scene actually
       happens.
 
+## Realistic connection rendering (§10.2, new requirement) — not yet phased
+- [x] **Connection styles: lit cylinders for poles, ropes, cables and
+      girders** — any particle-to-particle connection a scene draws can
+      now carry a `particlesim.render.ConnectionStyle` (name, shape
+      `LINE`/`CYLINDER`, radius, `Material`, optional joint spheres) via
+      `SceneFrame.connectionStyles`; a connection with no style still
+      draws as the old 1px line. Sent as a deduplicated style table at
+      the end of the binary frame plus a per-connection style index
+      (-1 = none), kept separate from `connectionNames` (the force tag)
+      so a pole or tower leg can be styled without pretending to be a
+      force. The viewer draws cylinders as one `InstancedMesh` per style
+      (`MeshStandardMaterial`, so scene lights shade them), with joint
+      spheres for ropes/cables so bends stay continuous; a `colorBy`
+      color (break proximity) still wins per connection. Plain lines get
+      no thickness control on purpose - WebGL ignores line width.
+      **Live control**: a new "connections" outliner section lists each
+      style; its panel (or right-clicking a cylinder that isn't tied to
+      a force) offers show/hide, shape, color, radius and joints as
+      viewer-only overrides with a reset, cleared on scene change.
+      Cylinders are pickable for drag (nearest endpoint) and right-click
+      (the connection's force panel, else its style panel).
+      Applied to every pole/rope/bridge scene via a shared palette
+      (`particlesim.debug.ConnectionStyles`: steel, painted steel, wood,
+      hemp rope, concrete, aluminium, rubber, cable): rope bridge wooden
+      posts + hemp ropes; cable-stayed red tower legs/beams + red stays;
+      arch bridge steel truss + concrete pylons + steel hangers; trestle
+      steel bents; flag/flagOnRope/poleRope/multiShape aluminium poles,
+      ropes, clips and a rubber tire rim. The bridges' old `lineColors`
+      moved into styles, which also ends the false "break proximity"
+      legend on them. `BinaryFrameTest` round-trips styles.
+      **Verified live**: lighting visibly shades the cylinders (sun off
+      loses the highlights); live restyle, line/cylinder switch, reset,
+      right-click and cylinder drag all work. Performance note: headless
+      Chromium has no GPU, so the arch bridge's ~900 cylinders + joints
+      cost real CPU there (step rate dropped from ~1780 to ~930/s,
+      ~1420/s after cutting cylinders to 8 sides); hiding the truss
+      restored ~1770/s, confirming it's client-side rendering, not the
+      server (encode adds ~30µs/frame).
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

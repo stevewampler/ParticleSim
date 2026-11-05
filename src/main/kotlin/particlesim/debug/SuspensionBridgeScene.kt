@@ -50,13 +50,15 @@ class SuspensionBridgeScene : DemoScene {
         lights = lights,
     )
 
-    private val rope = Color(0.78, 0.62, 0.4)
-    private val wood = Color(0.36, 0.26, 0.17)
+    // Lit solid shapes (§10.2 connection styles): thick wooden posts, hemp foot ropes and
+    // handrails (with joints, so their sag reads as one continuous rope), thinner vertical ropes.
     private val postConnections = scenario.posts.flatMap { it.zipWithNext() }
-    private val ropeConnections = scenario.footRopes.flatMap { it.zipWithNext() } +
-        scenario.handrails.flatMap { it.zipWithNext() } + scenario.verticalConnections
-    private val structureConnections = postConnections + ropeConnections
-    private val lineColors = postConnections.associateWith { wood } + ropeConnections.associateWith { rope }
+    private val mainRopeConnections = scenario.footRopes.flatMap { it.zipWithNext() } + scenario.handrails.flatMap { it.zipWithNext() }
+    private val structureConnections = postConnections + mainRopeConnections + scenario.verticalConnections
+    private val connectionStyles =
+        (postConnections styledAs ConnectionStyles.wood("posts", radius = 0.06)) +
+            (mainRopeConnections styledAs ConnectionStyles.rope("main-ropes", radius = 0.022)) +
+            (scenario.verticalConnections styledAs ConnectionStyles.rope("vertical-ropes", radius = 0.012, joints = false))
 
     private val nonWalkwayIds = scenario.posts.flatten() + scenario.handrails.flatten().distinct() + scenario.loadId
     private val allIds = (scenario.walkway.flatten() + nonWalkwayIds).distinct()
@@ -98,7 +100,7 @@ class SuspensionBridgeScene : DemoScene {
     override fun frame(t: Double): SceneFrame = SceneFrame(
         camera = camera.evaluate(t, scene),
         connections = structureConnections,
-        lineColors = lineColors,
+        connectionStyles = connectionStyles,
         sphereRadii = sphereRadii,
         meshes = listOf(walkwayMesh),
         visibleIds = visibleIds,

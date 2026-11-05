@@ -10,6 +10,8 @@ import particlesim.lifecycle.EmitterCapPolicy
 import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.ConnectionStyle
+import particlesim.render.ConnectionShape
 import particlesim.render.Light
 import particlesim.render.Material
 import particlesim.render.NamedArrowSamples
@@ -42,10 +44,13 @@ import kotlin.math.roundToInt
  *                   (radius is NaN when the particle has none — matches ParticleStore.radius's
  *                   own NaN-means-unset sentinel, no new encoding invented)
  * i32  connectionCount
- * connectionCount * { i32 a, i32 b, f64 r, f64 g, f64 b, i32 nameLen, nameLen UTF-8 bytes }
+ * connectionCount * { i32 a, i32 b, f64 r, f64 g, f64 b, i32 nameLen, nameLen UTF-8 bytes,
+ *                     i32 styleIndex }
  *                     (nameLen 0 = this connection isn't tagged back to a named
  *                     Spring/Damper/MeshSprings — same "empty name never matches anything"
- *                     convention an unnamed mesh's own nameLen already uses)
+ *                     convention an unnamed mesh's own nameLen already uses. r/g/b is only a
+ *                     colorBy result, [Color.DEFAULT_LINE] otherwise; styleIndex points into the
+ *                     connection-style table at the end of the frame, -1 = unstyled)
  * u8   hasCamera (0 or 1); if set: 9x f64 (position.xyz, lookAt.xyz, up.xyz)
  * i32  sphereCount
  * sphereCount * { i32 id, f64 radius }
@@ -147,6 +152,11 @@ import kotlin.math.roundToInt
  *                toggle state once per scene load, so a person can still check the box to show
  *                them again; unlike visibleIds, which removes dots outright. Empty for every
  *                scene that doesn't ask for it.)
+ * i32  connectionStyleCount
+ * connectionStyleCount * { i32 nameLen, nameLen UTF-8 bytes, u8 shape (0=line, 1=cylinder),
+ *                          f64 radius, f64 r, g, b, f64 roughness, f64 opacity, u8 joints }
+ *                (§10.2's [ConnectionStyle] table, deduplicated - each connection above names
+ *                its entry by index)
  * ```
  *
  * The event section is §9.1's discrete-event channel ([SimEvent]) — everything above it in this
@@ -245,7 +255,8 @@ object BinaryFrame {
     private const val HEADER_SIZE = 8 + 8 + 4 // t, step, particleCount
     private const val PARTICLE_SIZE = 4 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 8 // id, x, y, z, vx, vy, vz, mass, radius
     private const val CONNECTION_HEADER_SIZE = 4 // connectionCount
-    private const val CONNECTION_FIXED_SIZE = 4 + 4 + 8 + 8 + 8 // a, b, r, g, b (nameLen+bytes is variable)
+    private const val CONNECTION_FIXED_SIZE = 4 + 4 + 8 + 8 + 8 + 4 // a, b, r, g, b, styleIndex (nameLen+bytes is variable)
+    private const val CONNECTION_STYLE_FIXED_SIZE = 1 + 8 + 8 + 8 + 8 + 8 + 8 + 1 // shape, radius, r, g, b, roughness, opacity, joints
     private const val CAMERA_FLAG_SIZE = 1
     private const val CAMERA_SIZE = 9 * 8 // position, lookAt, up
     private const val SPHERE_HEADER_SIZE = 4
@@ -312,13 +323,17 @@ object BinaryFrame {
         activeScene: String = "",
         lights: List<Light> = emptyList(),
         hiddenByDefaultGroups: Set<String> = emptySet(),
+        connectionStyles: Map<Pair<Int, Int>, ConnectionStyle> = emptyMap(),
     ): ByteBuffer {
+        val styleTable = connectionStyles.values.distinct()
+        val styleIndex = styleTable.withIndex().associate { (i, style) -> style to i }
         val fieldEntries = collectEditableFields(registry)
         val emitterEntries = collectEmitterEntries(registry, t)
         val windEntries = collectWindEntries(registry, t)
         val particleExpressionEntries = collectParticleExpressionSources(store)
         val size = HEADER_SIZE + ids.size * PARTICLE_SIZE +
             CONNECTION_HEADER_SIZE + connections.sumOf { CONNECTION_FIXED_SIZE + stringSize(connectionNames[it] ?: "") } +
+            4 + styleTable.sumOf { stringSize(it.name) + CONNECTION_STYLE_FIXED_SIZE } +
             CAMERA_FLAG_SIZE + (if (camera != null) CAMERA_SIZE else 0) +
             SPHERE_HEADER_SIZE + sphereRadii.size * SPHERE_SIZE +
             PARTICLE_COLOR_HEADER_SIZE + particleColors.size * PARTICLE_COLOR_SIZE +
@@ -365,6 +380,7 @@ object BinaryFrame {
             buffer.putInt(a); buffer.putInt(b)
             buffer.putDouble(color.r); buffer.putDouble(color.g); buffer.putDouble(color.b)
             putString(buffer, connectionNames[connection] ?: "")
+            buffer.putInt(connectionStyles[connection]?.let { styleIndex.getValue(it) } ?: -1)
         }
         if (camera != null) {
             buffer.put(1)
@@ -516,6 +532,16 @@ object BinaryFrame {
             putString(buffer, light.name ?: "")
         }
         putNameList(buffer, hiddenByDefaultGroups)
+        buffer.putInt(styleTable.size)
+        for (style in styleTable) {
+            putString(buffer, style.name)
+            buffer.put(if (style.shape == ConnectionShape.CYLINDER) 1 else 0)
+            buffer.putDouble(style.radius)
+            buffer.putDouble(style.material.color.r); buffer.putDouble(style.material.color.g); buffer.putDouble(style.material.color.b)
+            buffer.putDouble(style.material.roughness)
+            buffer.putDouble(style.material.opacity)
+            buffer.put(if (style.joints) 1 else 0)
+        }
 
         buffer.flip()
         return buffer
@@ -551,7 +577,8 @@ object BinaryFrame {
             val b = buf.int
             val color = Color(buf.double, buf.double, buf.double)
             val name = getString(buf)
-            DecodedConnection(a, b, color, name.ifEmpty { null })
+            val styleIndex = buf.int
+            DecodedConnection(a, b, color, name.ifEmpty { null }, styleIndex)
         }
         val hasCamera = buf.get().toInt() != 0
         val camera = if (hasCamera) {
@@ -644,9 +671,19 @@ object BinaryFrame {
             }
         }
         val hiddenByDefaultGroups = getNameList(buf).toSet()
+        val connectionStyles = (0 until buf.int).map {
+            val name = getString(buf)
+            val shape = if (buf.get().toInt() == 1) ConnectionShape.CYLINDER else ConnectionShape.LINE
+            val radius = buf.double
+            val color = Color(buf.double, buf.double, buf.double)
+            val roughness = buf.double
+            val opacity = buf.double
+            val joints = buf.get().toInt() != 0
+            ConnectionStyle(name, shape, radius, Material(color, roughness, opacity), joints)
+        }
         return DecodedFrame(
             t, step, particles, connections, camera, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
-            colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups,
+            colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles,
         )
     }
 
@@ -889,7 +926,7 @@ object BinaryFrame {
 
 data class DecodedParticle(val id: Int, val position: Vector3, val velocity: Vector3, val mass: Double, val radius: Double?)
 
-data class DecodedConnection(val a: Int, val b: Int, val color: Color, val forceName: String? = null)
+data class DecodedConnection(val a: Int, val b: Int, val color: Color, val forceName: String? = null, val styleIndex: Int = -1)
 
 data class DecodedSphere(val id: Int, val radius: Double)
 
@@ -1013,4 +1050,6 @@ data class DecodedFrame(
     val activeScene: String = "",
     val lights: List<Light> = emptyList(),
     val hiddenByDefaultGroups: Set<String> = emptySet(),
+    /** Indexed by [DecodedConnection.styleIndex]. */
+    val connectionStyles: List<ConnectionStyle> = emptyList(),
 )

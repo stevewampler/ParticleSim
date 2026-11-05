@@ -47,6 +47,9 @@ data class SceneFrame(
      * loads - unlike [visibleIds], only a default: a person can still check the box in the
      * group's panel to show them. See [BinaryFrame]'s layout doc. */
     val hiddenByDefaultGroups: Set<String> = emptySet(),
+    /** How each connection is drawn (§10.2's [particlesim.render.ConnectionStyle]) - a connection
+     * with no entry draws as a plain line, exactly as before styles existed. */
+    val connectionStyles: Map<Pair<Int, Int>, particlesim.render.ConnectionStyle> = emptyMap(),
     val registry: SceneRegistry = SceneRegistry.build(),
     val colliders: List<Collider> = emptyList(),
     val events: List<SimEvent> = emptyList(),

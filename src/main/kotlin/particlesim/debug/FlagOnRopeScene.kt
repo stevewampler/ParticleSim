@@ -212,10 +212,19 @@ class FlagOnRopeScene : DemoScene {
         scenario.collisions.resolve(scenario.store, scenario.groups, t, dt)
     }
 
+    // Lit solid shapes (§10.2 connection styles): an aluminium pole, a thin halyard rope, and
+    // the short clips tying the flag's edge to it. The flag's own springs stay plain lines.
+    private val poleConnections = scenario.flagpole.poleIds.zipWithNext()
+    private val ropeConnections = scenario.rope.ropeIds.zipWithNext()
+    private val clipConnections = (0 until flagRows).map { row -> scenario.flagGrid[row][0] to scenario.rope.ropeIds[row] }
+    private val connectionStyles =
+        (poleConnections styledAs ConnectionStyles.aluminium("flagpole", radius = 0.05)) +
+            (ropeConnections styledAs ConnectionStyles.rope("halyard", radius = 0.012)) +
+            (clipConnections styledAs ConnectionStyles.steel("clips", radius = 0.008, joints = false))
+
     override fun frame(t: Double): SceneFrame = SceneFrame(
-        connections = scenario.flagpole.poleIds.zipWithNext() + scenario.rope.ropeIds.zipWithNext() +
-            scenario.flagStructural.activeConnections() +
-            (0 until flagRows).map { row -> scenario.flagGrid[row][0] to scenario.rope.ropeIds[row] },
+        connections = poleConnections + ropeConnections + scenario.flagStructural.activeConnections() + clipConnections,
+        connectionStyles = connectionStyles,
         meshes = listOf(clothMesh),
         // No particle has a dot in this scene by default (§10.3's per-object toggle can't bring
         // one back either - the client's "show particles" checkbox only ever hides *further*,

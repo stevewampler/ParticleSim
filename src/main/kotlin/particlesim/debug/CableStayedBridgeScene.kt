@@ -48,7 +48,14 @@ class CableStayedBridgeScene : DemoScene {
 
     private val towerRed = Color(0.85, 0.12, 0.1)
     private val structureConnections = scenario.towerConnections + scenario.stayConnections + scenario.floorBeamConnections
-    private val lineColors = (scenario.towerConnections + scenario.stayConnections).associateWith { towerRed }
+    // Lit solid shapes (§10.2 connection styles): massive red tower legs and crossbeams, thin
+    // red stays, grey steel floor beams under the deck.
+    private val towerLegConnections = scenario.towerLegs.flatMap { it.zipWithNext() }
+    private val connectionStyles =
+        (scenario.towerConnections styledAs ConnectionStyles.paintedSteel("tower-beams", towerRed, radius = 0.08)) +
+            (towerLegConnections styledAs ConnectionStyles.paintedSteel("tower-legs", towerRed, radius = 0.12)) +
+            (scenario.stayConnections styledAs ConnectionStyles.cable("stays", towerRed, radius = 0.02)) +
+            (scenario.floorBeamConnections styledAs ConnectionStyles.steel("floor-beams", radius = 0.02))
 
     private val towerIds = scenario.towerLegs.flatten()
     private val nonDeckIds = towerIds + scenario.floorBeamIds + scenario.loadId
@@ -91,7 +98,7 @@ class CableStayedBridgeScene : DemoScene {
     override fun frame(t: Double): SceneFrame = SceneFrame(
         camera = camera.evaluate(t, scene),
         connections = structureConnections,
-        lineColors = lineColors,
+        connectionStyles = connectionStyles,
         sphereRadii = sphereRadii,
         particleColors = particleColors,
         meshes = listOf(deckMesh),

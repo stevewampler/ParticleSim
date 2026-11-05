@@ -43,6 +43,10 @@ class FlagScene : DemoScene {
 
     private val poleIds = scenario.groups.membersOf("pole")
     private val poleSphereRadii = poleIds.associateWith { 0.03 }
+    // The flag's pole is its own pinned left-hand column - drawn as a lit aluminium cylinder
+    // through those particles, bottom to top (§10.2 connection styles).
+    private val poleConnections = poleIds.sortedBy { scenario.store.position(it).y }.zipWithNext()
+    private val connectionStyles = poleConnections styledAs ConnectionStyles.aluminium("flagpole", radius = 0.035)
     // §10.2's texture-mapped surfaces, worked example: the flag renders with an image instead
     // of a flat shaded color. scenario.surface already carries Grid.uvs (see buildFlag).
     private val clothMesh = SurfaceRenderer(scenario.surface, wireframe = false, textureName = TextureAssets.USA_FLAG)
@@ -118,13 +122,17 @@ class FlagScene : DemoScene {
         val windSamples = ArrowSampling.sample(windArrows, t).map { it.copy(vector = it.vector * DEFAULT_ARROW_VISUAL_SCALE) }
         val structuralConnections = structural.activeConnections()
         return SceneFrame(
-            connections = structuralConnections,
+            connections = structuralConnections + poleConnections,
+            connectionStyles = connectionStyles,
             connectionNames = structural.name?.let { name -> structuralConnections.associateWith { name } } ?: emptyMap(),
             camera = camera.evaluate(t, scene),
             sphereRadii = poleSphereRadii,
             meshes = listOf(clothMesh),
             arrowGroups = listOf(NamedArrowSamples(wind.name ?: "", windSamples)),
             visibleIds = poleIds,
+            // The pole now draws as a cylinder, so its dots start hidden (the "pole" group's
+            // "show particles" toggle brings them back, e.g. to right-click one).
+            hiddenByDefaultGroups = setOf("pole"),
             registry = registry,
             lights = lights,
         )

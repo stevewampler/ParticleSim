@@ -13,6 +13,8 @@ import particlesim.physics.UniformGravity
 import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.ConnectionStyle
+import particlesim.render.ConnectionShape
 import particlesim.render.Light
 import particlesim.render.Material
 import particlesim.render.NamedArrowSamples
@@ -23,6 +25,7 @@ import particlesim.surface.Surface
 import particlesim.surface.Triangle
 import particlesim.surface.UV
 import kotlin.test.Test
+import kotlin.test.assertTrue
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
@@ -392,6 +395,28 @@ class BinaryFrameTest {
             BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), lights = lights),
         )
         assertEquals(listOf("bounce-highlight", null), decoded.lights.map { it.name })
+    }
+
+    @Test
+    fun `connection styles round-trip, shared styles are sent once, and unstyled connections stay unstyled`() {
+        val store = ParticleStore()
+        val ids = (0 until 4).map { store.create(position = Vector3(it.toDouble(), 0.0, 0.0)) }
+        val pole = ConnectionStyle("pole", ConnectionShape.CYLINDER, radius = 0.05, material = Material(Color(0.6, 0.6, 0.6), roughness = 0.4))
+        val rope = ConnectionStyle("rope", ConnectionShape.LINE, radius = 0.01, material = Material(Color(0.8, 0.6, 0.4)), joints = true)
+        val connections = listOf(ids[0] to ids[1], ids[1] to ids[2], ids[2] to ids[3], ids[0] to ids[3])
+        val styles = mapOf(connections[0] to pole, connections[1] to pole, connections[2] to rope)
+
+        val decoded = BinaryFrame.decode(
+            BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = ids, connections = connections, connectionStyles = styles),
+        )
+
+        assertEquals(listOf(pole, rope), decoded.connectionStyles, "each distinct style sent once")
+        assertEquals(listOf("pole", "pole", "rope", null), decoded.connections.map { c -> decoded.connectionStyles.getOrNull(c.styleIndex)?.name })
+        assertEquals(-1, decoded.connections[3].styleIndex)
+
+        val none = BinaryFrame.decode(BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = ids, connections = connections))
+        assertEquals(emptyList(), none.connectionStyles)
+        assertTrue(none.connections.all { it.styleIndex == -1 })
     }
 
     @Test

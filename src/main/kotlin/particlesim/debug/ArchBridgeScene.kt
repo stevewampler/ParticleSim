@@ -60,6 +60,13 @@ class ArchBridgeScene : DemoScene {
     // buildFlagpole).
     private val pylonConnections = scenario.pylonLegs.flatMap { it.zipWithNext() }
     private val structureConnections = scenario.archConnections + pylonConnections + scenario.hangerConnections + scenario.floorBeamConnections
+    // Lit solid shapes (§10.2 connection styles): grey steel arch trusses, concrete pylons,
+    // thin steel hangers, steel floor beams under the deck.
+    private val connectionStyles =
+        (scenario.archConnections styledAs ConnectionStyles.steel("arch-truss", radius = 0.025)) +
+            (pylonConnections styledAs ConnectionStyles.concrete("pylons", radius = 0.12)) +
+            (scenario.hangerConnections styledAs ConnectionStyles.cable("hangers", radius = 0.014)) +
+            (scenario.floorBeamConnections styledAs ConnectionStyles.steel("floor-beams", radius = 0.02))
 
     private val floorBeamIds = scenario.floorBeamConnections.flatMap { listOf(it.first, it.second) }.distinct() - scenario.deckGrid.flatten().toSet()
     private val nonDeckIds = scenario.pylonLegs.flatten() + scenario.archSides.flatMap { (u, l) -> u + l } + floorBeamIds + scenario.loadId
@@ -101,6 +108,7 @@ class ArchBridgeScene : DemoScene {
     override fun frame(t: Double): SceneFrame = SceneFrame(
         camera = camera.evaluate(t, scene),
         connections = structureConnections,
+        connectionStyles = connectionStyles,
         sphereRadii = sphereRadii,
         meshes = listOf(deckMesh),
         visibleIds = visibleIds,

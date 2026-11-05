@@ -946,9 +946,19 @@ external image onto a mesh's surface.
   by the force's *type* (any `UniformFieldForce`) rather than by which
   scene it happens to be in. `[stretch]` streamlines as a denser
   alternative to discrete arrows.
-- Pairwise forces (spring/damper, §5.1) render as a **line** between the
-  two connected particles, optionally colored and/or thickness-mapped to a
-  derived attribute of the connection's current state:
+- Pairwise connections (spring/damper, §5.1, and render-only ones like a
+  pole's segments) take a per-connection **connection style**: a shape
+  (a 1px **line**, or a lit solid **cylinder** of a given radius - what
+  makes a pole, rope, cable or girder read as a real object the scene's
+  lights shade, see "Lighting & materials" below), a material (color,
+  roughness, opacity), and optional joint spheres so a bending rope stays
+  continuous. A connection with no style draws as a plain line. Styles are
+  named so the viewer can list and restyle them live (§10.3); a viewer-side
+  restyle never touches the physics. Lines get no thickness control, since
+  WebGL ignores line width - thickness means a cylinder. Independently of
+  its style, a connection can be colored (and, `[stretch]`, thickness-mapped)
+  by a derived attribute of its current state, which wins over the style's
+  own color:
   - `stretch` / `force`: current deformation or force magnitude.
   - `breakProximity` (only meaningful on a breakable connection, §5.4): the
     ratio of current deformation (or force) to whichever break threshold

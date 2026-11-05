@@ -66,10 +66,17 @@ class MultiShapeScene : DemoScene {
         ball.collisions.resolve(store, groups, t, dt)
     }
 
+    // Lit solid shapes (§10.2 connection styles) for the pole and the tire's rim; the flag's own
+    // springs stay plain lines.
+    private val poleConnections = flagpole.poleIds.zipWithNext()
+    private val rimConnections = tire.rimIds.indices.map { i -> tire.rimIds[i] to tire.rimIds[(i + 1) % tire.rimIds.size] }
+    private val connectionStyles =
+        (poleConnections styledAs ConnectionStyles.aluminium("flagpole", radius = 0.04)) +
+            (rimConnections styledAs ConnectionStyles.rubber("tire-rim", radius = 0.05))
+
     override fun frame(t: Double): SceneFrame = SceneFrame(
-        connections = flagpole.poleIds.zipWithNext() +
-            flag.meshSprings[0].activeConnections() +
-            tire.rimIds.indices.map { i -> tire.rimIds[i] to tire.rimIds[(i + 1) % tire.rimIds.size] },
+        connections = poleConnections + flag.meshSprings[0].activeConnections() + rimConnections,
+        connectionStyles = connectionStyles,
         registry = registry,
         colliders = allColliders,
     )

@@ -66,8 +66,16 @@ class PoleRopeScene : DemoScene {
         integrator.step(store, groups, allForces, allConstraints, t, dt)
     }
 
+    // Lit solid shapes (§10.2 connection styles): an aluminium pole and a hemp rope.
+    private val poleConnections = flagpole.poleIds.zipWithNext()
+    private val ropeConnections = rope.ropeIds.zipWithNext()
+    private val connectionStyles =
+        (poleConnections styledAs ConnectionStyles.aluminium("flagpole", radius = 0.04)) +
+            (ropeConnections styledAs ConnectionStyles.rope("rope", radius = 0.015))
+
     override fun frame(t: Double): SceneFrame = SceneFrame(
-        connections = flagpole.poleIds.zipWithNext() + rope.ropeIds.zipWithNext(),
+        connections = poleConnections + ropeConnections,
+        connectionStyles = connectionStyles,
         registry = registry,
     )
 }

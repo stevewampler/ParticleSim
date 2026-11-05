@@ -65,6 +65,10 @@ class TrainTrestleScene : DemoScene {
     }
     private val trainCouplingConnections = scenario.trainIds.zipWithNext()
     private val structureConnections = bentConnections + trainCouplingConnections
+    // Lit solid shapes (§10.2 connection styles): steel bents with their bracing, dark couplings.
+    private val connectionStyles =
+        (bentConnections styledAs ConnectionStyles.steel("bents", radius = 0.035)) +
+            (trainCouplingConnections styledAs ConnectionStyles.paintedSteel("couplings", Color(0.15, 0.15, 0.17), radius = 0.04, joints = false))
 
     private val nonDeckIds = scenario.bents.flatMap { (l, r) -> l + r } + scenario.trainIds
     private val allIds = scenario.deckGrid.flatten() + nonDeckIds
@@ -117,6 +121,7 @@ class TrainTrestleScene : DemoScene {
     override fun frame(t: Double): SceneFrame = SceneFrame(
         camera = camera.evaluate(t, scene),
         connections = structureConnections,
+        connectionStyles = connectionStyles,
         sphereRadii = sphereRadii,
         meshes = listOf(deckMesh),
         visibleIds = visibleIds,

@@ -99,6 +99,7 @@ fun main(args: Array<String>) {
                 activeScene = library.activeName,
                 lights = frame.lights,
                 hiddenByDefaultGroups = frame.hiddenByDefaultGroups,
+                connectionStyles = frame.connectionStyles,
             )
         } catch (e: Exception) {
             System.err.println("scene loop error on '${library.activeName}': $e")
