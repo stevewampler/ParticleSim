@@ -23,9 +23,10 @@ import particlesim.render.SurfaceRenderer
  * See that function's doc comment for the sources, dimensions and scaling.
  *
  * The wind is a live-editable expression in the `wind` force's panel, and it drives the
- * `flutter` force too - e.g. a steady `[5.9, 0, 0]` (where the one-node twist the scene starts
- * with grows into the collapse-day mode) or `[3, 0, 0]` (below the flutter speed, so it dies
- * away). The `flutter` panel's `a2Slope` set to 0 switches flutter off. There's no load crossing
+ * `flutter` force too. The default gust settles into whole-span (symmetric) twisting; switching
+ * to a steady `[5.9, 0, 0]` mid-run lets the seeded one-node twist slowly grow until, after
+ * ~100 s, it matches the symmetric twist (a mixed motion, not a clean collapse mode); `[3, 0, 0]`
+ * is below the flutter speed, so the twisting dies away. The `flutter` panel's `a2Slope` set to 0 switches flutter off. There's no load crossing
  * this one: the wind is the load.
  */
 class TacomaNarrowsScene : DemoScene {

@@ -72,8 +72,8 @@ import particlesim.surface.Triangle
  * full scale. Reduced velocity is unchanged by Froude scaling, so the failure wind is at about
  * the same `Vr` (~7.8) here as on the real bridge. With the frequency frozen at the one-node
  * mode's, the symmetric twist goes unstable at nearly the same wind, so which mode develops
- * depends on how each starts: the default gust drives the symmetric one; a steady wind lets the
- * seeded one-node twist ([seedOneNodeTwist]) lead.
+ * depends on how each starts: the default gust drives the symmetric one, and a steady 5.9 lets
+ * the seeded one-node twist ([seedOneNodeTwist]) grow alongside it into a mixed motion.
  */
 data class TacomaNarrowsScenario(
     val store: ParticleStore,

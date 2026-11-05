@@ -5831,9 +5831,12 @@ load. Full `./gradlew test -q` suite green throughout.
       with a frozen frequency both twist modes see the same A2*, so the
       symmetric twist (0.74 Hz) goes unstable at nearly the same wind and
       initial conditions pick the mode: the default gust (aimed at that
-      mode) settles into a symmetric limit cycle (~0.65 rad mid-span); a
-      steady 5.9 with the scene's 0.3 rad/s one-node seed grows a mixed
-      one-node-led motion (~0.6 rad one-node, ~0.5 symmetric at αs 0.4).
+      mode) settles into a symmetric limit cycle (~0.65 rad mid-span);
+      switching to a steady 5.9 at t=30 s lets the one-node twist grow from
+      ~0.1 to ~0.46 rad by t=150 s while the symmetric one eases to ~0.44 -
+      a mixed motion, not a clean collapse mode. More wind doesn't help: at
+      U=7 the symmetric twist grows during the settle and its saturation
+      suppresses the one-node one. (Restart rebuilds with the default gust.)
       The principled fix is per-mode reduced velocity (project strip twist
       rates onto the span's mode shapes, use each mode's own f) - not built.
       The scene seeds a one-node twist at start (`seedOneNodeTwist`, the
