@@ -5759,6 +5759,44 @@ load. Full `./gradlew test -q` suite green throughout.
       restored ~1770/s, confirming it's client-side rendering, not the
       server (encode adds ~30µs/frame).
 
+## Tacoma Narrows Bridge (1940) demo (§7/§9.6, new requirement) — not yet phased
+- [x] **New shape + library scene, `tacomaNarrows`** — the 1940 bridge at
+      1 unit = 10 m with real gravity (Froude scaling: frequencies x√10,
+      velocities /√10). Real dimensions from WSDOT / Structure magazine /
+      Britannica (in `buildTacomaNarrows`'s doc comment): 2,800 ft main span,
+      1,100 ft side spans, 39 ft between cables, 8 ft plate girders (1:72,
+      1:350), 232 ft sag, suspenders every 50 ft, towers ~248 ft above deck.
+      Deck rows are open H cross-sections (girder tops/bottoms + roadway
+      centreline; deck-plane bracing, girder webs, knee braces and cross
+      frames, deliberately no bottom lateral bracing), three separate spans
+      hung from two continuous **pretensioned** cables (rest = length - T/k
+      from H = wL²/8f, side-span sag chosen for equal H; hangers likewise),
+      so it settles by ~1 cm instead of dropping. Roadway mass is weighted
+      toward the centreline to match the real torsion/vertical frequency
+      ratio. Measured (still air): one-node torsion 0.64 Hz = **0.20 Hz real
+      (12.2 cycles/min, matching the real ~12)**; antisymmetric vertical
+      0.44 Hz = 0.14 Hz real. Steady, live-editable crosswind on the roadway
+      and girder webs, default the failure-day 42 mph Froude-scaled (5.9).
+      **Wind experiment (the user's question)**: steady wind at 0-25 units/s
+      (up to ~4x the failure-equivalent) only leans the deck (static twist
+      ∝ U) and never self-excites - seeded twist decays at every speed. The
+      engine's `Wind` is quasi-steady and linear (F = ρA(v_rel·n)n, split
+      evenly over a triangle's vertices), so for a left-right symmetric
+      section it can't produce a twisting moment that grows with twist rate,
+      which is what torsional flutter (the actual 1940 mechanism) needs. A
+      periodic gust tuned to the *symmetric* torsion mode (0.74 Hz) does
+      resonate (twist builds to ~0.14 rad, ~8°, damping-limited), but that's
+      forced resonance from an unrealistically tuned gust and the wrong mode
+      shape; gusting at the one-node mode's 0.64 Hz does nothing, since a
+      span-uniform gust can't drive an antisymmetric mode. A flutter-capable
+      aeroelastic deck force (Scanlan-style, moment ∝ twist and twist rate)
+      would be the next step if wanted. `TacomaNarrowsTest` pins settling,
+      fixed towers, no blow-up, the torsion frequency, and "steady wind
+      doesn't self-excite". Cable/hanger springs are unnamed on purpose -
+      ~400 named ones made each frame 180 KB and flooded the outliner.
+      Headless Chromium managed ~780 of the 1,000 steps/s it needs (server
+      step ~240µs, so CPU contention on this machine, not the engine).
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created
