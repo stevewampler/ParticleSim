@@ -474,6 +474,17 @@ normal points the same logical way (e.g. outward) — inconsistent winding
 would make neighboring triangles compute wind force in opposite directions
 for what's supposed to be one continuous sheet.
 
+This pressure model is quasi-steady: it can't produce a moment that grows
+with how fast a section twists, so it can't reproduce aeroelastic
+**flutter** (the Tacoma Narrows mechanism). That is a separate,
+deck-specific force: a self-excited twisting moment per deck cross-section
+in Scanlan's flutter-derivative form (`M = ½ρB⁴ω·A2*(Vr)·α̇`, with `A2*` a
+function of reduced velocity `Vr = U/(fB)` that crosses from stabilizing to
+destabilizing), applied as a pure couple across the deck, reading its wind
+speed from the same wind expression, and saturating at large twist so it
+reaches a limit cycle rather than diverging. Its coefficients are fitted
+per scene, not general.
+
 ### 7.3 Worked example: a flag
 
 > A rectangular grid of particles forms a triangulated sheet. Particles
@@ -1778,7 +1789,10 @@ expression parser (§4.1 — parsing, evaluation, and the parse-time
 scalar/vector type-checking already required there), scene-construction
 validation (§4.2 — malformed input produces the expected error), and
 force/collision geometry in isolation (spring force magnitude for known
-inputs, sphere–plane/sphere–box intersection correctness, §12.4). These
+inputs, sphere–plane/sphere–box intersection correctness, §12.4; the
+deck flutter moment of §7.2 against its formula, as a zero-net-force
+couple, and with the sign of its power `M·α̇` flipping at the critical
+reduced velocity). These
 don't need a running simulation at all, just JUnit 5 (already wired into
 the build) against individual functions.
 

@@ -3,7 +3,9 @@ package particlesim.debug
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
 import particlesim.examples.TACOMA_DT
+import particlesim.examples.TACOMA_SCENE_SEED_RATE
 import particlesim.examples.buildTacomaNarrows
+import particlesim.examples.seedOneNodeTwist
 import particlesim.physics.Integrator
 import particlesim.render.CameraFunction
 import particlesim.render.CameraPose
@@ -16,15 +18,20 @@ import particlesim.render.SurfaceRenderer
 
 /**
  * §9.6 scene-library demo for [buildTacomaNarrows] - the 1940 Tacoma Narrows Bridge at 1 unit =
- * 10 m, in a steady crosswind of its failure-day speed (Froude-scaled). See that function's doc
- * comment for the sources, dimensions and scaling.
+ * 10 m, in its failure-day wind speed (Froude-scaled) with a gust pulsing at the symmetric
+ * torsion frequency, plus the [particlesim.physics.TorsionalFlutter] self-excited deck moment.
+ * See that function's doc comment for the sources, dimensions and scaling.
  *
- * The wind is a live-editable expression in the `wind` force's panel - e.g. a steady
- * `[12, 0, 0]`, or a periodic gust tuned to the symmetric torsion mode,
- * `[5.9 + 2.0*sin(t*4.65), 0, 0]`. There's no load crossing this one: the wind is the load.
+ * The wind is a live-editable expression in the `wind` force's panel, and it drives the
+ * `flutter` force too - e.g. a steady `[5.9, 0, 0]` (where the one-node twist the scene starts
+ * with grows into the collapse-day mode) or `[3, 0, 0]` (below the flutter speed, so it dies
+ * away). The `flutter` panel's `a2Slope` set to 0 switches flutter off. There's no load crossing
+ * this one: the wind is the load.
  */
 class TacomaNarrowsScene : DemoScene {
-    internal val scenario = buildTacomaNarrows()
+    // Starts with a small one-node twist - the model is symmetric, so the collapse-day mode needs
+    // a disturbance to grow from (on the day, a slipped cable band at mid-span).
+    internal val scenario = buildTacomaNarrows().also { it.seedOneNodeTwist(TACOMA_SCENE_SEED_RATE) }
     private val integrator = Integrator()
     private val scene = SceneQueryImpl(scenario.store, scenario.groups)
 

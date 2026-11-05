@@ -29,17 +29,38 @@ class TacomaNarrowsTest {
         (s.store.position(row.topLeft).y - s.store.position(row.topRight).y) /
             (s.store.position(row.topRight).x - s.store.position(row.topLeft).x)
 
-    /** Seeds the main span's one-node (antisymmetric) twist - the collapse-day mode shape. */
-    private fun seedAntisymmetricTwist(s: TacomaNarrowsScenario, rate: Double = 0.05) {
-        val main = s.mainSpan
-        for ((r, row) in main.withIndex()) {
-            val k = rate * sin(2 * PI * r / main.lastIndex)
-            val c = s.store.position(row.centre)
-            for (id in row.all) {
-                val p = s.store.position(id) - c
-                s.store.setVelocity(id, s.store.velocity(id) + Vector3(-k * p.y, k * p.x, 0.0))
-            }
-        }
+    /** A row's tilt angle (rad), valid at any twist. */
+    private fun tilt(s: TacomaNarrowsScenario, row: DeckRow) =
+        (s.store.position(row.topRight) - s.store.position(row.topLeft)).let { kotlin.math.atan2(it.y, it.x) }
+
+    /** Growth of the one-node twist in a steady wind [u]: settle 15 s so the wind's switch-on
+     * transient dies away, seed a small one-node twist, and compare its antisymmetric part
+     * ((1/4-span twist − 3/4-span twist)/2) early and late over the next 24 s. */
+    private fun oneNodeGrowth(u: Double, flutter: Boolean = true): Pair<Double, Double> {
+        val s = buildTacomaNarrows(windVelocity = "[$u, 0, 0]", flutter = flutter)
+        val t = step(s, 15.0)
+        s.seedOneNodeTwist(0.05)
+        val quarter = s.mainSpan[s.mainSpan.size / 4]
+        val threeQuarter = s.mainSpan[3 * s.mainSpan.size / 4]
+        val series = ArrayList<Double>()
+        step(s, 24.0, startT = t) { series += (twist(s, quarter) - twist(s, threeQuarter)) / 2 }
+        val third = series.size / 3
+        fun amplitude(seg: List<Double>) = seg.average().let { m -> seg.maxOf { abs(it - m) } }
+        return amplitude(series.subList(0, third)) to amplitude(series.subList(2 * third, series.size))
+    }
+
+    @Test
+    fun `with the flutter force the one-node twist decays in a light wind`() {
+        val (early, late) = oneNodeGrowth(3.0)
+        assertTrue(late < 0.7 * early, "one-node twist went from $early to $late rad at U=3 - should decay below the flutter speed")
+    }
+
+    @Test
+    fun `with the flutter force the one-node twist grows in the collapse-day wind`() {
+        // Calibrated so onset is just below the failure wind (~5.0 vs 5.9): there the twist grows
+        // at roughly 7%/s, about 3x over the 16 s between the measurement windows.
+        val (early, late) = oneNodeGrowth(TACOMA_FAILURE_WIND)
+        assertTrue(late > 1.5 * early, "one-node twist went from $early to $late rad at the failure wind - should grow")
     }
 
     private fun dominantFrequency(series: List<Double>, dtS: Double): Double {
@@ -68,12 +89,24 @@ class TacomaNarrowsTest {
     }
 
     @Test
-    fun `the towers stay fixed and the collapse-day wind doesn't blow the model up`() {
+    fun `the towers stay fixed and the default gusty wind with flutter levels off instead of blowing up`() {
+        // The scene's own setup, run long enough for the flutter to grow and reach its limit cycle
+        // (the viewer runs it indefinitely).
         val s = buildTacomaNarrows()
+        s.seedOneNodeTwist(TACOMA_SCENE_SEED_RATE)
         val towerStart = s.towerLegs.flatten().associateWith { s.store.position(it) }
+        val mid = s.mainSpan[s.mainSpan.size / 2]
         var maxSpeed = 0.0
-        step(s, 15.0) { for (id in s.store.liveIds()) maxSpeed = maxOf(maxSpeed, s.store.velocity(id).length()) }
-        assertTrue(maxSpeed < 20.0, "max speed $maxSpeed suggests instability at dt=$TACOMA_DT")
+        var lateTwist = 0.0
+        var t = 0.0
+        step(s, 120.0) {
+            t += 0.02
+            for (id in s.store.liveIds()) maxSpeed = maxOf(maxSpeed, s.store.velocity(id).length())
+            if (t > 60.0) lateTwist = maxOf(lateTwist, abs(tilt(s, mid)))
+        }
+        assertTrue(maxSpeed < 5.0, "max speed $maxSpeed - the flutter isn't levelling off")
+        assertTrue(lateTwist > 0.2, "mid-span twist only reached $lateTwist rad - the flutter didn't develop")
+        assertTrue(lateTwist < 1.0, "mid-span twist reached $lateTwist rad - not a bounded limit cycle")
         for ((id, p) in towerStart) assertTrue((s.store.position(id) - p).length() < 1e-9, "tower particle $id moved")
     }
 
@@ -83,7 +116,7 @@ class TacomaNarrowsTest {
         val target = 0.2 * sqrt(10.0)
         val s = buildTacomaNarrows(windVelocity = "[0, 0, 0]")
         val t = step(s, 2.0)
-        seedAntisymmetricTwist(s)
+        s.seedOneNodeTwist(0.05)
         val quarter = s.mainSpan[s.mainSpan.size / 4]
         val series = ArrayList<Double>()
         step(s, 25.0, startT = t) { series += twist(s, quarter) }
@@ -92,7 +125,7 @@ class TacomaNarrowsTest {
     }
 
     @Test
-    fun `a steady crosswind leans the deck but doesn't self-excite the one-node twist`() {
+    fun `the plain Wind force alone leans the deck but doesn't self-excite the one-node twist`() {
         // The finding this scene was built to test: this engine's quasi-steady, linear Wind force
         // gives a static lean plus (slightly) more damping, not the self-excited torsional
         // flutter that destroyed the real bridge. Measured properly: settle in the wind first so
@@ -100,12 +133,13 @@ class TacomaNarrowsTest {
         // track only its antisymmetric part, (twist at 1/4 span - twist at 3/4 span) / 2, which
         // cancels the span-uniform lean and symmetric twist a uniform wind drives. If a future
         // wind model does produce flutter, this should fail - and that would be worth knowing.
-        val s = buildTacomaNarrows(windVelocity = "[$TACOMA_FAILURE_WIND, 0, 0]")
+        // (Flutter off: this is the plain Wind's own behaviour, which is why TorsionalFlutter exists.)
+        val s = buildTacomaNarrows(windVelocity = "[$TACOMA_FAILURE_WIND, 0, 0]", flutter = false)
         val t = step(s, 15.0)
         val quarter = s.mainSpan[s.mainSpan.size / 4]
         val threeQuarter = s.mainSpan[3 * s.mainSpan.size / 4]
         val lean = (twist(s, quarter) + twist(s, threeQuarter)) / 2
-        seedAntisymmetricTwist(s, rate = 0.5)
+        s.seedOneNodeTwist(0.5)
         val series = ArrayList<Double>()
         step(s, 24.0, startT = t) { series += (twist(s, quarter) - twist(s, threeQuarter)) / 2 }
         val third = series.size / 3

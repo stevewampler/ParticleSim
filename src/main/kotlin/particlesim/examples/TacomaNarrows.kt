@@ -10,6 +10,7 @@ import particlesim.physics.FixedPosition
 import particlesim.physics.Force
 import particlesim.physics.MeshSprings
 import particlesim.physics.Spring
+import particlesim.physics.TorsionalFlutter
 import particlesim.physics.UniformGravity
 import particlesim.physics.Wind
 import particlesim.surface.Grid
@@ -57,8 +58,22 @@ import particlesim.surface.Triangle
  * equilibrium shape instead of dropping into it.
  *
  * **Wind.** A [Wind] force on the deck's top surface and both girder webs. Its velocity is an
- * expression (a steady crosswind of the failure-equivalent ~5.9 units/s by default), live-
- * editable in the viewer.
+ * expression, live-editable in the viewer; by default ([TACOMA_GUSTY_WIND]) the failure-day
+ * ~5.9 units/s with a ±2 gust pulsing at the symmetric torsion frequency. On its own, this
+ * pressure force only leans the deck and slightly damps its twisting - it can't self-excite.
+ *
+ * **Flutter.** So the deck also carries a [TorsionalFlutter] moment (main span only), driven by
+ * the same wind expression: Scanlan's torsional-damping term, `M = ½ρB⁴ω·A2*(Vr)·α̇` per unit
+ * span, with an `A2*` that is stabilizing at low reduced velocity `Vr = U/(fB)` and
+ * destabilizing above a crossing. Its numbers are **fitted, not measured**: the model's masses
+ * and air density aren't physical, so [FLUTTER_DENSITY], [FLUTTER_SLOPE] and
+ * [FLUTTER_CRITICAL_VR] were chosen so that the one-node twist starts to grow at about 5.0
+ * units/s (15% below the failure wind) and grows at ~7%/s at 5.9 - an e-fold of ~14 s, ~45 s at
+ * full scale. Reduced velocity is unchanged by Froude scaling, so the failure wind is at about
+ * the same `Vr` (~7.8) here as on the real bridge. With the frequency frozen at the one-node
+ * mode's, the symmetric twist goes unstable at nearly the same wind, so which mode develops
+ * depends on how each starts: the default gust drives the symmetric one; a steady wind lets the
+ * seeded one-node twist ([seedOneNodeTwist]) lead.
  */
 data class TacomaNarrowsScenario(
     val store: ParticleStore,
@@ -81,6 +96,8 @@ data class TacomaNarrowsScenario(
     /** Every deck/girder spring as plain pairs, for rendering. */
     val deckConnections: List<Pair<Int, Int>>,
     val wind: Wind,
+    /** The self-excited twisting moment on the deck, or null when built with `flutter = false`. */
+    val flutter: TorsionalFlutter?,
 ) {
     val mainSpan: List<DeckRow> get() = spans[1]
 }
@@ -95,6 +112,18 @@ const val TACOMA_DT = 1e-3
 
 /** The failure-day wind (~42 mph, 18.8 m/s) Froude-scaled to this model: 18.8 / √10. */
 const val TACOMA_FAILURE_WIND = 5.9
+
+/** The scene's default wind: the failure-day speed with a gust pulsing at 4.65 rad/s
+ * (0.74 Hz), the model's symmetric torsion frequency. */
+const val TACOMA_GUSTY_WIND = "[$TACOMA_FAILURE_WIND + 2.0*sin(t*4.65), 0.0, 0.0]"
+
+/** The model's one-node (antisymmetric) torsion frequency in still air, Hz - the real 0.2 Hz
+ * times √10. The flutter force's frozen frequency. */
+const val TACOMA_TORSION_FREQUENCY = 0.64
+
+/** The one-node twist rate (rad/s) the scene starts with - a stand-in for the mid-span cable
+ * band that slipped on the day (see [seedOneNodeTwist]). */
+const val TACOMA_SCENE_SEED_RATE = 0.3
 
 fun buildTacomaNarrows(
     mainSpan: Double = 85.34,
@@ -122,8 +151,14 @@ fun buildTacomaNarrows(
     /** Low on purpose - real structural damping was small, and heavy damping would hide any
      * aerodynamic effect. */
     structuralDamping: Double = 3.0,
-    windVelocity: String = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]",
+    windVelocity: String = TACOMA_GUSTY_WIND,
     windDensity: Double = 1.0,
+    /** Add the [TorsionalFlutter] moment to the deck - what the plain [Wind] can't do. */
+    flutter: Boolean = true,
+    flutterDensity: Double = FLUTTER_DENSITY,
+    flutterSlope: Double = FLUTTER_SLOPE,
+    flutterCriticalReducedVelocity: Double = FLUTTER_CRITICAL_VR,
+    flutterSaturationTwist: Double = 0.3,
     store: ParticleStore = ParticleStore(),
     groups: Groups = Groups(),
     placement: ShapePlacement = ShapePlacement(),
@@ -298,12 +333,28 @@ fun buildTacomaNarrows(
 
     val wind = Wind(deckTriangles + girderTriangles, ExpressionParser.parseVector(windVelocity), density = windDensity, name = placement.name("wind"))
 
-    val forces = listOf(
+    // One flutter strip per interior main-span row (end rows are pinned), each standing for one
+    // bay. Main span only: the force's frozen frequency is the main span's torsion frequency, and
+    // applying it to the side spans (whose own torsion frequency isn't the same) let them run
+    // away in a flutter of their own.
+    val flutterForce = if (!flutter) null else TorsionalFlutter(
+        strips = spans[1].subList(1, spans[1].lastIndex).map { TorsionalFlutter.Strip(it.topLeft, it.topRight, mainBay) },
+        windVelocity = wind::currentVelocity,
+        frequency = TACOMA_TORSION_FREQUENCY,
+        density = flutterDensity,
+        slope = flutterSlope,
+        criticalReducedVelocity = flutterCriticalReducedVelocity,
+        saturationTwist = flutterSaturationTwist,
+        name = placement.name("flutter"),
+    )
+
+    val forces = listOfNotNull(
         MeshSprings(deckEdges, store, stiffness = deckStiffness, damping = structuralDamping, name = placement.name("deck-structure")),
         MeshSprings(chordEdges, store, stiffness = girderChordStiffness, damping = structuralDamping, name = placement.name("girder-chords")),
         UniformGravity(deckGroup, Vector3(0.0, -g, 0.0), name = placement.name("gravity")),
         UniformGravity(cableGroup, Vector3(0.0, -g, 0.0), name = placement.name("cable-gravity")),
         wind,
+        flutterForce,
     ) + cableForces + hangerForces
 
     val constraints = towerLegs.flatMap { it.constraints } + listOf(
@@ -325,5 +376,30 @@ fun buildTacomaNarrows(
         hangerConnections = hangerConnections,
         deckConnections = (deckEdges + chordEdges).map { it.a to it.b },
         wind = wind,
+        flutter = flutterForce,
     )
+}
+
+// Fitted, not measured - see [buildTacomaNarrows]'s flutter note. The density is per the
+// model's own (non-physical) mass units.
+const val FLUTTER_DENSITY = 0.16
+const val FLUTTER_SLOPE = 0.3
+const val FLUTTER_CRITICAL_VR = 5.9
+
+/**
+ * Starts the main span twisting in its one-node (antisymmetric) shape - the two halves rotating
+ * in opposite directions, the collapse-day mode - at peak rate [rate] rad/s, about each row's
+ * centreline. The model and a span-uniform wind are both symmetric, so without a disturbance
+ * like this the antisymmetric mode has nothing to grow from; on the real bridge, the source
+ * accounts say the one-node twist set in after a cable band at mid-span slipped.
+ */
+fun TacomaNarrowsScenario.seedOneNodeTwist(rate: Double) {
+    for ((r, row) in mainSpan.withIndex()) {
+        val k = rate * kotlin.math.sin(2 * Math.PI * r / mainSpan.lastIndex)
+        val c = store.position(row.centre)
+        for (id in row.all) {
+            val p = store.position(id) - c
+            store.setVelocity(id, store.velocity(id) + Vector3(-k * p.y, k * p.x, 0.0))
+        }
+    }
 }

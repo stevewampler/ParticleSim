@@ -5805,6 +5805,41 @@ load. Full `./gradlew test -q` suite green throughout.
       server step is ~240µs, hiding all rendering didn't help, flagOnRope
       (same 1 ms dt, 133 particles) also runs ~830 in that setup, and the
       runner's whole-steps-per-frame cap limits any 1 ms scene to 960/s.
+- [x] **Default wind is now the tuned gust** `[5.9 + 2.0*sin(t*4.65), 0, 0]`
+      (`TACOMA_GUSTY_WIND`) - user's request.
+- [x] **Torsional flutter force (§7.2), `particlesim.physics.TorsionalFlutter`**
+      - Scanlan's single-degree-of-freedom torsional-damping term per deck
+      strip, `M = ½ρB⁴ω·A2*(Vr)·α̇·ℓ` (the U² cancels once K = Bω/U is
+      substituted, so A2* *must* depend on Vr = U/(fB) or there's no
+      critical speed), `A2* = slope·(Vr−Vr₀)·min(1, Vr/Vr₀)` (stabilizing
+      below Vr₀, zero in still air), frozen frequency f, applied as a pure
+      couple perpendicular to the chord in the section plane; the wind is
+      read from the scene's own `Wind` so one expression drives both.
+      Saturation `A2*·(1−(α/αs)²)` gives a limit cycle at amplitude
+      2αs·√(1−A2*crit/A2*) (≤ 2αs). Stateless (twist/rate from current
+      positions/velocities), chunk-strided. Editable: frequency, density,
+      a2Slope (0 = off), criticalReducedVelocity, saturationTwist.
+      `TorsionalFlutterTest`: formula, pure couple, power sign above/below
+      Vr₀, no moment without wind/rate/slope, span-wise wind ignored,
+      saturation factor, fields.
+      **Tacoma calibration (fitted, not measured)**: density 0.16, slope
+      0.3, Vr₀ 5.9, αs 0.3, f = 0.64 Hz, main span only (on the side spans,
+      with the main span's frozen frequency, they ran away in their own
+      flutter). Measured growth rate of the seeded one-node twist (settle
+      15 s, seed 0.05 rad/s, 16 s window): U=3 −0.107/s, 5.0 −0.001/s (onset),
+      5.9 +0.071/s, so onset is ~15% below the failure wind. Limitation:
+      with a frozen frequency both twist modes see the same A2*, so the
+      symmetric twist (0.74 Hz) goes unstable at nearly the same wind and
+      initial conditions pick the mode: the default gust (aimed at that
+      mode) settles into a symmetric limit cycle (~0.65 rad mid-span); a
+      steady 5.9 with the scene's 0.3 rad/s one-node seed grows a mixed
+      one-node-led motion (~0.6 rad one-node, ~0.5 symmetric at αs 0.4).
+      The principled fix is per-mode reduced velocity (project strip twist
+      rates onto the span's mode shapes, use each mode's own f) - not built.
+      The scene seeds a one-node twist at start (`seedOneNodeTwist`, the
+      stand-in for the slipped mid-span cable band). Tests: decays at U=3,
+      grows at 5.9, plain Wind (flutter off) still can't self-excite, and
+      the default scene levels off (speed < 5, twist 0.2-1.0 rad) over 120 s.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
