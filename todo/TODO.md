@@ -5777,25 +5777,34 @@ load. Full `./gradlew test -q` suite green throughout.
       (12.2 cycles/min, matching the real ~12)**; antisymmetric vertical
       0.44 Hz = 0.14 Hz real. Steady, live-editable crosswind on the roadway
       and girder webs, default the failure-day 42 mph Froude-scaled (5.9).
-      **Wind experiment (the user's question)**: steady wind at 0-25 units/s
-      (up to ~4x the failure-equivalent) only leans the deck (static twist
-      ∝ U) and never self-excites - seeded twist decays at every speed. The
-      engine's `Wind` is quasi-steady and linear (F = ρA(v_rel·n)n, split
-      evenly over a triangle's vertices), so for a left-right symmetric
-      section it can't produce a twisting moment that grows with twist rate,
-      which is what torsional flutter (the actual 1940 mechanism) needs. A
-      periodic gust tuned to the *symmetric* torsion mode (0.74 Hz) does
-      resonate (twist builds to ~0.14 rad, ~8°, damping-limited), but that's
-      forced resonance from an unrealistically tuned gust and the wrong mode
-      shape; gusting at the one-node mode's 0.64 Hz does nothing, since a
-      span-uniform gust can't drive an antisymmetric mode. A flutter-capable
-      aeroelastic deck force (Scanlan-style, moment ∝ twist and twist rate)
+      **Wind experiment (the user's question)**: settle 20 s in a steady
+      wind, seed the one-node twist, track its antisymmetric part
+      ((twist at 1/4 span - twist at 3/4 span)/2, cancelling the uniform
+      lean and symmetric twist). Log decrement per cycle: 0.0588 still air,
+      0.0588 at U=3, 0.0590 at 5.9 (failure-equivalent), 0.0609 at 12,
+      0.0664 at 25 - the wind only adds a little damping, with no trend
+      toward zero, so no flutter speed exists for this model. The steady
+      wind also leans the deck (static twist ∝ U). Why: the engine's `Wind`
+      is quasi-steady and linear (F = ρA(v_rel·n)n, split evenly over a
+      triangle's vertices), so for a left-right symmetric section it can't
+      produce a twisting moment that grows with twist rate, which is what
+      torsional flutter (the 1940 mechanism) needs. A periodic gust tuned to
+      the *symmetric* torsion mode (0.74 Hz) does resonate (forced
+      resonance; its size depends on the arbitrary windDensity and gust
+      amplitude), but gusting at the one-node mode's 0.64 Hz does nothing:
+      a span-uniform gust can't drive an antisymmetric mode. (An early
+      version of this experiment seeded the twist only 3 s after switching
+      the wind on and mostly measured that switch-on transient - fixed.)
+      A flutter-capable aeroelastic deck force (Scanlan-style, moment ∝
+      twist and twist rate)
       would be the next step if wanted. `TacomaNarrowsTest` pins settling,
       fixed towers, no blow-up, the torsion frequency, and "steady wind
       doesn't self-excite". Cable/hanger springs are unnamed on purpose -
       ~400 named ones made each frame 180 KB and flooded the outliner.
-      Headless Chromium managed ~780 of the 1,000 steps/s it needs (server
-      step ~240µs, so CPU contention on this machine, not the engine).
+      Headless Chromium managed ~780 of the 1,000 steps/s it needs; the
+      server step is ~240µs, hiding all rendering didn't help, flagOnRope
+      (same 1 ms dt, 133 particles) also runs ~830 in that setup, and the
+      runner's whole-steps-per-frame cap limits any 1 ms scene to 960/s.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

@@ -92,22 +92,29 @@ class TacomaNarrowsTest {
     }
 
     @Test
-    fun `a steady crosswind leans the deck but doesn't self-excite the twist`() {
+    fun `a steady crosswind leans the deck but doesn't self-excite the one-node twist`() {
         // The finding this scene was built to test: this engine's quasi-steady, linear Wind force
-        // gives a static twist plus damping, not the self-excited torsional flutter that
-        // destroyed the real bridge. If a future wind model does produce flutter, this should
-        // fail - and that would be worth knowing.
+        // gives a static lean plus (slightly) more damping, not the self-excited torsional
+        // flutter that destroyed the real bridge. Measured properly: settle in the wind first so
+        // the wind's own switch-on transient has died away, then seed the one-node twist and
+        // track only its antisymmetric part, (twist at 1/4 span - twist at 3/4 span) / 2, which
+        // cancels the span-uniform lean and symmetric twist a uniform wind drives. If a future
+        // wind model does produce flutter, this should fail - and that would be worth knowing.
         val s = buildTacomaNarrows(windVelocity = "[$TACOMA_FAILURE_WIND, 0, 0]")
-        val t = step(s, 3.0)
-        seedAntisymmetricTwist(s)
+        val t = step(s, 15.0)
         val quarter = s.mainSpan[s.mainSpan.size / 4]
+        val threeQuarter = s.mainSpan[3 * s.mainSpan.size / 4]
+        val lean = (twist(s, quarter) + twist(s, threeQuarter)) / 2
+        seedAntisymmetricTwist(s, rate = 0.5)
         val series = ArrayList<Double>()
-        step(s, 30.0, startT = t) { series += twist(s, quarter) }
+        step(s, 24.0, startT = t) { series += (twist(s, quarter) - twist(s, threeQuarter)) / 2 }
         val third = series.size / 3
         fun amplitude(seg: List<Double>) = seg.average().let { m -> seg.maxOf { abs(it - m) } }
         val early = amplitude(series.subList(0, third))
         val late = amplitude(series.subList(2 * third, series.size))
-        assertTrue(late < early, "twist grew from $early to $late rad in a steady wind")
-        assertTrue(abs(series.average()) > 0.005, "a crosswind should lean the deck: mean twist ${series.average()} rad")
+        // ~10 cycles apart at a log decrement of ~0.06/cycle gives ~0.55 in still air or this
+        // wind; 0.7 leaves margin while still failing on anything that isn't clearly decaying.
+        assertTrue(late < 0.7 * early, "one-node twist went from $early to $late rad in a steady wind - not decaying")
+        assertTrue(abs(lean) > 0.005, "a crosswind should lean the deck: mean twist $lean rad")
     }
 }
