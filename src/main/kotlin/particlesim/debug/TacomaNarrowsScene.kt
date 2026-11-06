@@ -33,7 +33,7 @@ import particlesim.surface.Surface
  * limit cycle at the failure wind; `[3, 0, 0]` is below the flutter speed, so it dies away.
  * `tacomaNarrowsSteady` is the same scene in a steady failure-day wind, without the gust's
  * forced whole-span twist on top. The `flutter` force's arrows (shown by default) draw its
- * twisting push on each slice: red where it's feeding the twist, blue where it's damping it.
+ * twisting push on each slice: magenta where it's feeding the twist, cyan where it's damping it.
  * `a2Slope` 0 in its panel switches flutter off.
  *
  * With `breakable` (the `tacomaNarrowsBreakable` scene, steady failure wind) the members break at
@@ -122,8 +122,9 @@ class TacomaNarrowsScene(
     private companion object {
         const val BREAKABLE_SETTLE_SECONDS = 8.0
         const val ARM_AFTER_SECONDS = 5.0
-        val FEEDING = Color(0.95, 0.2, 0.15)
-        val DAMPING = Color(0.2, 0.5, 1.0)
+        // Magenta/cyan - well clear of the green-yellow-red stress colors on the hangers and cables.
+        val FEEDING = Color(0.9, 0.2, 0.85)
+        val DAMPING = Color(0.1, 0.85, 0.95)
         /** Arrow length per unit of couple force - a few deck widths at the limit cycle's peak. */
         const val FLUTTER_ARROW_SCALE = 2.0
     }
@@ -164,8 +165,8 @@ class TacomaNarrowsScene(
     }
 
     // The flutter force drawn as its couple on each main-span slice: an arrow up on one girder
-    // and down on the other, red where it's feeding energy into the twist (moment the same way
-    // as the twist rate - negative aerodynamic damping) and blue where it's taking it out.
+    // and down on the other, magenta where it's feeding energy into the twist (moment the same way
+    // as the twist rate - negative aerodynamic damping) and cyan where it's taking it out.
     private fun flutterArrows(t: Double): List<NamedArrowSamples> {
         val flutter = scenario.flutter ?: return emptyList()
         val samples = flutter.couples(scenario.store, t).flatMap { c ->

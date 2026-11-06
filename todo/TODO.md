@@ -5864,8 +5864,9 @@ load. Full `./gradlew test -q` suite green throughout.
       default gust -> one-node ~0.49 + forced whole-span ~0.18.
 - [x] **`tacomaNarrowsSteady` scene** - same scene, steady 5.9 wind.
 - [x] **Flutter visualised**: the scene sends the force's couple per
-      main-span slice as arrows on both girder tops (`couples()`), red where
-      M·α̇ > 0 (feeding the twist), blue where it damps, shown by default.
+      main-span slice as arrows on both girder tops (`couples()`), magenta
+      where M·α̇ > 0 (feeding the twist), cyan where it damps (were red/blue -
+      changed to stay clear of the green-yellow-red stress ramp), shown by default.
       Wire format grew two appended sections: per-arrow colors
       (`ArrowSample.color`, u8 rgb per sample for groups that set any) and
       `shownByDefaultArrows` (seeds the viewer's "show arrows" per scene
