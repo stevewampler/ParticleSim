@@ -157,6 +157,14 @@ import kotlin.math.roundToInt
  *                          f64 radius, f64 r, g, b, f64 roughness, f64 opacity, u8 joints }
  *                (§10.2's [ConnectionStyle] table, deduplicated - each connection above names
  *                its entry by index)
+ * i32  arrowColorGroupCount
+ * arrowColorGroupCount * { i32 arrowGroupIndex, sampleCount * { u8 r, g, b } }
+ *                (per-arrow colors for the arrow groups above that set any - sampleCount is that
+ *                group's own; an arrow without a color of its own is sent as the default arrow
+ *                color, 255/170/51. Groups with no colored arrow aren't listed.)
+ * i32  shownByDefaultArrowCount; shownByDefaultArrowCount * { i32 nameLen, nameLen UTF-8 bytes }
+ *                (forces whose "show arrows" toggle starts checked when this scene loads - the
+ *                arrow counterpart of hiddenByDefaultGroups; arrows otherwise start hidden)
  * ```
  *
  * The event section is §9.1's discrete-event channel ([SimEvent]) — everything above it in this
@@ -302,6 +310,10 @@ object BinaryFrame {
      * choice, not a modeled property; see this file's own doc comment. */
     const val PLANE_RENDER_HALF_SIZE = 3.0
 
+    /** The viewer's default arrow color (its `ARROW_COLOR`, 0xffaa33) - what an uncolored arrow
+     * in a group with other colored arrows is sent as. */
+    val DEFAULT_ARROW_COLOR = Color(1.0, 170.0 / 255.0, 51.0 / 255.0)
+
     fun encode(
         t: Double,
         step: Long,
@@ -324,7 +336,9 @@ object BinaryFrame {
         lights: List<Light> = emptyList(),
         hiddenByDefaultGroups: Set<String> = emptySet(),
         connectionStyles: Map<Pair<Int, Int>, ConnectionStyle> = emptyMap(),
+        shownByDefaultArrows: Set<String> = emptySet(),
     ): ByteBuffer {
+        val coloredArrowGroups = arrowGroups.withIndex().filter { (_, g) -> g.samples.any { it.color != null } }
         val styleTable = connectionStyles.values.distinct()
         val styleIndex = styleTable.withIndex().associate { (i, style) -> style to i }
         val fieldEntries = collectEditableFields(registry)
@@ -358,7 +372,9 @@ object BinaryFrame {
             EVENT_HEADER_SIZE + events.sumOf { eventEntrySize(it) } +
             nameListSize(availableScenes) + stringSize(activeScene) +
             LIGHT_HEADER_SIZE + lights.sumOf { LIGHT_ENTRY_SIZE + stringSize(it.name ?: "") } +
-            nameListSize(hiddenByDefaultGroups)
+            nameListSize(hiddenByDefaultGroups) +
+            4 + coloredArrowGroups.sumOf { 4 + it.value.samples.size * 3 } +
+            nameListSize(shownByDefaultArrows)
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
         buffer.putDouble(t)
@@ -542,6 +558,15 @@ object BinaryFrame {
             buffer.putDouble(style.material.opacity)
             buffer.put(if (style.joints) 1 else 0)
         }
+        buffer.putInt(coloredArrowGroups.size)
+        for ((index, group) in coloredArrowGroups) {
+            buffer.putInt(index)
+            for (sample in group.samples) {
+                val c = sample.color ?: DEFAULT_ARROW_COLOR
+                buffer.put(colorChannelToByte(c.r)); buffer.put(colorChannelToByte(c.g)); buffer.put(colorChannelToByte(c.b))
+            }
+        }
+        putNameList(buffer, shownByDefaultArrows)
 
         buffer.flip()
         return buffer
@@ -681,9 +706,20 @@ object BinaryFrame {
             val joints = buf.get().toInt() != 0
             ConnectionStyle(name, shape, radius, Material(color, roughness, opacity), joints)
         }
+        val arrowColors = (0 until buf.int).associate {
+            val index = buf.int
+            index to (0 until arrowGroups[index].samples.size).map {
+                Color((buf.get().toInt() and 0xff) / 255.0, (buf.get().toInt() and 0xff) / 255.0, (buf.get().toInt() and 0xff) / 255.0)
+            }
+        }
+        val coloredArrowGroups = arrowGroups.mapIndexed { i, group ->
+            val colors = arrowColors[i] ?: return@mapIndexed group
+            group.copy(samples = group.samples.mapIndexed { j, sample -> sample.copy(color = colors[j]) })
+        }
+        val shownByDefaultArrows = getNameList(buf).toSet()
         return DecodedFrame(
-            t, step, particles, connections, camera, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
-            colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles,
+            t, step, particles, connections, camera, spheres, particleColors, meshes, coloredArrowGroups, visibleIds, registry,
+            colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
         )
     }
 
@@ -1052,4 +1088,5 @@ data class DecodedFrame(
     val hiddenByDefaultGroups: Set<String> = emptySet(),
     /** Indexed by [DecodedConnection.styleIndex]. */
     val connectionStyles: List<ConnectionStyle> = emptyList(),
+    val shownByDefaultArrows: Set<String> = emptySet(),
 )

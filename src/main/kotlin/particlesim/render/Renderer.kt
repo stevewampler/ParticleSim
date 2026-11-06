@@ -129,7 +129,10 @@ data class ArrowRenderer(
     }
 }
 
-data class ArrowSample(val origin: Vector3, val vector: Vector3)
+/** One arrow. [color] overrides the viewer's default arrow color for just this arrow - e.g. a
+ * force drawn red where it's feeding energy in and blue where it's taking it out; null keeps the
+ * default. */
+data class ArrowSample(val origin: Vector3, val vector: Vector3, val color: Color? = null)
 
 /** One named force's arrow samples for a frame — [ArrowSample] itself carries no source tag, so
  * without this a per-force visibility toggle (§10.3) couldn't tell which force's arrows a given

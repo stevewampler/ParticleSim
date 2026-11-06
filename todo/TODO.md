@@ -5844,6 +5844,33 @@ load. Full `./gradlew test -q` suite green throughout.
       grows at 5.9, plain Wind (flutter off) still can't self-excite, and
       the default scene levels off (speed < 5, twist 0.2-1.0 rad) over 120 s.
 
+- [x] **Per-mode reduced velocity (the mode-selection fix).** `TorsionalFlutter`
+      takes optional `modes` (shape per strip + frequency): strip twist
+      rates are projected onto the shapes each step (q̇ₙ = Σφℓα̇/Σφ²ℓ), each
+      part gets ω·A2*(U/(fₙB)) for its own fₙ, the remainder uses
+      `frequency`. Recomputed per chunk in fixed order (4 chunks, 56 strips:
+      cheap), so still stateless/deterministic. Component test: a motion in
+      each mode's shape gets that mode's frequency.
+      Found on the way: the "0.74 Hz symmetric torsion" was wrong - seeding
+      sin(πz/L) gives 0.605 Hz, *below* the one-node 0.645, because the
+      cables were ~6x too extensible (EA/(wL) ~130 vs real ~860, estimated
+      from 17.5 in cables). cableStiffness 300k -> 1M (dt-limited) puts the
+      modes at n=1 0.835, n=2 0.645 (unchanged), n=3 1.125, n=4 1.075 Hz;
+      residual 1.1. Growth rates now (per s, n=1 / n=2): U=3 −0.106/−0.110,
+      5 −0.088/−0.009, 5.9 −0.112/+0.075, 7 −0.057/+0.168, 8 +0.024/+0.222 -
+      one-node onset ~5.1, whole-span ~7.7, so the collapse mode wins at the
+      failure wind on physics alone. Scene (seed 0.3 rad/s): steady 5.9 ->
+      one-node limit cycle ~0.56 rad (quarter points), whole-span ~0.02;
+      default gust -> one-node ~0.49 + forced whole-span ~0.18.
+- [x] **`tacomaNarrowsSteady` scene** - same scene, steady 5.9 wind.
+- [x] **Flutter visualised**: the scene sends the force's couple per
+      main-span slice as arrows on both girder tops (`couples()`), red where
+      M·α̇ > 0 (feeding the twist), blue where it damps, shown by default.
+      Wire format grew two appended sections: per-arrow colors
+      (`ArrowSample.color`, u8 rgb per sample for groups that set any) and
+      `shownByDefaultArrows` (seeds the viewer's "show arrows" per scene
+      load, like hiddenByDefaultGroups). `BinaryFrameTest` round-trips both.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

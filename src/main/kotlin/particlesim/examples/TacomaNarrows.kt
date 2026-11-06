@@ -16,6 +16,7 @@ import particlesim.physics.Wind
 import particlesim.surface.Grid
 import particlesim.surface.Surface
 import particlesim.surface.Triangle
+import kotlin.math.sin
 
 /**
  * The 1940 Tacoma Narrows Bridge ("Galloping Gertie"), at **1 unit = 10 m**, with real gravity.
@@ -59,7 +60,7 @@ import particlesim.surface.Triangle
  *
  * **Wind.** A [Wind] force on the deck's top surface and both girder webs. Its velocity is an
  * expression, live-editable in the viewer; by default ([TACOMA_GUSTY_WIND]) the failure-day
- * ~5.9 units/s with a ±2 gust pulsing at the symmetric torsion frequency. On its own, this
+ * ~5.9 units/s with a ±2 gust pulsing at 0.74 Hz. On its own, this
  * pressure force only leans the deck and slightly damps its twisting - it can't self-excite.
  *
  * **Flutter.** So the deck also carries a [TorsionalFlutter] moment (main span only), driven by
@@ -68,12 +69,23 @@ import particlesim.surface.Triangle
  * destabilizing above a crossing. Its numbers are **fitted, not measured**: the model's masses
  * and air density aren't physical, so [FLUTTER_DENSITY], [FLUTTER_SLOPE] and
  * [FLUTTER_CRITICAL_VR] were chosen so that the one-node twist starts to grow at about 5.0
- * units/s (15% below the failure wind) and grows at ~7%/s at 5.9 - an e-fold of ~14 s, ~45 s at
- * full scale. Reduced velocity is unchanged by Froude scaling, so the failure wind is at about
- * the same `Vr` (~7.8) here as on the real bridge. With the frequency frozen at the one-node
- * mode's, the symmetric twist goes unstable at nearly the same wind, so which mode develops
- * depends on how each starts: the default gust drives the symmetric one, and a steady 5.9 lets
- * the seeded one-node twist ([seedOneNodeTwist]) grow alongside it into a mixed motion.
+ * units/s (~15% below the failure wind) and grows at ~7.5%/s at 5.9 - an e-fold of ~13 s, ~42 s
+ * at full scale. Reduced velocity is unchanged by Froude scaling, so the failure wind is at
+ * about the same `Vr` (~7.8) here as on the real bridge.
+ *
+ * **Which mode.** The force uses per-mode reduced velocity ([TACOMA_TORSION_MODE_FREQUENCIES],
+ * measured on this model): the whole-span twist has to stretch the main cables, so it's stiffer
+ * (0.835 Hz vs the one-node 0.645 Hz), sits at a lower reduced velocity in the same wind, and
+ * doesn't go unstable until ~7.7 units/s. So at the failure wind only the one-node mode - the
+ * collapse-day mode - flutters, without that being tuned in: measured growth at 5.9 is +0.075/s
+ * for the one-node twist and −0.11/s for the whole-span twist. (That depends on the cables being
+ * realistically stiff: at the earlier [cableStiffness] of 300,000 the cables stretched ~6x too
+ * easily compared with the real steel ones - EA/(wL) ~130 vs an estimated ~860 - which made the
+ * whole-span twist the *softer* mode. 1,000,000 is as stiff as the 1 ms timestep comfortably
+ * allows, EA/(wL) ~450.) The one-node mode still needs a disturbance to grow from
+ * ([seedOneNodeTwist]): in steady wind it settles into a one-node limit cycle of ~0.56 rad at the
+ * quarter points with the whole-span twist ~0.02; the default gust adds a forced whole-span
+ * twist of ~0.18 rad on top of a ~0.49 rad one-node cycle.
  */
 data class TacomaNarrowsScenario(
     val store: ParticleStore,
@@ -113,13 +125,27 @@ const val TACOMA_DT = 1e-3
 /** The failure-day wind (~42 mph, 18.8 m/s) Froude-scaled to this model: 18.8 / √10. */
 const val TACOMA_FAILURE_WIND = 5.9
 
-/** The scene's default wind: the failure-day speed with a gust pulsing at 4.65 rad/s
- * (0.74 Hz), the model's symmetric torsion frequency. */
+/** The scene's default wind: the failure-day speed with a ±2 gust pulsing at 4.65 rad/s
+ * (0.74 Hz). (Originally aimed at the whole-span twist mode; with the stiffer cables that mode
+ * is now 0.835 Hz, so the gust drives it off-resonance.) */
 const val TACOMA_GUSTY_WIND = "[$TACOMA_FAILURE_WIND + 2.0*sin(t*4.65), 0.0, 0.0]"
 
 /** The model's one-node (antisymmetric) torsion frequency in still air, Hz - the real 0.2 Hz
- * times √10. The flutter force's frozen frequency. */
-const val TACOMA_TORSION_FREQUENCY = 0.64
+ * times √10. */
+const val TACOMA_TORSION_FREQUENCY = 0.645
+
+/**
+ * The main span's first four torsion modes, as measured on this model in still air (seed each
+ * shape `sin(nπz/L)`, take the spectrum's peak): n = 1 (whole span twisting together), 2 (the
+ * one-node, collapse-day mode), 3, 4, in Hz. The odd (symmetric) ones are stiff because twisting
+ * that way has to stretch the main cables; the one-node mode doesn't, so it's the softest - as
+ * on the real bridge. The flutter force uses these for per-mode reduced velocity.
+ */
+val TACOMA_TORSION_MODE_FREQUENCIES = listOf(0.835, TACOMA_TORSION_FREQUENCY, 1.125, 1.075)
+
+/** What the flutter force uses for any twisting the four modes above don't capture (higher
+ * modes) - about the highest of them. */
+const val TACOMA_RESIDUAL_TORSION_FREQUENCY = 1.1
 
 /** The one-node twist rate (rad/s) the scene starts with - a stand-in for the mid-span cable
  * band that slipped on the day (see [seedOneNodeTwist]). */
@@ -141,7 +167,7 @@ fun buildTacomaNarrows(
      * frequency ratio (see [buildTacomaNarrows]'s tuning note). */
     roadwayMassPerParticle: Double = 6.0,
     cableMassPerParticle: Double = 2.0,
-    cableStiffness: Double = 300_000.0,
+    cableStiffness: Double = 1_000_000.0,
     hangerStiffness: Double = 20_000.0,
     deckStiffness: Double = 100_000.0,
     /** The girders' top/bottom chords along the span - what sets the deck's bending (and, for
@@ -334,13 +360,17 @@ fun buildTacomaNarrows(
     val wind = Wind(deckTriangles + girderTriangles, ExpressionParser.parseVector(windVelocity), density = windDensity, name = placement.name("wind"))
 
     // One flutter strip per interior main-span row (end rows are pinned), each standing for one
-    // bay. Main span only: the force's frozen frequency is the main span's torsion frequency, and
-    // applying it to the side spans (whose own torsion frequency isn't the same) let them run
+    // bay. Main span only: its mode frequencies are the main span's, and applying the main
+    // span's frequency to the side spans (whose own torsion frequencies differ) let them run
     // away in a flutter of their own.
+    val flutterRows = spans[1].subList(1, spans[1].lastIndex)
     val flutterForce = if (!flutter) null else TorsionalFlutter(
-        strips = spans[1].subList(1, spans[1].lastIndex).map { TorsionalFlutter.Strip(it.topLeft, it.topRight, mainBay) },
+        strips = flutterRows.map { TorsionalFlutter.Strip(it.topLeft, it.topRight, mainBay) },
         windVelocity = wind::currentVelocity,
-        frequency = TACOMA_TORSION_FREQUENCY,
+        frequency = TACOMA_RESIDUAL_TORSION_FREQUENCY,
+        modes = TACOMA_TORSION_MODE_FREQUENCIES.withIndex().map { (k, f) ->
+            TorsionalFlutter.Mode(DoubleArray(flutterRows.size) { sin((k + 1) * Math.PI * (it + 1) / mainBays) }, f)
+        },
         density = flutterDensity,
         slope = flutterSlope,
         criticalReducedVelocity = flutterCriticalReducedVelocity,
@@ -393,9 +423,13 @@ const val FLUTTER_CRITICAL_VR = 5.9
  * like this the antisymmetric mode has nothing to grow from; on the real bridge, the source
  * accounts say the one-node twist set in after a cable band at mid-span slipped.
  */
-fun TacomaNarrowsScenario.seedOneNodeTwist(rate: Double) {
+fun TacomaNarrowsScenario.seedOneNodeTwist(rate: Double) = seedTwist(halfWaves = 2, rate = rate)
+
+/** Starts the main span twisting in the shape `sin(halfWaves·πz/L)` at peak rate [rate] rad/s,
+ * about each row's centreline: 1 = the whole span together, 2 = the one-node mode. */
+fun TacomaNarrowsScenario.seedTwist(halfWaves: Int, rate: Double) {
     for ((r, row) in mainSpan.withIndex()) {
-        val k = rate * kotlin.math.sin(2 * Math.PI * r / mainSpan.lastIndex)
+        val k = rate * sin(halfWaves * Math.PI * r / mainSpan.lastIndex)
         val c = store.position(row.centre)
         for (id in row.all) {
             val p = store.position(id) - c

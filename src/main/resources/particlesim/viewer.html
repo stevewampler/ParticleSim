@@ -1140,6 +1140,8 @@ function applyFrame(frame) {
       // the previous 0.3/0.15 caps were close to a third of a typical arrow's own length,
       // reading as an oversized arrowhead rather than a thin shaft with a point.
       arrow.setLength(length, Math.min(0.12, length * 0.2), Math.min(0.06, length * 0.1));
+      const color = sample.color ?? ARROW_COLOR;
+      if (arrow.userData.color !== color) { arrow.setColor(color); arrow.userData.color = color; }
       arrow.visible = true;
     } else {
       arrow.visible = false; // a zero-length arrow has no defined direction to draw
@@ -1491,9 +1493,23 @@ function decodeFrame(buffer) {
     connectionStyles[i] = { name, shape, radius, color: { r, g, b }, roughness, opacity, joints };
   }
 
+  // Per-arrow colors for the arrow groups that set any (e.g. the flutter force: red where it
+  // feeds the twist, blue where it damps it) - as 0xRRGGBB on each sample.
+  const arrowColorGroupCount = view.getInt32(offset, true); offset += 4;
+  for (let i = 0; i < arrowColorGroupCount; i++) {
+    const index = view.getInt32(offset, true); offset += 4;
+    for (const sample of arrowGroups[index].samples) {
+      sample.color = (view.getUint8(offset) << 16) | (view.getUint8(offset + 1) << 8) | view.getUint8(offset + 2);
+      offset += 3;
+    }
+  }
+
+  // Forces whose "show arrows" starts checked for this scene - seeded once per scene load.
+  const shownByDefaultArrows = readNameList();
+
   return {
     t, step, particles, connections, camera: cam, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
-    colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles,
+    colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
   };
 }
 
@@ -1832,6 +1848,7 @@ function seedHiddenGroupsFromFrame(frame) {
   if (hiddenGroupsSeeded) return;
   if (hiddenGroupsSeedScene !== null && frame.activeScene !== hiddenGroupsSeedScene) return;
   for (const name of frame.hiddenByDefaultGroups) hiddenGroups.add(name);
+  for (const name of frame.shownByDefaultArrows) shownForces.add(name);
   hiddenGroupsSeeded = true;
   if (selectedKind === "groups") renderObjectPanel();
 }

@@ -32,15 +32,23 @@ import kotlin.math.sqrt
  * - stabilizing at low reduced velocity, destabilizing above a crossing - is that of measured
  * H-section derivatives; the numbers are **fitted, not measured** (see the scene that uses it).
  *
- * **Frozen frequency.** [frequency] `f` is fixed (the structure's torsion frequency), the usual
- * time-domain simplification of frequency-domain derivatives. The moment is a damping-like term,
- * so its effect on a mode scales as `1/ω` of that mode: of two torsion modes the slower one is
- * destabilized more and goes unstable first.
+ * **Which frequency.** Flutter derivatives are measured per frequency, but a time-domain force
+ * sees a mix of modes. Two options:
+ * - **Frozen** (no [modes]): one [frequency] `f` for everything - the usual simplification.
+ *   Every twisting pattern then sees the same `Vr` and `A2*`, so different twist modes go unstable
+ *   at almost the same wind and only their starting conditions decide which one develops.
+ * - **Per mode** ([modes]): the strips' twist rates are projected onto the given mode shapes each
+ *   step (a least-squares fit, `q̇ₙ = Σ φₙᵢ ℓᵢ α̇ᵢ / Σ φₙᵢ² ℓᵢ`), and each mode's part of the motion
+ *   gets the moment for its *own* frequency `fₙ` and so its own `Vr = U/(fₙB)`; whatever the modes
+ *   don't capture uses [frequency]. A stiffer, higher-frequency mode sits at a lower reduced
+ *   velocity than a softer one in the same wind, so it goes unstable at a higher wind - the
+ *   physical reason one mode wins. Still stateless: every chunk redoes the (small) projection in
+ *   the same fixed order, so it stays deterministic.
  *
  * **Saturation.** Real H-section flutter settles into a large limit cycle rather than growing
  * forever (and Tacoma's ended when the structure failed, which isn't modelled here). A positive
  * A2* is scaled by `1 − (α/αs)²` for the section's tilt α ([saturationTwist] αs): it feeds energy
- * in at small twist and takes it out beyond αs. Over a sinusoidal cycle of amplitude A the
+ * in at small twist and takes it out beyond αs (the factor bottoms out at −1). Over a sinusoidal cycle of amplitude A the
  * aerodynamic work balances at `A = 2αs·√(1 − A2*crit/A2*)`, where `A2*crit` is the value that
  * just cancels the structural damping - so the twist levels off at a finite amplitude of up to
  * `2αs` instead of running away.
@@ -63,9 +71,22 @@ class TorsionalFlutter(
     private var saturationTwist: Double = 0.5,
     /** Unit vector along the deck's span. */
     private val spanAxis: Vector3 = Vector3(0.0, 0.0, 1.0),
+    /** Mode shapes (one value per strip) and their frequencies, for per-mode reduced velocity;
+     * empty = frozen [frequency] for everything. */
+    private val modes: List<Mode> = emptyList(),
     override val name: String? = null,
 ) : Force, EditableFields {
     data class Strip(val left: Int, val right: Int, val spanLength: Double)
+
+    /** A twisting mode: [shape] has one entry per strip, in strip order; [frequency] in Hz. */
+    class Mode(val shape: DoubleArray, val frequency: Double)
+
+    init {
+        for (mode in modes) require(mode.shape.size == strips.size) { "a mode shape needs one value per strip" }
+    }
+
+    // Each mode's Σ φ² ℓ - fixed, since shapes and span lengths are.
+    private val modeNorms = modes.map { m -> strips.indices.sumOf { m.shape[it] * m.shape[it] * strips[it].spanLength } }
 
     override fun editableFields(): Map<String, FieldValue> = mapOf(
         "frequency" to FieldValue.Scalar(frequency),
@@ -93,46 +114,103 @@ class TorsionalFlutter(
     fun a2(vr: Double): Double = slope * (vr - criticalReducedVelocity) * minOf(1.0, vr / criticalReducedVelocity)
 
     /** The twisting moment on [strip] right now: positive raises the [Strip.right] edge. */
-    fun moment(store: ParticleStore, strip: Strip, t: Double): Double = section(store, strip, windVelocity(t))?.moment ?: 0.0
+    fun moment(store: ParticleStore, strip: Strip, t: Double): Double {
+        val i = strips.indexOf(strip)
+        require(i >= 0) { "not one of this force's strips" }
+        return compute(store, windVelocity(t)).moments[i]
+    }
 
-    private class Section(val moment: Double, val chord: Double, val normal: Vector3)
+    /** Every strip's moment right now, in strip order. */
+    fun moments(store: ParticleStore, t: Double): DoubleArray = compute(store, windVelocity(t)).moments
 
-    private fun section(store: ParticleStore, strip: Strip, wind: Vector3): Section? {
-        val d = store.position(strip.right) - store.position(strip.left)
-        // The cross-section plane is perpendicular to the span; work within it, so a section
-        // twisted through any angle (even past vertical) still has a well-defined twist.
-        val inPlane = d - spanAxis * d.dot(spanAxis)
-        val chord = inPlane.length()
-        if (chord <= 0.0) return null
-        val across = inPlane * (1.0 / chord)
-        // A quarter-turn from `across` within the section plane: the direction the right edge moves
-        // when the section twists positively (+y for a level deck spanning +z, right edge at +x).
-        val normal = spanAxis.cross(across)
+    /** One strip's couple right now, for drawing it: [force] is what the [Strip.right] edge gets
+     * (the left gets its negative); [feeding] is whether it's putting energy into the twist
+     * (moment and twist rate the same way) rather than taking it out. */
+    data class Couple(val strip: Strip, val force: Vector3, val feeding: Boolean)
+
+    fun couples(store: ParticleStore, t: Double): List<Couple> {
+        val state = compute(store, windVelocity(t))
+        return strips.indices.mapNotNull { i ->
+            val normal = state.normals[i] ?: return@mapNotNull null
+            Couple(strips[i], normal * (state.moments[i] / state.chords[i]), state.moments[i] * state.rates[i] > 0.0)
+        }
+    }
+
+    private class State(val moments: DoubleArray, val chords: DoubleArray, val normals: Array<Vector3?>, val rates: DoubleArray)
+
+    private fun compute(store: ParticleStore, wind: Vector3): State {
+        val n = strips.size
+        val chords = DoubleArray(n)
+        val normals = arrayOfNulls<Vector3>(n)
+        val rates = DoubleArray(n)
+        val tilts = DoubleArray(n)
+        for ((i, strip) in strips.withIndex()) {
+            val d = store.position(strip.right) - store.position(strip.left)
+            // The cross-section plane is perpendicular to the span; work within it, so a section
+            // twisted through any angle (even past vertical) still has a well-defined twist.
+            val inPlane = d - spanAxis * d.dot(spanAxis)
+            val chord = inPlane.length()
+            if (chord <= 0.0) continue
+            val across = inPlane * (1.0 / chord)
+            // A quarter-turn from `across` within the section plane: the direction the right edge
+            // moves when the section twists positively (+y for a level deck spanning +z, right
+            // edge at +x).
+            val normal = spanAxis.cross(across)
+            chords[i] = chord
+            normals[i] = normal
+            tilts[i] = asin(across.y.coerceIn(-1.0, 1.0))
+            rates[i] = (store.velocity(strip.right) - store.velocity(strip.left)).dot(normal) / chord
+        }
         val crossWind = wind - spanAxis * wind.dot(spanAxis)
         val u = sqrt(crossWind.x * crossWind.x + crossWind.z * crossWind.z)
-        val vr = u / (frequency * chord)
-        var a2 = a2(vr)
-        val twist = asin(across.y.coerceIn(-1.0, 1.0))
-        if (a2 > 0.0) a2 *= 1.0 - (twist / saturationTwist) * (twist / saturationTwist)
-        val twistRate = (store.velocity(strip.right) - store.velocity(strip.left)).dot(normal) / chord
-        val b2 = chord * chord
-        return Section(0.5 * density * b2 * b2 * (2.0 * PI * frequency) * a2 * twistRate * strip.spanLength, chord, normal)
+
+        // Split each strip's twist rate into per-mode parts plus a residual.
+        val modalRates = DoubleArray(modes.size) { m ->
+            var sum = 0.0
+            for (i in 0 until n) sum += modes[m].shape[i] * strips[i].spanLength * rates[i]
+            sum / modeNorms[m]
+        }
+        val moments = DoubleArray(n)
+        for (i in 0 until n) {
+            val chord = chords[i]
+            if (chord <= 0.0) continue
+            // Clamped at -1: past αs√2 the moment damps the twist as strongly as it fed it at
+            // small twist, and no more - unbounded, a deck flipped far past αs (e.g. dragged)
+            // would get huge moments.
+            val saturation = maxOf(-1.0, 1.0 - (tilts[i] / saturationTwist) * (tilts[i] / saturationTwist))
+            // ω·A2*(Vr) for a motion component at frequency f, saturated when destabilizing.
+            fun gain(f: Double): Double {
+                val a2 = a2(u / (f * chord))
+                return 2.0 * PI * f * (if (a2 > 0.0) a2 * saturation else a2)
+            }
+            var residual = rates[i]
+            var sum = 0.0
+            for (m in modes.indices) {
+                val part = modes[m].shape[i] * modalRates[m]
+                residual -= part
+                sum += gain(modes[m].frequency) * part
+            }
+            sum += gain(frequency) * residual
+            val b2 = chord * chord
+            moments[i] = 0.5 * density * b2 * b2 * sum * strips[i].spanLength
+        }
+        return State(moments, chords, normals, rates)
     }
 
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
     ) {
-        val wind = windVelocity(t)
+        val state = compute(store, windVelocity(t))
         var i = chunkIndex
         while (i < strips.size) {
-            val strip = strips[i]
-            val section = section(store, strip, wind)
-            if (section != null && section.moment != 0.0) {
+            val m = state.moments[i]
+            val normal = state.normals[i]
+            if (m != 0.0 && normal != null) {
                 // A pure couple: ±M/chord on the two edges, perpendicular to the chord.
-                val f = section.normal * (section.moment / section.chord)
-                chunk.add(store.slotOf(strip.right), f)
-                chunk.add(store.slotOf(strip.left), f * -1.0)
+                val f = normal * (m / state.chords[i])
+                chunk.add(store.slotOf(strips[i].right), f)
+                chunk.add(store.slotOf(strips[i].left), f * -1.0)
             }
             i += chunkCount
         }

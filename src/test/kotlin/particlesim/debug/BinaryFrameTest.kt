@@ -385,6 +385,33 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `per-arrow colors and shown-by-default arrow names round-trip`() {
+        val store = ParticleStore()
+        val red = Color(1.0, 0.0, 0.0)
+        val groups = listOf(
+            particlesim.render.NamedArrowSamples("wind", listOf(particlesim.render.ArrowSample(Vector3(0.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0)))),
+            particlesim.render.NamedArrowSamples(
+                "flutter",
+                listOf(
+                    particlesim.render.ArrowSample(Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0), red),
+                    particlesim.render.ArrowSample(Vector3(-1.0, 0.0, 0.0), Vector3(0.0, -1.0, 0.0)),
+                ),
+            ),
+        )
+        val decoded = BinaryFrame.decode(
+            BinaryFrame.encode(
+                t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(),
+                arrowGroups = groups, shownByDefaultArrows = setOf("flutter"),
+            ),
+        )
+        assertEquals(null, decoded.arrowGroups[0].samples[0].color, "a group with no colors stays uncolored")
+        assertEquals(red, decoded.arrowGroups[1].samples[0].color)
+        val other = decoded.arrowGroups[1].samples[1].color!!
+        assertTrue(kotlin.math.abs(other.g - BinaryFrame.DEFAULT_ARROW_COLOR.g) < 0.01, "an uncolored arrow in a colored group gets the default color")
+        assertEquals(setOf("flutter"), decoded.shownByDefaultArrows)
+    }
+
+    @Test
     fun `light names round-trip, and an unnamed light stays unnamed`() {
         val store = ParticleStore()
         val lights = listOf(

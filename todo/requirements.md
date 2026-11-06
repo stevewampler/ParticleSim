@@ -483,7 +483,14 @@ function of reduced velocity `Vr = U/(fB)` that crosses from stabilizing to
 destabilizing), applied as a pure couple across the deck, reading its wind
 speed from the same wind expression, and saturating at large twist so it
 reaches a limit cycle rather than diverging. Its coefficients are fitted
-per scene, not general.
+per scene, not general. Because flutter derivatives depend on frequency,
+the force can take the structure's twist mode shapes and frequencies and
+give each mode's share of the motion its own reduced velocity, so a
+stiffer mode goes unstable at a higher wind than a softer one; without
+them it uses one frozen frequency. A scene can draw it as per-slice arrows
+colored by whether the moment is feeding the twist or damping it (§10.2
+arrows may carry a per-arrow color, and a scene may ask for a force's
+arrows to start shown).
 
 ### 7.3 Worked example: a flag
 

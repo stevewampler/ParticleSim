@@ -1,5 +1,7 @@
 package particlesim.debug
 
+import particlesim.examples.TACOMA_FAILURE_WIND
+
 /**
  * §9.6's scene library, live: `./gradlew runSceneLibraryDemo`, then open the URL it prints.
  * One always-on WebSocket/HTTP server hosting every debug demo this project has, switchable at
@@ -46,6 +48,7 @@ fun main(args: Array<String>) {
         "archBridge" to { ArchBridgeScene() },
         "cableStayedBridge" to { CableStayedBridgeScene() },
         "tacomaNarrows" to { TacomaNarrowsScene() },
+        "tacomaNarrowsSteady" to { TacomaNarrowsScene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]") },
     )
     val requestedScene = args.getOrNull(0)
     if (requestedScene != null && requestedScene !in factories) {
@@ -101,6 +104,7 @@ fun main(args: Array<String>) {
                 lights = frame.lights,
                 hiddenByDefaultGroups = frame.hiddenByDefaultGroups,
                 connectionStyles = frame.connectionStyles,
+                shownByDefaultArrows = frame.shownByDefaultArrows,
             )
         } catch (e: Exception) {
             System.err.println("scene loop error on '${library.activeName}': $e")

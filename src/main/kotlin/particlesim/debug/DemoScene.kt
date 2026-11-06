@@ -50,6 +50,10 @@ data class SceneFrame(
     /** How each connection is drawn (§10.2's [particlesim.render.ConnectionStyle]) - a connection
      * with no entry draws as a plain line, exactly as before styles existed. */
     val connectionStyles: Map<Pair<Int, Int>, particlesim.render.ConnectionStyle> = emptyMap(),
+    /** Forces whose arrows (in [arrowGroups]) start shown when this scene loads, instead of
+     * waiting for their "show arrows" box to be checked - a default only, like
+     * [hiddenByDefaultGroups]. */
+    val shownByDefaultArrows: Set<String> = emptySet(),
     val registry: SceneRegistry = SceneRegistry.build(),
     val colliders: List<Collider> = emptyList(),
     val events: List<SimEvent> = emptyList(),

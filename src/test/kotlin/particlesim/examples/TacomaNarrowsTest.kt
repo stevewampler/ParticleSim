@@ -33,34 +33,37 @@ class TacomaNarrowsTest {
     private fun tilt(s: TacomaNarrowsScenario, row: DeckRow) =
         (s.store.position(row.topRight) - s.store.position(row.topLeft)).let { kotlin.math.atan2(it.y, it.x) }
 
-    /** Growth of the one-node twist in a steady wind [u]: settle 15 s so the wind's switch-on
-     * transient dies away, seed a small one-node twist, and compare its antisymmetric part
-     * ((1/4-span twist − 3/4-span twist)/2) early and late over the next 24 s. */
-    private fun oneNodeGrowth(u: Double, flutter: Boolean = true): Pair<Double, Double> {
+    /** Growth rate (per second; negative = decaying) of the main span's twist in the shape
+     * `sin(halfWaves·πz/L)` in a steady wind [u]: settle 15 s so the wind's switch-on transient
+     * dies away, seed a small twist in that shape, project the twist onto the shape and compare
+     * its amplitude in the first and last quarters of the next 16 s. */
+    private fun twistGrowth(u: Double, halfWaves: Int, flutter: Boolean = true): Double {
         val s = buildTacomaNarrows(windVelocity = "[$u, 0, 0]", flutter = flutter)
         val t = step(s, 15.0)
-        s.seedOneNodeTwist(0.05)
-        val quarter = s.mainSpan[s.mainSpan.size / 4]
-        val threeQuarter = s.mainSpan[3 * s.mainSpan.size / 4]
+        s.seedTwist(halfWaves, 0.05)
+        val n = s.mainSpan.lastIndex
         val series = ArrayList<Double>()
-        step(s, 24.0, startT = t) { series += (twist(s, quarter) - twist(s, threeQuarter)) / 2 }
-        val third = series.size / 3
+        step(s, 16.0, startT = t) { series += s.mainSpan.withIndex().sumOf { (r, row) -> sin(halfWaves * PI * r / n) * tilt(s, row) } }
+        val q = series.size / 4
         fun amplitude(seg: List<Double>) = seg.average().let { m -> seg.maxOf { abs(it - m) } }
-        return amplitude(series.subList(0, third)) to amplitude(series.subList(2 * third, series.size))
+        return kotlin.math.ln(amplitude(series.subList(3 * q, series.size)) / amplitude(series.subList(0, q))) / 12.0
     }
 
     @Test
     fun `with the flutter force the one-node twist decays in a light wind`() {
-        val (early, late) = oneNodeGrowth(3.0)
-        assertTrue(late < 0.7 * early, "one-node twist went from $early to $late rad at U=3 - should decay below the flutter speed")
+        val rate = twistGrowth(3.0, halfWaves = 2)
+        assertTrue(rate < -0.03, "one-node twist growth rate $rate/s at U=3 - should decay below the flutter speed")
     }
 
     @Test
-    fun `with the flutter force the one-node twist grows in the collapse-day wind`() {
-        // Calibrated so onset is just below the failure wind (~5.0 vs 5.9): there the twist grows
-        // at roughly 7%/s, about 3x over the 16 s between the measurement windows.
-        val (early, late) = oneNodeGrowth(TACOMA_FAILURE_WIND)
-        assertTrue(late > 1.5 * early, "one-node twist went from $early to $late rad at the failure wind - should grow")
+    fun `in the collapse-day wind the one-node twist grows but the whole-span twist doesn't`() {
+        // Per-mode reduced velocity: the one-node mode (0.645 Hz) is past its flutter onset
+        // (~5.1) at the failure wind, while the stiffer whole-span mode (0.835 Hz) sits at a
+        // lower reduced velocity and doesn't go unstable until ~7.7. Measured: +0.075/s and -0.11/s.
+        val oneNode = twistGrowth(TACOMA_FAILURE_WIND, halfWaves = 2)
+        val wholeSpan = twistGrowth(TACOMA_FAILURE_WIND, halfWaves = 1)
+        assertTrue(oneNode > 0.03, "one-node twist growth rate $oneNode/s at the failure wind - should grow")
+        assertTrue(wholeSpan < -0.03, "whole-span twist growth rate $wholeSpan/s at the failure wind - should decay")
     }
 
     private fun dominantFrequency(series: List<Double>, dtS: Double): Double {
@@ -91,22 +94,23 @@ class TacomaNarrowsTest {
     @Test
     fun `the towers stay fixed and the default gusty wind with flutter levels off instead of blowing up`() {
         // The scene's own setup, run long enough for the flutter to grow and reach its limit cycle
-        // (the viewer runs it indefinitely).
+        // (the viewer runs it indefinitely). Measured: the one-node twist levels off near 0.49 rad.
         val s = buildTacomaNarrows()
         s.seedOneNodeTwist(TACOMA_SCENE_SEED_RATE)
         val towerStart = s.towerLegs.flatten().associateWith { s.store.position(it) }
-        val mid = s.mainSpan[s.mainSpan.size / 2]
+        val quarter = s.mainSpan[s.mainSpan.size / 4]
+        val threeQuarter = s.mainSpan[3 * s.mainSpan.size / 4]
         var maxSpeed = 0.0
-        var lateTwist = 0.0
+        var lateOneNode = 0.0
         var t = 0.0
         step(s, 120.0) {
             t += 0.02
             for (id in s.store.liveIds()) maxSpeed = maxOf(maxSpeed, s.store.velocity(id).length())
-            if (t > 60.0) lateTwist = maxOf(lateTwist, abs(tilt(s, mid)))
+            if (t > 80.0) lateOneNode = maxOf(lateOneNode, abs(tilt(s, quarter) - tilt(s, threeQuarter)) / 2)
         }
         assertTrue(maxSpeed < 5.0, "max speed $maxSpeed - the flutter isn't levelling off")
-        assertTrue(lateTwist > 0.2, "mid-span twist only reached $lateTwist rad - the flutter didn't develop")
-        assertTrue(lateTwist < 1.0, "mid-span twist reached $lateTwist rad - not a bounded limit cycle")
+        assertTrue(lateOneNode > 0.3, "one-node twist only reached $lateOneNode rad - the flutter didn't develop")
+        assertTrue(lateOneNode < 1.0, "one-node twist reached $lateOneNode rad - not a bounded limit cycle")
         for ((id, p) in towerStart) assertTrue((s.store.position(id) - p).length() < 1e-9, "tower particle $id moved")
     }
 

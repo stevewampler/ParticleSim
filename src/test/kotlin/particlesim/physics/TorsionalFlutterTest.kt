@@ -99,4 +99,30 @@ class TorsionalFlutterTest {
         assertEquals(FieldValue.Scalar(0.0), f.editableFields()["a2Slope"])
         assertTrue(!f.setField("frequency", FieldValue.Scalar(-1.0)), "a non-positive frequency should be rejected")
     }
+
+    @Test
+    fun `with modes each part of the motion uses its own mode's frequency`() {
+        // Two strips; mode A twists both the same way at 0.5 Hz, mode B opposite ways at 1.0 Hz.
+        val store = ParticleStore()
+        val l1 = store.create(position = Vector3(-1.0, 0.0, 0.0)); val r1 = store.create(position = Vector3(1.0, 0.0, 0.0))
+        val l2 = store.create(position = Vector3(-1.0, 0.0, 1.0)); val r2 = store.create(position = Vector3(1.0, 0.0, 1.0))
+        val strips = listOf(TorsionalFlutter.Strip(l1, r1, 1.0), TorsionalFlutter.Strip(l2, r2, 1.0))
+        val f = TorsionalFlutter(
+            strips, windVelocity = { Vector3(6.0, 0.0, 0.0) }, frequency = 2.0, density = 0.3, slope = 0.2,
+            criticalReducedVelocity = 4.0,
+            modes = listOf(TorsionalFlutter.Mode(doubleArrayOf(1.0, 1.0), 0.5), TorsionalFlutter.Mode(doubleArrayOf(1.0, -1.0), 1.0)),
+        )
+        fun twist(rate1: Double, rate2: Double) {
+            store.setVelocity(l1, Vector3(0.0, -rate1, 0.0)); store.setVelocity(r1, Vector3(0.0, rate1, 0.0))
+            store.setVelocity(l2, Vector3(0.0, -rate2, 0.0)); store.setVelocity(r2, Vector3(0.0, rate2, 0.0))
+        }
+        // ½ρB⁴ω·A2*(U/(fB))·α̇ℓ with B = 2, U = 6.
+        fun expected(freq: Double, rate: Double) = 0.5 * 0.3 * 16.0 * 2.0 * PI * freq * f.a2(6.0 / (freq * 2.0)) * rate
+        twist(0.1, 0.1)
+        assertEquals(expected(0.5, 0.1), f.moments(store, 0.0)[0], 1e-12)
+        twist(0.1, -0.1)
+        assertEquals(expected(1.0, 0.1), f.moments(store, 0.0)[0], 1e-12)
+        assertEquals(expected(1.0, -0.1), f.moments(store, 0.0)[1], 1e-12)
+        assertTrue(f.moments(store, 0.0)[0] < 0.0, "mode B's Vr (3) is below Vr₀ (4): it should damp")
+    }
 }
