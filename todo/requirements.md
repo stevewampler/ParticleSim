@@ -492,6 +492,13 @@ colored by whether the moment is feeding the twist or damping it (§10.2
 arrows may carry a per-arrow color, and a scene may ask for a force's
 arrows to start shown).
 
+Breaking (§5.4) on a mesh can be specified as a **strain** - a fraction of
+each edge's rest length - so one material limit applies to edges of any
+length, and a scene may break a whole group of mesh edges at once between
+steps (e.g. a bridge bay tearing apart once both its girders have failed).
+A surface force that pushes on triangles (wind) can be told to stop
+pushing on triangles whose corners are no longer held together.
+
 ### 7.3 Worked example: a flag
 
 > A rectangular grid of particles forms a triangulated sheet. Particles

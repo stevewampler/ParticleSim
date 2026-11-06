@@ -130,4 +130,42 @@ class MeshSpringsTest {
 
         assertTrue(mesh.activeConnectionsWithBreakProximity(store).isEmpty())
     }
+
+    @Test
+    fun `strain thresholds scale with each edge's own rest length`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val a = store.create(position = Vector3(0.0, 0.0, 0.0))
+        val b = store.create(position = Vector3(1.0, 0.0, 0.0))
+        val c = store.create(position = Vector3(0.0, 0.0, 10.0))
+        val d = store.create(position = Vector3(0.0, 0.0, 20.0))
+        // 1% strain: the 1-long edge breaks past 0.01 of stretch, the 10-long edge past 0.1.
+        val mesh = MeshSprings(
+            listOf(Grid.Edge(a, b), Grid.Edge(c, d)), store, stiffness = 1.0,
+            extensionBreakThreshold = 0.01, compressionBreakThreshold = 0.005, breakThresholdsAreStrains = true,
+        )
+        store.setPosition(b, Vector3(1.02, 0.0, 0.0)) // 2% - breaks
+        store.setPosition(d, Vector3(0.0, 0.0, 20.05)) // 0.5% - holds
+        mesh.accumulate(store, groups, 0.0, ChunkAccumulator(store.capacity), 0, 1)
+        assertFalse(mesh.isActive(mesh.edgeIndexOf(a, b)))
+        assertTrue(mesh.isActive(mesh.edgeIndexOf(d, c)), "edge lookup works in either order")
+        store.setPosition(d, Vector3(0.0, 0.0, 19.9)) // 1% compression > 0.5% - breaks
+        mesh.accumulate(store, groups, 0.0, ChunkAccumulator(store.capacity), 0, 1)
+        assertFalse(mesh.isActive(mesh.edgeIndexOf(c, d)))
+    }
+
+    @Test
+    fun `breakEdge removes an edge's force for good`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val a = store.create(position = Vector3(0.0, 0.0, 0.0))
+        val b = store.create(position = Vector3(1.0, 0.0, 0.0))
+        val mesh = MeshSprings(listOf(Grid.Edge(a, b)), store, stiffness = 10.0)
+        store.setPosition(b, Vector3(2.0, 0.0, 0.0))
+        mesh.breakEdge(0)
+        val chunk = ChunkAccumulator(store.capacity)
+        mesh.accumulate(store, groups, 0.0, chunk, 0, 1)
+        assertEquals(Vector3(0.0, 0.0, 0.0), chunk.at(store.slotOf(b)))
+        assertEquals(-1, mesh.edgeIndexOf(a, a))
+    }
 }

@@ -18,6 +18,9 @@ import particlesim.render.NamedArrowSamples
 import particlesim.render.SceneQueryImpl
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
+import particlesim.core.VectorExpr
+import particlesim.expr.ExpressionParser
+import particlesim.surface.Surface
 
 /**
  * §9.6 scene-library demo for [buildTacomaNarrows] - the 1940 Tacoma Narrows Bridge at 1 unit =
@@ -30,14 +33,42 @@ import particlesim.render.SurfaceRenderer
  * `tacomaNarrowsSteady` is the same scene in a steady failure-day wind, without the gust's
  * forced whole-span twist on top. The `flutter` force's arrows (shown by default) draw its
  * twisting push on each slice: red where it's feeding the twist, blue where it's damping it.
- * `a2Slope` 0 in its panel switches flutter off. There's no load crossing this one: the wind
+ * `a2Slope` 0 in its panel switches flutter off.
+ *
+ * With `breakable` (the `tacomaNarrowsBreakable` scene, steady failure wind) the members break at
+ * the 1941 report's real limits ([particlesim.examples.TacomaBreakage]) and pieces fall to the
+ * water 195 ft below. At the documented 45° twist the model sits right at its limit: the first
+ * quarter-point girders buckle after ~4 minutes and nothing else goes. Raise the `flutter`
+ * panel's `saturationTwist` (e.g. 0.42, ~57°) and the whole cascade follows within ~2 1/2
+ * minutes - girders buckling, hangers snapping and the main span falling away bay by bay. There's no load crossing this one: the wind
  * is the load.
  */
-class TacomaNarrowsScene(windVelocity: String = TACOMA_GUSTY_WIND) : DemoScene {
-    // Starts with a small one-node twist - the model is symmetric, so the collapse-day mode needs
-    // a disturbance to grow from (on the day, a slipped cable band at mid-span).
-    internal val scenario = buildTacomaNarrows(windVelocity = windVelocity).also { it.seedOneNodeTwist(TACOMA_SCENE_SEED_RATE) }
+class TacomaNarrowsScene(
+    windVelocity: String = TACOMA_GUSTY_WIND,
+    /** Real breaking limits ([particlesim.examples.TacomaBreakage]) and the water below. */
+    private val breakable: Boolean = false,
+) : DemoScene {
+    internal val scenario = buildTacomaNarrows(windVelocity = windVelocity, breakable = breakable)
     private val integrator = Integrator()
+    private val forces = scenario.forces.toMutableList()
+    private val events = ArrayList<SimEvent>()
+
+    init {
+        if (breakable) {
+            // The freshly built model rings for several seconds (hanger tension briefly ~2x its
+            // dead load) - let that die away in still air before anything can break.
+            scenario.wind.setVelocity(VectorExpr.of(Vector3.ZERO))
+            var t = 0.0
+            repeat((BREAKABLE_SETTLE_SECONDS / TACOMA_DT).toInt()) {
+                integrator.step(scenario.store, scenario.groups, forces, scenario.constraints, t, TACOMA_DT)
+                t += TACOMA_DT
+            }
+            scenario.wind.setVelocity(ExpressionParser.parseVector(windVelocity))
+        }
+        // Starts with a small one-node twist - the model is symmetric, so the collapse-day mode
+        // needs a disturbance to grow from (on the day, a slipped cable band at mid-span).
+        scenario.seedOneNodeTwist(TACOMA_SCENE_SEED_RATE)
+    }
     private val scene = SceneQueryImpl(scenario.store, scenario.groups)
 
     private val roadwayMesh = SurfaceRenderer(
@@ -73,6 +104,8 @@ class TacomaNarrowsScene(windVelocity: String = TACOMA_GUSTY_WIND) : DemoScene {
             (towerConnections styledAs ConnectionStyles.paintedSteel("towers", towerGrey, radius = 0.18))
 
     private companion object {
+        const val BREAKABLE_SETTLE_SECONDS = 8.0
+        const val ARM_AFTER_SECONDS = 5.0
         val FEEDING = Color(0.95, 0.2, 0.15)
         val DAMPING = Color(0.2, 0.5, 1.0)
         /** Arrow length per unit of couple force - a few deck widths at the limit cycle's peak. */
@@ -100,11 +133,17 @@ class TacomaNarrowsScene(windVelocity: String = TACOMA_GUSTY_WIND) : DemoScene {
     override fun ids(): List<Int> = allIds
 
     override fun step(t: Double) {
-        integrator.step(scenario.store, scenario.groups, scenario.forces, scenario.constraints, t, dt)
+        val breakage = scenario.breakage
+        // Armed a few seconds in, so the seed's own sudden kick isn't what breaks anything.
+        if (breakable && !breakage.armed && t >= ARM_AFTER_SECONDS) breakage.arm()
+        val result = integrator.step(scenario.store, scenario.groups, forces, scenario.constraints, t, dt)
+        if (result.brokenForces.isNotEmpty()) forces.removeAll(result.brokenForces.toSet())
+        for (description in breakage.afterStep(result.brokenForces)) events += SimEvent.ForceBreak(description)
+        scenario.collisions?.resolve(scenario.store, scenario.groups, t, dt)
     }
 
     override fun handleControl(message: SceneControlMessage, t: Double) {
-        if (applyEditableFieldMessage(message, scenario.forces, scenario.constraints, scenario.store, t, lights)) return
+        if (applyEditableFieldMessage(message, forces, scenario.constraints, scenario.store, t, lights)) return
         if (message is SceneControlMessage.SetGroupEnabled) scenario.groups.setEnabled(message.name, message.enabled)
     }
 
@@ -124,16 +163,41 @@ class TacomaNarrowsScene(windVelocity: String = TACOMA_GUSTY_WIND) : DemoScene {
         return listOf(NamedArrowSamples(flutter.name ?: "", samples))
     }
 
-    override fun frame(t: Double): SceneFrame = SceneFrame(
-        arrowGroups = flutterArrows(t),
-        shownByDefaultArrows = setOfNotNull(scenario.flutter?.name),
-        camera = camera.evaluate(t, scene),
-        connections = structureConnections,
-        connectionStyles = connectionStyles,
-        meshes = listOf(roadwayMesh, girderMesh),
-        visibleIds = visibleIds,
-        hiddenByDefaultGroups = hiddenByDefaultGroups,
-        registry = registry,
-        lights = lights,
-    )
+    // Broken hangers and cable segments stop being drawn; a torn-apart bay's roadway and girder
+    // panels disappear (rebuilt only when something new has broken).
+    private var drawnBreakCount = -1
+    private var connections = structureConnections
+    private var meshes = listOf(roadwayMesh, girderMesh)
+
+    private fun refreshBrokenGeometry() {
+        val breakage = scenario.breakage
+        val count = breakage.brokenHangerCount + breakage.brokenCableCount + breakage.separatedBayCount
+        if (count == drawnBreakCount) return
+        drawnBreakCount = count
+        val gone = (breakage.hangers + breakage.cables).filter { breakage.isBroken(it.spring) }.map { it.connection }.toSet()
+        connections = structureConnections.filter { it !in gone }
+        val hidden = breakage.hiddenTriangles
+        meshes = if (hidden.isEmpty()) listOf(roadwayMesh, girderMesh) else listOf(roadwayMesh, girderMesh).map { mesh ->
+            mesh.copy(surface = Surface(mesh.surface.triangles.filter { it !in hidden }, name = mesh.surface.name))
+        }
+    }
+
+    override fun frame(t: Double): SceneFrame {
+        refreshBrokenGeometry()
+        val frame = SceneFrame(
+            arrowGroups = flutterArrows(t),
+            shownByDefaultArrows = setOfNotNull(scenario.flutter?.name),
+            camera = camera.evaluate(t, scene),
+            connections = connections,
+            connectionStyles = connectionStyles,
+            meshes = meshes,
+            visibleIds = visibleIds,
+            hiddenByDefaultGroups = hiddenByDefaultGroups,
+            registry = registry,
+            lights = lights,
+            events = events.toList(),
+        )
+        events.clear()
+        return frame
+    }
 }

@@ -5871,6 +5871,41 @@ load. Full `./gradlew test -q` suite green throughout.
       `shownByDefaultArrows` (seeds the viewer's "show arrows" per scene
       load, like hiddenByDefaultGroups). `BinaryFrameTest` round-trips both.
 
+- [x] **Breakable version, `tacomaNarrowsBreakable`** (steady failure wind) with real
+      member limits from the 1941 Board of Engineers report (Ammann, von Kármán,
+      Woodruff, *The Failure of the Tacoma Narrows Bridge*, FWA, pp. 48-60; text
+      extracted from the Caltech scan): suspenders 4 x 165,400 lb ultimate vs
+      106,000 lb dead -> break at 6.24x dead-load tension; cables 235,000 psi
+      tested vs 67,700 dead -> 3.47x; girder chords at steel strains 0.00276
+      tension (80,000 psi silicon steel) / 0.00138 compression (40,000 psi
+      flange buckling), E = 29e6 psi. Load ratios work despite non-physical
+      masses (δ₀ = T₀/k is known exactly); chord strain is geometric. The rest
+      of the deck lattice has no limit (its still-air strains are 0.002-0.003,
+      meaningless as material strains); instead a bay separates when both its
+      girders have failed (`TacomaBreakage`, a modeling choice). Bays touching
+      a support can't fail (the rigid 5-particle pin made them fail within 2 s
+      of the seed - artifact). Limits armed 5 s after the seed; the scene
+      settles 8 s in still air first (hangers ring to ~2.1x dead load at build).
+      Torn bays drop their panels from rendering and from `Wind`
+      (`Wind.removeTriangles` - stretched panels caught ever more wind, ~300
+      units/s fragments) and their rows from flutter
+      (`TorsionalFlutter.deactivateStrip` - free fragments spun up). Water: plane
+      collider at -19.5 (195 ft). Engine additions: `MeshSprings`
+      `breakThresholdsAreStrains`, `edgeIndexOf`/`isActive`/`breakEdge`.
+      Calibrations that changed every Tacoma scene: `windDensity` 1.0 -> 0.24
+      (side drag at Cd~2 = 1.3% of dead load, was ~4x), flutter saturation
+      0.42 -> 0.31 fitted to the report's "alternating 45° torsion" (p. 59);
+      flutter onset now ~4.7, whole-span ~7.3, growth +0.108/s at 5.9.
+      **Result**: at 45° the model sits at its limit - quarter-point girders
+      buckle (as the report describes, p. 60) after ~4 min, nothing else; at
+      ~57° (saturationTwist 0.42) the full cascade: girders buckle, hangers
+      snap, the main span falls away bay by bay within ~2.5 min, cables never
+      break (as on the day). Not modeled: slab shear failure (the report's
+      first failure), cable band slip, suspender bending at their 45°-bent
+      connections, tower buckling. `TacomaBreakageTest` pins the limits, arming,
+      bay separation, the support exclusion, still-air safety and 2 min at 45°
+      with nothing broken.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

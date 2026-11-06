@@ -85,8 +85,25 @@ class TorsionalFlutter(
         for (mode in modes) require(mode.shape.size == strips.size) { "a mode shape needs one value per strip" }
     }
 
-    // Each mode's Σ φ² ℓ - fixed, since shapes and span lengths are.
-    private val modeNorms = modes.map { m -> strips.indices.sumOf { m.shape[it] * m.shape[it] * strips[it].spanLength } }
+    // Each mode's Σ φ² ℓ over the active strips - fixed until a strip is switched off.
+    private val stripActive = BooleanArray(strips.size) { true }
+    private var modeNorms = computeModeNorms()
+
+    private fun computeModeNorms() = modes.map { m ->
+        strips.indices.filter { stripActive[it] }.sumOf { m.shape[it] * m.shape[it] * strips[it].spanLength }
+    }
+
+    /**
+     * Stops applying the moment to strip [index] for good - for a deck section that has torn
+     * loose, where the flutter model (aerodynamics of an *intact* deck twisting as a whole)
+     * no longer applies: left on, a free fragment's own spin would be fed without limit. Call
+     * between steps, not during [accumulate].
+     */
+    fun deactivateStrip(index: Int) {
+        if (!stripActive[index]) return
+        stripActive[index] = false
+        modeNorms = computeModeNorms()
+    }
 
     override fun editableFields(): Map<String, FieldValue> = mapOf(
         "frequency" to FieldValue.Scalar(frequency),
@@ -145,6 +162,7 @@ class TorsionalFlutter(
         val rates = DoubleArray(n)
         val tilts = DoubleArray(n)
         for ((i, strip) in strips.withIndex()) {
+            if (!stripActive[i]) continue
             val d = store.position(strip.right) - store.position(strip.left)
             // The cross-section plane is perpendicular to the span; work within it, so a section
             // twisted through any angle (even past vertical) still has a well-defined twist.
@@ -168,7 +186,7 @@ class TorsionalFlutter(
         val modalRates = DoubleArray(modes.size) { m ->
             var sum = 0.0
             for (i in 0 until n) sum += modes[m].shape[i] * strips[i].spanLength * rates[i]
-            sum / modeNorms[m]
+            if (modeNorms[m] > 0.0) sum / modeNorms[m] else 0.0
         }
         val moments = DoubleArray(n)
         for (i in 0 until n) {

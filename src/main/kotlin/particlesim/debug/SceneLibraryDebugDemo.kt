@@ -49,6 +49,7 @@ fun main(args: Array<String>) {
         "cableStayedBridge" to { CableStayedBridgeScene() },
         "tacomaNarrows" to { TacomaNarrowsScene() },
         "tacomaNarrowsSteady" to { TacomaNarrowsScene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]") },
+        "tacomaNarrowsBreakable" to { TacomaNarrowsScene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]", breakable = true) },
     )
     val requestedScene = args.getOrNull(0)
     if (requestedScene != null && requestedScene !in factories) {

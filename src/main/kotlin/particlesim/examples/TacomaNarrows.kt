@@ -16,6 +16,10 @@ import particlesim.physics.Wind
 import particlesim.surface.Grid
 import particlesim.surface.Surface
 import particlesim.surface.Triangle
+import particlesim.collision.CollisionSystem
+import particlesim.collision.ParticleColliderRule
+import particlesim.collision.PlaneCollider
+import particlesim.core.VectorExpr
 import kotlin.math.sin
 
 /**
@@ -68,24 +72,29 @@ import kotlin.math.sin
  * span, with an `A2*` that is stabilizing at low reduced velocity `Vr = U/(fB)` and
  * destabilizing above a crossing. Its numbers are **fitted, not measured**: the model's masses
  * and air density aren't physical, so [FLUTTER_DENSITY], [FLUTTER_SLOPE] and
- * [FLUTTER_CRITICAL_VR] were chosen so that the one-node twist starts to grow at about 5.0
- * units/s (~15% below the failure wind) and grows at ~7.5%/s at 5.9 - an e-fold of ~13 s, ~42 s
- * at full scale. Reduced velocity is unchanged by Froude scaling, so the failure wind is at
+ * [FLUTTER_CRITICAL_VR] were chosen so that the one-node twist starts to grow a little below
+ * the failure wind - now ~4.7 units/s, ~20% below, with the plain wind at its calibrated
+ * [TACOMA_WIND_DENSITY] - and grows at ~11%/s at 5.9 (an e-fold of ~9 s, ~29 s at full scale).
+ * [FLUTTER_SATURATION_TWIST] sets the amplitude it levels off at, fitted to the 1941 report's
+ * "alternating 45° torsion in the final one-node motion" (p. 59): ~45° at the quarter points
+ * in the steady failure wind. Reduced velocity is unchanged by Froude scaling, so the failure wind is at
  * about the same `Vr` (~7.8) here as on the real bridge.
  *
  * **Which mode.** The force uses per-mode reduced velocity ([TACOMA_TORSION_MODE_FREQUENCIES],
  * measured on this model): the whole-span twist has to stretch the main cables, so it's stiffer
  * (0.835 Hz vs the one-node 0.645 Hz), sits at a lower reduced velocity in the same wind, and
- * doesn't go unstable until ~7.7 units/s. So at the failure wind only the one-node mode - the
- * collapse-day mode - flutters, without that being tuned in: measured growth at 5.9 is +0.075/s
- * for the one-node twist and −0.11/s for the whole-span twist. (That depends on the cables being
+ * doesn't go unstable until ~7.3 units/s. So at the failure wind only the one-node mode - the
+ * collapse-day mode - flutters, without that being tuned in: measured growth at 5.9 is +0.108/s
+ * for the one-node twist and −0.081/s for the whole-span twist. (That depends on the cables being
  * realistically stiff: at the earlier [cableStiffness] of 300,000 the cables stretched ~6x too
  * easily compared with the real steel ones - EA/(wL) ~130 vs an estimated ~860 - which made the
  * whole-span twist the *softer* mode. 1,000,000 is as stiff as the 1 ms timestep comfortably
  * allows, EA/(wL) ~450.) The one-node mode still needs a disturbance to grow from
- * ([seedOneNodeTwist]): in steady wind it settles into a one-node limit cycle of ~0.56 rad at the
- * quarter points with the whole-span twist ~0.02; the default gust adds a forced whole-span
- * twist of ~0.18 rad on top of a ~0.49 rad one-node cycle.
+ * ([seedOneNodeTwist]): in steady wind it settles into a one-node limit cycle of ~0.78 rad (45°)
+ * at the quarter points; the default gust gives ~44°.
+ *
+ * **Breaking.** Every scenario carries the 1941 report's member limits in [TacomaBreakage],
+ * inert until armed; `breakable = true` adds the water below for falling pieces to land on.
  */
 data class TacomaNarrowsScenario(
     val store: ParticleStore,
@@ -110,6 +119,10 @@ data class TacomaNarrowsScenario(
     val wind: Wind,
     /** The self-excited twisting moment on the deck, or null when built with `flutter = false`. */
     val flutter: TorsionalFlutter?,
+    /** The real breaking limits - inert until [TacomaBreakage.arm] is called. */
+    val breakage: TacomaBreakage,
+    /** The water below, for a breakable bridge (`breakable = true`); null otherwise. */
+    val collisions: CollisionSystem?,
 ) {
     val mainSpan: List<DeckRow> get() = spans[1]
 }
@@ -178,13 +191,15 @@ fun buildTacomaNarrows(
      * aerodynamic effect. */
     structuralDamping: Double = 3.0,
     windVelocity: String = TACOMA_GUSTY_WIND,
-    windDensity: Double = 1.0,
+    windDensity: Double = TACOMA_WIND_DENSITY,
     /** Add the [TorsionalFlutter] moment to the deck - what the plain [Wind] can't do. */
     flutter: Boolean = true,
     flutterDensity: Double = FLUTTER_DENSITY,
     flutterSlope: Double = FLUTTER_SLOPE,
     flutterCriticalReducedVelocity: Double = FLUTTER_CRITICAL_VR,
-    flutterSaturationTwist: Double = 0.3,
+    flutterSaturationTwist: Double = FLUTTER_SATURATION_TWIST,
+    /** Add the water below, for a bridge whose pieces can fall ([TacomaBreakage]). */
+    breakable: Boolean = false,
     store: ParticleStore = ParticleStore(),
     groups: Groups = Groups(),
     placement: ShapePlacement = ShapePlacement(),
@@ -226,9 +241,15 @@ fun buildTacomaNarrows(
 
     val deckEdges = ArrayList<Grid.Edge>()
     val chordEdges = ArrayList<Grid.Edge>()
+    // Per-bay bookkeeping for [TacomaBreakage]: (span, bay) -> its edge indices and triangles.
+    class BayParts(val span: Int, val index: Int) {
+        val left = ArrayList<Int>(); val right = ArrayList<Int>(); val deck = ArrayList<Int>()
+        val triangles = HashSet<Triangle>()
+    }
+    val bayParts = ArrayList<BayParts>()
     val deckTriangles = ArrayList<Triangle>()
     val girderTriangles = ArrayList<Triangle>()
-    for (span in spans) {
+    for ((spanIndex, span) in spans.withIndex()) {
         for (row in span) {
             // Floor beams across the deck, girder-web verticals, knee braces.
             deckEdges += Grid.Edge(row.topLeft, row.centre)
@@ -243,22 +264,27 @@ fun buildTacomaNarrows(
             deckEdges += Grid.Edge(row.bottomLeft, row.topRight)
             deckEdges += Grid.Edge(row.bottomRight, row.topLeft)
         }
-        for ((a, b) in span.zipWithNext()) {
+        for ((bayIndex, pair) in span.zipWithNext().withIndex()) {
+            val (a, b) = pair
+            val bay = BayParts(spanIndex, bayIndex).also { bayParts += it }
+            fun deckEdge(x: Int, y: Int) { bay.deck += deckEdges.size; deckEdges += Grid.Edge(x, y) }
             // Chords along the span: the deck centreline here, the four girder chords below.
-            deckEdges += Grid.Edge(a.centre, b.centre)
-            for ((x, y) in listOf(a.topLeft to b.topLeft, a.topRight to b.topRight, a.bottomLeft to b.bottomLeft, a.bottomRight to b.bottomRight)) {
-                chordEdges += Grid.Edge(x, y)
-            }
+            deckEdge(a.centre, b.centre)
+            for ((x, y) in listOf(a.topLeft to b.topLeft, a.bottomLeft to b.bottomLeft)) { bay.left += chordEdges.size; chordEdges += Grid.Edge(x, y) }
+            for ((x, y) in listOf(a.topRight to b.topRight, a.bottomRight to b.bottomRight)) { bay.right += chordEdges.size; chordEdges += Grid.Edge(x, y) }
             // Deck-plane lateral bracing (X in each half of the bay).
-            deckEdges += Grid.Edge(a.topLeft, b.centre); deckEdges += Grid.Edge(a.centre, b.topLeft)
-            deckEdges += Grid.Edge(a.centre, b.topRight); deckEdges += Grid.Edge(a.topRight, b.centre)
+            deckEdge(a.topLeft, b.centre); deckEdge(a.centre, b.topLeft)
+            deckEdge(a.centre, b.topRight); deckEdge(a.topRight, b.centre)
             // Girder-web diagonals (X per bay, per girder). No bottom lateral bracing: open section.
-            deckEdges += Grid.Edge(a.topLeft, b.bottomLeft); deckEdges += Grid.Edge(a.bottomLeft, b.topLeft)
-            deckEdges += Grid.Edge(a.topRight, b.bottomRight); deckEdges += Grid.Edge(a.bottomRight, b.topRight)
+            deckEdge(a.topLeft, b.bottomLeft); deckEdge(a.bottomLeft, b.topLeft)
+            deckEdge(a.topRight, b.bottomRight); deckEdge(a.bottomRight, b.topRight)
 
-            deckTriangles += Grid.triangles(listOf(listOf(a.topLeft, a.centre, a.topRight), listOf(b.topLeft, b.centre, b.topRight)))
-            girderTriangles += Grid.triangles(listOf(listOf(a.topLeft, b.topLeft), listOf(a.bottomLeft, b.bottomLeft)))
-            girderTriangles += Grid.triangles(listOf(listOf(a.topRight, b.topRight), listOf(a.bottomRight, b.bottomRight)))
+            val roadway = Grid.triangles(listOf(listOf(a.topLeft, a.centre, a.topRight), listOf(b.topLeft, b.centre, b.topRight)))
+            val webs = Grid.triangles(listOf(listOf(a.topLeft, b.topLeft), listOf(a.bottomLeft, b.bottomLeft))) +
+                Grid.triangles(listOf(listOf(a.topRight, b.topRight), listOf(a.bottomRight, b.bottomRight)))
+            deckTriangles += roadway
+            girderTriangles += webs
+            bay.triangles += roadway + webs
         }
     }
     val deckSurface = Surface(deckTriangles, name = placement.name("roadway"))
@@ -299,6 +325,8 @@ fun buildTacomaNarrows(
     val cables = ArrayList<List<Int>>()
     val hangerConnections = ArrayList<Pair<Int, Int>>()
     val hangerForces = ArrayList<Force>()
+    val cableMembers = ArrayList<TacomaBreakage.Member>()
+    val hangerMembers = ArrayList<TacomaBreakage.Member>()
     for ((side, x) in listOf("left" to -halfWidth, "right" to halfWidth)) {
         val westTop = legIds[if (side == "left") 0 else 1].last()
         val eastTop = legIds[if (side == "left") 2 else 3].last()
@@ -338,6 +366,7 @@ fun buildTacomaNarrows(
             // Unnamed: ~400 individually named cable/hanger springs would flood the viewer's
             // outliner and every frame's registry (they were most of a 180 KB frame).
             Spring(a, b, restLength = length - tension / cableStiffness, stiffness = cableStiffness, compressionStiffness = 0.0)
+                .also { cableMembers += TacomaBreakage.Member(it, a to b, tension / cableStiffness) }
         }
         cableForces += springs
 
@@ -351,7 +380,7 @@ fun buildTacomaNarrows(
                 hangerForces += Spring(
                     cableId, deckId, restLength = length - deckWeightPerHanger / hangerStiffness, stiffness = hangerStiffness,
                     compressionStiffness = 0.0,
-                )
+                ).also { hangerMembers += TacomaBreakage.Member(it, cableId to deckId, deckWeightPerHanger / hangerStiffness) }
                 hangerConnections += cableId to deckId
             }
         }
@@ -378,9 +407,28 @@ fun buildTacomaNarrows(
         name = placement.name("flutter"),
     )
 
+    val deckStructure = MeshSprings(deckEdges, store, stiffness = deckStiffness, damping = structuralDamping, name = placement.name("deck-structure"))
+    // Strain break thresholds (armed later by TacomaBreakage), so one steel limit fits every chord.
+    val girderChords = MeshSprings(
+        chordEdges, store, stiffness = girderChordStiffness, damping = structuralDamping, breakThresholdsAreStrains = true,
+        name = placement.name("girder-chords"),
+    )
+    val breakage = TacomaBreakage(
+        hangers = hangerMembers, cables = cableMembers, chords = girderChords, deck = deckStructure,
+        bays = bayParts.map {
+            TacomaBreakage.Bay(
+                it.span, it.index, it.left.toIntArray(), it.right.toIntArray(), it.deck.toIntArray(), it.triangles,
+                atSupport = it.index == 0 || it.index == spans[it.span].lastIndex - 1,
+            )
+        },
+        flutter = flutterForce,
+        flutterStripOfMainRow = (1 until spans[1].lastIndex).associateWith { it - 1 },
+        wind = wind,
+    )
+
     val forces = listOfNotNull(
-        MeshSprings(deckEdges, store, stiffness = deckStiffness, damping = structuralDamping, name = placement.name("deck-structure")),
-        MeshSprings(chordEdges, store, stiffness = girderChordStiffness, damping = structuralDamping, name = placement.name("girder-chords")),
+        deckStructure,
+        girderChords,
         UniformGravity(deckGroup, Vector3(0.0, -g, 0.0), name = placement.name("gravity")),
         UniformGravity(cableGroup, Vector3(0.0, -g, 0.0), name = placement.name("cable-gravity")),
         wind,
@@ -407,6 +455,18 @@ fun buildTacomaNarrows(
         deckConnections = (deckEdges + chordEdges).map { it.a to it.b },
         wind = wind,
         flutter = flutterForce,
+        breakage = breakage,
+        collisions = if (!breakable) null else {
+            // The water of the Narrows, 195 ft (19.5 units) below the deck: falling pieces stop
+            // there instead of accelerating forever. (Particles aren't destroyed - the forces and
+            // surfaces still reference them.)
+            val water = PlaneCollider(VectorExpr.of(Vector3(0.0, -TACOMA_DECK_HEIGHT_ABOVE_WATER, 0.0) + placement.offset), normal = Vector3(0.0, 1.0, 0.0), name = placement.name("water"))
+            CollisionSystem(
+                listOf(deckGroup, cableGroup).map {
+                    ParticleColliderRule(it, water, restitution = 0.0, staticFriction = 0.5, kineticFriction = 1.0)
+                },
+            )
+        },
     )
 }
 
@@ -415,6 +475,23 @@ fun buildTacomaNarrows(
 const val FLUTTER_DENSITY = 0.16
 const val FLUTTER_SLOPE = 0.3
 const val FLUTTER_CRITICAL_VR = 5.9
+
+/** Sets the flutter's limit-cycle amplitude: fitted (see [buildTacomaNarrows]) so the steady
+ * failure-day wind settles at about the report's "alternating 45° torsion". */
+const val FLUTTER_SATURATION_TWIST = 0.31
+
+/**
+ * The plain [Wind] force's density, calibrated so the sideways push on the deck matches the real
+ * bridge's: at the failure wind (18.8 m/s, q = ½ρU² ≈ 216 Pa with ρ = 1.225 kg/m³), drag on the
+ * 8 ft (2.44 m) girders at a drag coefficient of ~2 (typical for a bluff H-section - an
+ * assumption) is ~1.05 kN/m, about 1.3% of the 5,700 lb/ft (83 kN/m) dead load. Here the wind
+ * pushes on both girder webs, `windDensity·U·2·girderDepth` per unit span, against ~52 units of
+ * weight per unit span - 1.3% at U = 5.9 needs ≈ 0.24. (It was 1.0, ~4x too strong.)
+ */
+const val TACOMA_WIND_DENSITY = 0.24
+
+/** Deck height above the water, 195 ft (WSDOT). */
+const val TACOMA_DECK_HEIGHT_ABOVE_WATER = 19.5
 
 /**
  * Starts the main span twisting in its one-node (antisymmetric) shape - the two halves rotating

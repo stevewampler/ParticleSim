@@ -23,7 +23,7 @@ import particlesim.surface.Triangle
  * have thousands of triangles, all one `Force`, not one `Wind` per triangle.
  */
 class Wind(
-    private val triangles: List<Triangle>,
+    private var triangles: List<Triangle>,
     private var velocity: VectorExpr,
     private var density: Double = 1.0,
     override val name: String? = null,
@@ -65,6 +65,13 @@ class Wind(
      * confirmed the flag example never needed it) — spatially-varying gusts remain a
      * documented, unbuilt gap. */
     override fun sampleAt(position: Vector3, t: Double): Vector3 = currentVelocity(t)
+
+    /** Stops pushing on [removed] for good - e.g. the panels of a torn-apart section, whose
+     * corners are no longer held together and would otherwise stretch into ever-larger
+     * triangles catching ever more wind. Call between steps, not during [accumulate]. */
+    fun removeTriangles(removed: Set<Triangle>) {
+        if (removed.isNotEmpty()) triangles = triangles.filter { it !in removed }
+    }
 
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,

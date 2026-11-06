@@ -41,6 +41,10 @@ class MeshSprings(
     private val breakThreshold: Double = Double.POSITIVE_INFINITY,
     private var extensionBreakThreshold: Double = breakThreshold,
     private var compressionBreakThreshold: Double = breakThreshold,
+    /** When true, the break thresholds are **strains** - a fraction of each edge's own rest
+     * length (`0.002` = breaks at 0.2% stretch) - rather than absolute length changes, so one
+     * material limit applies correctly to edges of different lengths. */
+    private val breakThresholdsAreStrains: Boolean = false,
     override val name: String? = null,
 ) : Force, EditableFields {
     /** Same rationale as [Spring.editableFields]: exposes the six fields [accumulate]/
@@ -86,6 +90,29 @@ class MeshSprings(
 
     val edgeCount: Int get() = idA.size
 
+    private val edgeIndex: Map<Pair<Int, Int>, Int> by lazy {
+        val map = HashMap<Pair<Int, Int>, Int>()
+        for (i in idA.indices) { map[idA[i] to idB[i]] = i; map[idB[i] to idA[i]] = i }
+        map
+    }
+
+    /** The index of the edge between [a] and [b] (either order), or -1. */
+    fun edgeIndexOf(a: Int, b: Int): Int = edgeIndex[a to b] ?: -1
+
+    fun isActive(edge: Int): Boolean = active[edge]
+
+    /** Breaks [edge] now, as if it had passed its threshold (§5.4: permanent) - for a caller
+     * that decides, between steps, that a whole group of edges has failed together (e.g. a
+     * bridge bay whose girders have both buckled). Not safe to call during [accumulate]. */
+    fun breakEdge(edge: Int) {
+        active[edge] = false
+    }
+
+    private fun thresholdFor(edge: Int, displacement: Double): Double {
+        val threshold = if (displacement >= 0.0) extensionBreakThreshold else compressionBreakThreshold
+        return if (breakThresholdsAreStrains) threshold * restLength[edge] else threshold
+    }
+
     /** Endpoints of every currently-unbroken edge — for the debug renderer's line view (§10.2). */
     fun activeConnections(): List<Pair<Int, Int>> =
         (0 until idA.size).filter { active[it] }.map { idA[it] to idB[it] }
@@ -104,7 +131,7 @@ class MeshSprings(
             val b = idB[i]
             val length = maxOf((store.position(b) - store.position(a)).length(), minLength)
             val displacement = length - restLength[i]
-            val threshold = if (displacement >= 0.0) extensionBreakThreshold else compressionBreakThreshold
+            val threshold = thresholdFor(i, displacement)
             val proximity = if (threshold.isInfinite()) 0.0 else kotlin.math.abs(displacement) / threshold
             result += Triple(a, b, proximity)
         }
@@ -134,9 +161,7 @@ class MeshSprings(
                 chunk.add(store.slotOf(b), forceOnB)
                 chunk.add(store.slotOf(a), -forceOnB)
 
-                val brokeExtending = displacement >= 0.0 && displacement > extensionBreakThreshold
-                val brokeCompressing = displacement < 0.0 && -displacement > compressionBreakThreshold
-                if (brokeExtending || brokeCompressing) active[i] = false
+                if (kotlin.math.abs(displacement) > thresholdFor(i, displacement)) active[i] = false
             }
             i += chunkCount
         }
