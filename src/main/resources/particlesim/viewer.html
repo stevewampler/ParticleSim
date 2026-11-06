@@ -140,12 +140,12 @@
   #statusBarSceneMenu button.active { color: #fff; background: rgba(80,140,220,0.4); }
   #statusBarLegend { display: none; align-items: center; gap: 6px; color: #bbb; font-size: 11px; white-space: nowrap; }
   #statusBarLegend.active { display: flex; }
-  /* Matches particlesim.render.ColorRamp.blueOrange's Okabe-Ito palette exactly (0,114,178) ->
-     (230,159,0) - a visual constant, not derived from live data, so it's fine to hardcode here
+  /* Matches particlesim.render.ColorRamp.greenYellowRed exactly (0,170,60) -> (240,200,0) ->
+     (215,25,28) - a visual constant, not derived from live data, so it's fine to hardcode here
      rather than compute it in JS from values that never change at runtime. */
   #statusBarLegendBar {
     width: 90px; height: 8px; border-radius: 3px;
-    background: linear-gradient(to right, rgb(0,114,178), rgb(230,159,0));
+    background: linear-gradient(to right, rgb(0,170,60), rgb(240,200,0), rgb(215,25,28));
   }
 </style>
 </head>

@@ -995,11 +995,13 @@ external image onto a mesh's surface.
     choice) as it approaches its limit, e.g. a flag's structural springs
     (§7.1) warning of an imminent tear (§5.4) well before it happens,
     rather than the break being a total surprise.
-  - Default mapping is a perceptually-ordered, colorblind-safe gradient
-    (e.g. a blue → orange or viridis-style scale) as the chosen attribute
-    goes 0 → 1 — deliberately *not* the intuitive green → yellow → red,
-    which is close to worst-case for deuteranopia and one of the most
-    common color vision deficiencies. Same "map a derived attribute to
+  - Default mapping is green → yellow → red as the chosen attribute
+    goes 0 → 1 (the user's choice, Nov 2026, replacing an earlier
+    colorblind-safe blue → orange default) — the familiar traffic-light
+    reading, knowingly trading away deuteranopia-safety (green vs red is
+    close to worst-case for one of the most common color vision
+    deficiencies; the yellow middle and the brightness difference help
+    somewhat). Same "map a derived attribute to
     color/thickness" idea as particle color-by-attribute, just applied to
     a connection instead of a single particle.
 - N-body gravity and custom forces (§5.3) are lower priority / `[stretch]`
@@ -1091,7 +1093,7 @@ readout to debug a scene without a separate tool.
   tooling.
 - **Color legend**: whenever a `colorBy` gradient (§10.2) is active
   anywhere in the scene, a small legend shows what the gradient's two
-  ends mean, so "blue → orange" isn't something to memorize per scene.
+  ends mean, so "green → yellow → red" isn't something to memorize per scene.
 - **Stats overlay**: live particle count, step rate, and how far physics
   time is lagging wall-clock time — the last of these is a direct,
   user-visible readout of §9.1's pacing policy (frames drop before

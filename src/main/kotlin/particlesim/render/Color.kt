@@ -11,25 +11,24 @@ data class Color(val r: Double, val g: Double, val b: Double) {
 }
 
 object ColorRamp {
-    // Okabe-Ito colorblind-safe palette's blue/orange pair.
-    private val blue = Color(0.0 / 255, 114.0 / 255, 178.0 / 255)
-    private val orange = Color(230.0 / 255, 159.0 / 255, 0.0 / 255)
+    private val green = Color(0.0 / 255, 170.0 / 255, 60.0 / 255)
+    private val yellow = Color(240.0 / 255, 200.0 / 255, 0.0 / 255)
+    private val red = Color(215.0 / 255, 25.0 / 255, 28.0 / 255)
 
     /**
-     * Perceptually-ordered, colorblind-safe blue → orange gradient (§10.2) as [t] goes 0 → 1 —
-     * chosen explicitly over the intuitive green → yellow → red, which is close to worst-case
-     * for deuteranopia, one of the most common color vision deficiencies.
+     * Green → yellow → red as [t] goes 0 → 0.5 → 1 (§10.2), linear within each half - the
+     * familiar traffic-light reading of "fine / getting close / about to break". It replaced an
+     * Okabe-Ito blue → orange ramp at the user's request; the trade-off is that green vs red is
+     * hard to tell apart with deuteranopia, one of the most common color vision deficiencies
+     * (the yellow middle and the brightness difference still help).
      *
      * [t] is clamped to `[0,1]` first: a caller passing an unclamped `breakProximity` (which
      * can exceed `1` the one step a connection actually breaks — its force still applies that
      * step, §5.4) still gets a valid color rather than an out-of-gamut extrapolation.
      */
-    fun blueOrange(t: Double): Color {
+    fun greenYellowRed(t: Double): Color {
         val c = t.coerceIn(0.0, 1.0)
-        return Color(
-            blue.r + (orange.r - blue.r) * c,
-            blue.g + (orange.g - blue.g) * c,
-            blue.b + (orange.b - blue.b) * c,
-        )
+        val (from, to, f) = if (c <= 0.5) Triple(green, yellow, c * 2.0) else Triple(yellow, red, (c - 0.5) * 2.0)
+        return Color(from.r + (to.r - from.r) * f, from.g + (to.g - from.g) * f, from.b + (to.b - from.b) * f)
     }
 }

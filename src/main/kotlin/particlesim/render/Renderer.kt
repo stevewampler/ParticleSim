@@ -108,7 +108,7 @@ data class LineRenderer(val force: PairwiseForce, val colorBy: ColorBy = ColorBy
 object LineRendering {
     fun colorFor(renderer: LineRenderer, store: ParticleStore): Color? = when (renderer.colorBy) {
         ColorBy.NONE -> null
-        ColorBy.BREAK_PROXIMITY -> ColorRamp.blueOrange((renderer.force as Breakable).breakProximity(store))
+        ColorBy.BREAK_PROXIMITY -> ColorRamp.greenYellowRed((renderer.force as Breakable).breakProximity(store))
     }
 }
 

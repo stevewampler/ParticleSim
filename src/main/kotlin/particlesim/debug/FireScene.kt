@@ -14,7 +14,7 @@ import particlesim.render.SceneRegistry
  *
  * Colors every live particle yellow-to-red by its own age fraction (`(t - spawnTime) /
  * lifetime`, §14.2) via [BinaryFrame]'s per-particle color section - representational, not a
- * scalar-encoding ramp like [particlesim.render.ColorRamp.blueOrange], so it's kept local here
+ * scalar-encoding ramp like [particlesim.render.ColorRamp.greenYellowRed], so it's kept local here
  * rather than added to that shared object.
  */
 class FireScene : DemoScene {

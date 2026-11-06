@@ -32,7 +32,7 @@ class RendererTest {
         val spring = Spring(a, b, restLength = 1.0, stiffness = 10.0, breakThreshold = 1.0)
         val renderer = LineRenderer(spring, ColorBy.BREAK_PROXIMITY)
 
-        assertEquals(ColorRamp.blueOrange(0.5), LineRendering.colorFor(renderer, store))
+        assertEquals(ColorRamp.greenYellowRed(0.5), LineRendering.colorFor(renderer, store))
     }
 
     @Test

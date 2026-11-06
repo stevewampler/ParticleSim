@@ -50,7 +50,7 @@ class TacomaNarrowsScene(
     private val breakable: Boolean = false,
     /** Color every breakable member - hangers, cable segments and (drawn only then) the girder
      * chords - by how close it is to its real breaking limit
-     * ([particlesim.examples.TacomaBreakage.utilization]), blue unstressed to orange at breaking,
+     * ([particlesim.examples.TacomaBreakage.utilization]), green unstressed, yellow halfway, red at breaking,
      * with the viewer's break-proximity legend. */
     private val showStress: Boolean = breakable,
 ) : DemoScene {
@@ -204,7 +204,7 @@ class TacomaNarrowsScene(
         // keep their plain style color.
         val stress = if (showStress) scenario.breakage.utilization(scenario.store) else emptyMap()
         val frame = SceneFrame(
-            lineColors = stress.mapValues { (_, u) -> ColorRamp.blueOrange(u) },
+            lineColors = stress.mapValues { (_, u) -> ColorRamp.greenYellowRed(u) },
             arrowGroups = flutterArrows(t),
             shownByDefaultArrows = setOfNotNull(scenario.flutter?.name),
             camera = camera.evaluate(t, scene),
