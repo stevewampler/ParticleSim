@@ -132,4 +132,32 @@ class TacomaBreakageTest {
         assertTrue(abs(Math.toDegrees(peak) - 45.0) < 5.0, "one-node twist peaked at ${Math.toDegrees(peak)}°, fitted to the report's 45°")
         assertTrue(events.isEmpty(), "broke within 2 minutes at 45°: $events")
     }
+
+    @Test
+    fun `utilization is each member's load over its real limit, armed or not`() {
+        val s = buildTacomaNarrows()
+        val u = s.breakage.utilization(s.store)
+        val hanger = s.breakage.hangers[10]
+        val cable = s.breakage.cables[30]
+        // As built, every cable and hanger carries exactly its dead load.
+        assertEquals(1.0 / TacomaBreakage.HANGER_ULTIMATE_TO_DEAD, u.getValue(hanger.connection), 1e-9)
+        assertEquals(1.0 / TacomaBreakage.CABLE_ULTIMATE_TO_DEAD, u.getValue(cable.connection), 1e-9)
+        val chords = chords(s)
+        val main = s.mainSpan
+        val chord = main[20].topLeft to main[21].topLeft
+        assertEquals(0.0, u.getValue(chord), 1e-9, "chords are built unstressed")
+        assertEquals(4 * (s.spans.sumOf { it.size - 1 }) + s.breakage.hangers.size + s.breakage.cables.size, u.size)
+
+        // Squeeze a chord by half the buckling strain, stretch it by half the ultimate strain.
+        val p = s.store.position(main[21].topLeft)
+        val length = (p - s.store.position(main[20].topLeft)).length()
+        s.store.setPosition(main[21].topLeft, p - Vector3(0.0, 0.0, 0.5 * TacomaBreakage.GIRDER_BUCKLING_STRAIN * length))
+        assertEquals(0.5, s.breakage.utilization(s.store).getValue(chord), 1e-3)
+        s.store.setPosition(main[21].topLeft, p + Vector3(0.0, 0.0, 0.5 * TacomaBreakage.GIRDER_ULTIMATE_STRAIN * length))
+        assertEquals(0.5, s.breakage.utilization(s.store).getValue(chord), 1e-3)
+
+        // A broken chord drops out.
+        chords.breakEdge(chords.edgeIndexOf(chord.first, chord.second))
+        assertTrue(chord !in s.breakage.utilization(s.store))
+    }
 }

@@ -12,6 +12,7 @@ import particlesim.render.ArrowSample
 import particlesim.render.CameraFunction
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.ColorRamp
 import particlesim.render.Light
 import particlesim.render.Material
 import particlesim.render.NamedArrowSamples
@@ -47,6 +48,11 @@ class TacomaNarrowsScene(
     windVelocity: String = TACOMA_GUSTY_WIND,
     /** Real breaking limits ([particlesim.examples.TacomaBreakage]) and the water below. */
     private val breakable: Boolean = false,
+    /** Color every breakable member - hangers, cable segments and (drawn only then) the girder
+     * chords - by how close it is to its real breaking limit
+     * ([particlesim.examples.TacomaBreakage.utilization]), blue unstressed to orange at breaking,
+     * with the viewer's break-proximity legend. */
+    private val showStress: Boolean = breakable,
 ) : DemoScene {
     internal val scenario = buildTacomaNarrows(windVelocity = windVelocity, breakable = breakable)
     private val integrator = Integrator()
@@ -98,10 +104,20 @@ class TacomaNarrowsScene(
     private val towerConnections = scenario.towerLegs.flatMap { it.zipWithNext() } + scenario.towerBeamConnections
     private val structureConnections = cableConnections + scenario.hangerConnections + towerConnections
     private val towerGrey = Color(0.5, 0.55, 0.55)
+    // With stress colors on, the hangers are drawn thicker so their color reads, and the girder
+    // chords (otherwise only implied by the girder panels) are drawn too, just proud of them.
+    private val chordConnections = if (!showStress) emptyList() else {
+        val chordPairs = HashSet<Pair<Int, Int>>()
+        for (span in scenario.spans) for ((a, b) in span.zipWithNext()) {
+            chordPairs += listOf(a.topLeft to b.topLeft, a.bottomLeft to b.bottomLeft, a.topRight to b.topRight, a.bottomRight to b.bottomRight)
+        }
+        chordPairs.toList()
+    }
     private val connectionStyles =
         (cableConnections styledAs ConnectionStyles.steel("main-cables", radius = 0.04)) +
-            (scenario.hangerConnections styledAs ConnectionStyles.cable("hangers", radius = 0.01)) +
-            (towerConnections styledAs ConnectionStyles.paintedSteel("towers", towerGrey, radius = 0.18))
+            (scenario.hangerConnections styledAs ConnectionStyles.cable("hangers", radius = if (showStress) 0.018 else 0.01)) +
+            (towerConnections styledAs ConnectionStyles.paintedSteel("towers", towerGrey, radius = 0.18)) +
+            (chordConnections styledAs ConnectionStyles.paintedSteel("girder-chords", Color(0.42, 0.47, 0.44), radius = 0.03, joints = false))
 
     private companion object {
         const val BREAKABLE_SETTLE_SECONDS = 8.0
@@ -184,11 +200,15 @@ class TacomaNarrowsScene(
 
     override fun frame(t: Double): SceneFrame {
         refreshBrokenGeometry()
+        // Unbroken hangers, cable segments and chords, each with its stress color; the towers
+        // keep their plain style color.
+        val stress = if (showStress) scenario.breakage.utilization(scenario.store) else emptyMap()
         val frame = SceneFrame(
+            lineColors = stress.mapValues { (_, u) -> ColorRamp.blueOrange(u) },
             arrowGroups = flutterArrows(t),
             shownByDefaultArrows = setOfNotNull(scenario.flutter?.name),
             camera = camera.evaluate(t, scene),
-            connections = connections,
+            connections = if (showStress) towerConnections + stress.keys else connections,
             connectionStyles = connectionStyles,
             meshes = meshes,
             visibleIds = visibleIds,

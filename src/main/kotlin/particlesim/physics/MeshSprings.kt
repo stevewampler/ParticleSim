@@ -101,6 +101,14 @@ class MeshSprings(
 
     fun isActive(edge: Int): Boolean = active[edge]
 
+    fun edgeEndpoints(edge: Int): Pair<Int, Int> = idA[edge] to idB[edge]
+
+    /** [edge]'s current strain: (length − rest length) / rest length, positive when stretched. */
+    fun edgeStrain(store: ParticleStore, edge: Int): Double {
+        val length = maxOf((store.position(idB[edge]) - store.position(idA[edge])).length(), minLength)
+        return (length - restLength[edge]) / restLength[edge]
+    }
+
     /** Breaks [edge] now, as if it had passed its threshold (§5.4: permanent) - for a caller
      * that decides, between steps, that a whole group of edges has failed together (e.g. a
      * bridge bay whose girders have both buckled). Not safe to call during [accumulate]. */

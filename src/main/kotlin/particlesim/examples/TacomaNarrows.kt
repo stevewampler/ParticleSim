@@ -366,7 +366,7 @@ fun buildTacomaNarrows(
             // Unnamed: ~400 individually named cable/hanger springs would flood the viewer's
             // outliner and every frame's registry (they were most of a 180 KB frame).
             Spring(a, b, restLength = length - tension / cableStiffness, stiffness = cableStiffness, compressionStiffness = 0.0)
-                .also { cableMembers += TacomaBreakage.Member(it, a to b, tension / cableStiffness) }
+                .also { cableMembers += TacomaBreakage.Member(it, a to b, tension / cableStiffness, length - tension / cableStiffness) }
         }
         cableForces += springs
 
@@ -380,7 +380,7 @@ fun buildTacomaNarrows(
                 hangerForces += Spring(
                     cableId, deckId, restLength = length - deckWeightPerHanger / hangerStiffness, stiffness = hangerStiffness,
                     compressionStiffness = 0.0,
-                ).also { hangerMembers += TacomaBreakage.Member(it, cableId to deckId, deckWeightPerHanger / hangerStiffness) }
+                ).also { hangerMembers += TacomaBreakage.Member(it, cableId to deckId, deckWeightPerHanger / hangerStiffness, length - deckWeightPerHanger / hangerStiffness) }
                 hangerConnections += cableId to deckId
             }
         }

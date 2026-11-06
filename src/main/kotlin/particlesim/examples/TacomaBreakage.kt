@@ -1,5 +1,6 @@
 package particlesim.examples
 
+import particlesim.core.ParticleStore
 import particlesim.physics.FieldValue
 import particlesim.physics.Force
 import particlesim.physics.MeshSprings
@@ -60,8 +61,9 @@ class TacomaBreakage internal constructor(
     private val flutterStripOfMainRow: Map<Int, Int>,
     private val wind: Wind,
 ) {
-    /** A cable segment or hanger: its spring, its two particles, its dead-load stretch T₀/k. */
-    class Member(val spring: Spring, val connection: Pair<Int, Int>, val deadLoadStretch: Double)
+    /** A cable segment or hanger: its spring, its two particles, its dead-load stretch T₀/k and
+     * its spring's (unstressed) rest length. */
+    class Member(val spring: Spring, val connection: Pair<Int, Int>, val deadLoadStretch: Double, val restLength: Double)
 
     /** One bay of one span: its chord edges (in the chords MeshSprings), per girder; its other
      * span-wise lattice edges (in the deck MeshSprings); its roadway and girder triangles. */
@@ -95,6 +97,32 @@ class TacomaBreakage internal constructor(
     val brokenCableCount get() = cables.count { it.spring in brokenSprings }
     val failedGirderCount get() = failedGirders.size
     val separatedBayCount get() = separated.size
+
+    /**
+     * How close each unbroken breakable member is to its real limit right now, `0` unstressed to
+     * `1` at breaking - the same scale as a spring's break proximity, but computed from the real
+     * limits whether or not they're [armed] (so the stress shows in every scene). Cables and
+     * hangers: tension over ultimate tension (a slack one is 0; at rest a hanger sits at
+     * 1/6.24 ≈ 0.16, a cable at 1/3.47 ≈ 0.29). Girder chords: strain over the steel strain
+     * limit for its direction - ultimate in tension, flange buckling in compression.
+     */
+    fun utilization(store: ParticleStore): Map<Pair<Int, Int>, Double> {
+        val result = LinkedHashMap<Pair<Int, Int>, Double>()
+        for ((members, factor) in listOf(hangers to HANGER_ULTIMATE_TO_DEAD, cables to CABLE_ULTIMATE_TO_DEAD)) {
+            for (m in members) {
+                if (m.spring in brokenSprings) continue
+                val (a, b) = m.connection
+                val stretch = (store.position(b) - store.position(a)).length() - m.restLength
+                result[m.connection] = maxOf(0.0, stretch) / (factor * m.deadLoadStretch)
+            }
+        }
+        for (edge in 0 until chords.edgeCount) {
+            if (!chords.isActive(edge)) continue
+            val strain = chords.edgeStrain(store, edge)
+            result[chords.edgeEndpoints(edge)] = if (strain >= 0.0) strain / GIRDER_ULTIMATE_STRAIN else -strain / GIRDER_BUCKLING_STRAIN
+        }
+        return result
+    }
 
     /** Turns the real limits on. */
     fun arm() {

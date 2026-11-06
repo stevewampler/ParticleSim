@@ -5906,6 +5906,18 @@ load. Full `./gradlew test -q` suite green throughout.
       bay separation, the support exclusion, still-air safety and 2 min at 45°
       with nothing broken.
 
+- [x] **Stress visualisation** (breakable scene; `TacomaNarrowsScene(showStress)`):
+      every unbroken hanger, cable segment and girder chord (chords drawn as
+      thin cylinders only in this mode) is colored by
+      `TacomaBreakage.utilization` - load over the report's limit, 0 unstressed
+      to 1 at breaking, computed from the real limits armed or not (hangers sit
+      at 0.16 and cables at 0.29 at rest; chords use the tension or buckling
+      limit by sign) - via the existing break-proximity lineColors, which win
+      over the style color and switch on the viewer's legend. `MeshSprings`
+      gained `edgeEndpoints`/`edgeStrain`. Test pins the at-rest values, a
+      chord at half each limit, and broken members dropping out. Headless
+      steps/s fell ~880 -> ~720 with ~400 more cylinders (CPU-rendered).
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created
