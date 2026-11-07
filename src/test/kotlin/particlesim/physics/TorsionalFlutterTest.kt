@@ -125,4 +125,31 @@ class TorsionalFlutterTest {
         assertEquals(expected(1.0, -0.1), f.moments(store, 0.0)[1], 1e-12)
         assertTrue(f.moments(store, 0.0)[0] < 0.0, "mode B's Vr (3) is below Vr₀ (4): it should damp")
     }
+
+    @Test
+    fun `two decks added as sections get exactly the moments of a force each`() {
+        val store = ParticleStore()
+        fun deck(z0: Double, width: Double) = (0 until 3).map { k ->
+            TorsionalFlutter.Strip(store.create(position = Vector3(-width / 2, 0.0, z0 + k)), store.create(position = Vector3(width / 2, 0.0, z0 + k)), 1.0)
+        }
+        val a = deck(0.0, 2.0)
+        val b = deck(10.0, 3.0)
+        val modesA = listOf(TorsionalFlutter.Mode(doubleArrayOf(0.5, 1.0, 0.5), 0.5))
+        val modesB = listOf(TorsionalFlutter.Mode(doubleArrayOf(1.0, 0.0, -1.0), 1.5), TorsionalFlutter.Mode(doubleArrayOf(0.3, 1.0, 0.3), 1.0))
+        val rates = doubleArrayOf(0.1, -0.05, 0.2, 0.07, 0.3, -0.1)
+        for ((i, strip) in (a + b).withIndex()) {
+            store.setVelocity(strip.left, Vector3(0.0, -rates[i], 0.0)); store.setVelocity(strip.right, Vector3(0.0, rates[i], 0.0))
+        }
+        val wind = { _: Double -> Vector3(6.0, 0.0, 0.0) }
+        fun alone(strips: List<TorsionalFlutter.Strip>, modes: List<TorsionalFlutter.Mode>, residual: Double) = TorsionalFlutter(
+            strips, wind, frequency = residual, density = 0.3, slope = 0.2, criticalReducedVelocity = 4.0, modes = modes,
+        ).moments(store, 0.0)
+        val shared = TorsionalFlutter(emptyList(), wind, frequency = 99.0, density = 0.3, slope = 0.2, criticalReducedVelocity = 4.0)
+        assertEquals(0, shared.addSection(a, modesA, 0.8))
+        assertEquals(3, shared.addSection(b, modesB, 2.0))
+        val together = shared.moments(store, 0.0)
+        val separate = alone(a, modesA, 0.8) + alone(b, modesB, 2.0)
+        for (i in together.indices) assertEquals(separate[i], together[i], 1e-12, "strip $i")
+        assertTrue("frequency" !in shared.editableFields(), "every strip has its section's own residual frequency")
+    }
 }

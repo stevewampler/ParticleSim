@@ -170,7 +170,7 @@ fun buildTacomaNarrows(
     girderDepth: Double = 0.244,
     sag: Double = 7.07,
     towerHeightAboveDeck: Double = 7.56,
-    towerDepthBelowDeck: Double = 5.94,
+    towerDepthBelowDeck: Double = TACOMA_DECK_HEIGHT_ABOVE_WATER,
     hangerSpacing: Double = 1.524,
     /** Mass of each of the four girder-line particles (girder tops and bottoms) per row. */
     girderMassPerParticle: Double = 0.5,
@@ -199,6 +199,9 @@ fun buildTacomaNarrows(
     flutterSaturationTwist: Double = FLUTTER_SATURATION_TWIST,
     /** Add the water below, for a bridge whose pieces can fall ([TacomaBreakage]). */
     breakable: Boolean = false,
+    /** Use these wind, gravity and flutter forces (shared with another bridge) instead of this
+     * bridge's own; the wind and flutter parameters above are then unused. */
+    shared: TacomaSharedForces? = null,
     store: ParticleStore = ParticleStore(),
     groups: Groups = Groups(),
     placement: ShapePlacement = ShapePlacement(),
@@ -321,20 +324,28 @@ fun buildTacomaNarrows(
     val cableMembers = suspension.cableMembers
     val hangerMembers = suspension.hangerMembers
 
-    val wind = Wind(deckTriangles + girderTriangles, ExpressionParser.parseVector(windVelocity), density = windDensity, name = placement.name("wind"))
+    // The 1940 surfaces catch the full wind: the shared wind's density is this bridge's own.
+    val wind = shared?.wind?.also { it.addTriangles(deckTriangles + girderTriangles, windDensity / TACOMA_WIND_DENSITY) }
+        ?: Wind(deckTriangles + girderTriangles, ExpressionParser.parseVector(windVelocity), density = windDensity, name = placement.name("wind"))
 
     // One flutter strip per interior main-span row (end rows are pinned), each standing for one
     // bay. Main span only: its mode frequencies are the main span's, and applying the main
     // span's frequency to the side spans (whose own torsion frequencies differ) let them run
     // away in a flutter of their own.
     val flutterRows = spans[1].subList(1, spans[1].lastIndex)
-    val flutterForce = if (!flutter) null else TorsionalFlutter(
-        strips = flutterRows.map { TorsionalFlutter.Strip(it.topLeft, it.topRight, mainBay) },
+    val flutterStrips = flutterRows.map { TorsionalFlutter.Strip(it.topLeft, it.topRight, mainBay) }
+    val flutterModes = TACOMA_TORSION_MODE_FREQUENCIES.withIndex().map { (k, f) ->
+        TorsionalFlutter.Mode(DoubleArray(flutterRows.size) { sin((k + 1) * Math.PI * (it + 1) / mainBays) }, f)
+    }
+    // Index of this bridge's first strip in the flutter force (non-zero when it's shared).
+    var flutterStripOffset = 0
+    val flutterForce = if (!flutter) null else if (shared != null) {
+        shared.flutter.also { flutterStripOffset = it.addSection(flutterStrips, flutterModes, TACOMA_RESIDUAL_TORSION_FREQUENCY) }
+    } else TorsionalFlutter(
+        strips = flutterStrips,
         windVelocity = wind::currentVelocity,
         frequency = TACOMA_RESIDUAL_TORSION_FREQUENCY,
-        modes = TACOMA_TORSION_MODE_FREQUENCIES.withIndex().map { (k, f) ->
-            TorsionalFlutter.Mode(DoubleArray(flutterRows.size) { sin((k + 1) * Math.PI * (it + 1) / mainBays) }, f)
-        },
+        modes = flutterModes,
         density = flutterDensity,
         slope = flutterSlope,
         criticalReducedVelocity = flutterCriticalReducedVelocity,
@@ -357,11 +368,12 @@ fun buildTacomaNarrows(
             )
         },
         flutter = flutterForce,
-        flutterStripOfMainRow = (1 until spans[1].lastIndex).associateWith { it - 1 },
+        flutterStripOfMainRow = (1 until spans[1].lastIndex).associateWith { flutterStripOffset + it - 1 },
         wind = wind,
     )
 
-    val forces = listOfNotNull(
+    if (shared != null) for (id in groups.membersOf(deckGroup) + groups.membersOf(cableGroup)) groups.add(shared.gravityGroup, id)
+    val forces = if (shared != null) listOf(deckStructure, girderChords) + cableForces + hangerForces else listOfNotNull(
         deckStructure,
         girderChords,
         UniformGravity(deckGroup, Vector3(0.0, -g, 0.0), name = placement.name("gravity")),
@@ -425,8 +437,9 @@ const val FLUTTER_SATURATION_TWIST = 0.31
  */
 const val TACOMA_WIND_DENSITY = 0.24
 
-/** Deck height above the water, 195 ft (WSDOT). */
-const val TACOMA_DECK_HEIGHT_ABOVE_WATER = 19.5
+/** Deck height above the water, 195 ft (WSDOT) - 5.94 units, the towers' depth below the deck.
+ * (Was 19.5 - feet/10 rather than metres/10 - so falling pieces dropped ~3.3x too far.) */
+const val TACOMA_DECK_HEIGHT_ABOVE_WATER = 5.94
 
 /**
  * Starts the main span twisting in its one-node (antisymmetric) shape - the two halves rotating

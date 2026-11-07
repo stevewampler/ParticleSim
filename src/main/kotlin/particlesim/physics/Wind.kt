@@ -28,6 +28,19 @@ class Wind(
     private var density: Double = 1.0,
     override val name: String? = null,
 ) : Force, UniformFieldForce, EditableFields {
+    // Per-triangle multipliers on [density], parallel to [triangles]; null = all 1. Lets one wind
+    // (one velocity, one editable density) push on surfaces that catch it differently - e.g. an
+    // open truss presenting only a fraction of its face.
+    private var weights: DoubleArray? = null
+
+    /** Adds [added] to the surfaces this wind pushes on, each at [weight] times [density] (an
+     * open truss face, say, at its solidity). Call between steps, not during [accumulate]. */
+    fun addTriangles(added: List<Triangle>, weight: Double = 1.0) {
+        val old = weights ?: DoubleArray(triangles.size) { 1.0 }
+        weights = DoubleArray(old.size + added.size) { if (it < old.size) old[it] else weight }
+        triangles = triangles + added
+    }
+
     override fun editableFields(): Map<String, FieldValue> = mapOf("density" to FieldValue.Scalar(density))
 
     override fun setField(field: String, value: FieldValue): Boolean {
@@ -70,7 +83,10 @@ class Wind(
      * corners are no longer held together and would otherwise stretch into ever-larger
      * triangles catching ever more wind. Call between steps, not during [accumulate]. */
     fun removeTriangles(removed: Set<Triangle>) {
-        if (removed.isNotEmpty()) triangles = triangles.filter { it !in removed }
+        if (removed.isEmpty()) return
+        val w = weights
+        if (w != null) weights = triangles.indices.filter { triangles[it] !in removed }.map { w[it] }.toDoubleArray()
+        triangles = triangles.filter { it !in removed }
     }
 
     override fun accumulate(
@@ -78,6 +94,7 @@ class Wind(
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
     ) {
         val wind = currentVelocity(t)
+        val w = weights
         var i = chunkIndex
         while (i < triangles.size) {
             val triangle = triangles[i]
@@ -86,7 +103,7 @@ class Wind(
             if (area > 0.0) {
                 val normal = cross * (1.0 / cross.length())
                 val relativeWind = wind - triangle.averageVelocity(store)
-                val pressure = normal * (density * area * relativeWind.dot(normal))
+                val pressure = normal * ((if (w == null) density else density * w[i]) * area * relativeWind.dot(normal))
                 val perVertex = pressure * (1.0 / 3.0)
                 chunk.add(store.slotOf(triangle.a), perVertex)
                 chunk.add(store.slotOf(triangle.b), perVertex)

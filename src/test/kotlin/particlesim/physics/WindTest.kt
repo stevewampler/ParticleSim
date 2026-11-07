@@ -131,4 +131,31 @@ class WindTest {
         wind.setVelocity(particlesim.expr.ExpressionParser.parseVector("[6.0 + 2.0*sin(t), 0, 0]"))
         assertEquals("[6.0 + 2.0*sin(t), 0, 0]", wind.currentVelocitySource())
     }
+
+    @Test
+    fun `an added triangle's weight scales the density for it alone, and survives removals`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        fun triangle(x: Double) = Triangle(
+            store.create(position = Vector3(x, 0.0, 0.0)), store.create(position = Vector3(x + 1.0, 0.0, 0.0)), store.create(position = Vector3(x, 1.0, 0.0)),
+        )
+        val first = triangle(0.0)
+        val second = triangle(5.0)
+        val third = triangle(10.0)
+        val wind = Wind(listOf(first), VectorExpr.of(Vector3(0.0, 0.0, 5.0)), density = 1.0)
+        wind.addTriangles(listOf(second), weight = 0.3)
+        wind.addTriangles(listOf(third), weight = 2.0)
+        val full = Vector3(0.0, 0.0, 2.5 / 3.0)
+        assertVectorEquals(full, netForceOn(first.a, store, groups, wind))
+        assertVectorEquals(full * 0.3, netForceOn(second.a, store, groups, wind))
+        assertVectorEquals(full * 2.0, netForceOn(third.a, store, groups, wind))
+        // Removing the middle one leaves the others' weights with them.
+        wind.removeTriangles(setOf(second))
+        assertVectorEquals(Vector3.ZERO, netForceOn(second.a, store, groups, wind))
+        assertVectorEquals(full * 2.0, netForceOn(third.a, store, groups, wind))
+        // The editable density still scales everything.
+        wind.setField("density", FieldValue.Scalar(2.0))
+        assertVectorEquals(full * 4.0, netForceOn(third.a, store, groups, wind))
+        assertVectorEquals(full * 2.0, netForceOn(first.a, store, groups, wind))
+    }
 }

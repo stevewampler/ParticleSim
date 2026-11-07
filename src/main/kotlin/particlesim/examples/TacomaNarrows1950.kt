@@ -182,6 +182,9 @@ fun buildTacomaNarrows1950(
     flutterSlope: Double = FLUTTER_SLOPE,
     flutterCriticalReducedVelocity: Double = FLUTTER_CRITICAL_VR,
     flutterSaturationTwist: Double = FLUTTER_SATURATION_TWIST,
+    /** Use these wind, gravity and flutter forces (shared with another bridge) instead of this
+     * bridge's own; the wind and flutter parameters above are then unused. */
+    shared: TacomaSharedForces? = null,
     store: ParticleStore = ParticleStore(),
     groups: Groups = Groups(),
     placement: ShapePlacement = ShapePlacement(),
@@ -301,16 +304,23 @@ fun buildTacomaNarrows1950(
         cableGroup = cableGroup, cableAnchorGroup = cableAnchorGroup, store = store, groups = groups, placement = placement,
     )
 
-    val wind = Wind(roadwayTriangles + trussFaceTriangles, ExpressionParser.parseVector(windVelocity), density = windDensity, name = placement.name("wind"))
+    // Shared, this deck's surfaces catch [windDensity] relative to the shared wind's own density
+    // (the 1940 bridge's): the truss solidity.
+    val wind = shared?.wind?.also { it.addTriangles(roadwayTriangles + trussFaceTriangles, windDensity / TACOMA_WIND_DENSITY) }
+        ?: Wind(roadwayTriangles + trussFaceTriangles, ExpressionParser.parseVector(windVelocity), density = windDensity, name = placement.name("wind"))
 
     val flutterRows = spans[1].subList(1, spans[1].lastIndex)
-    val flutterForce = if (!flutter) null else TorsionalFlutter(
-        strips = flutterRows.map { TorsionalFlutter.Strip(it.topLeft, it.topRight, mainBay) },
+    val flutterStrips = flutterRows.map { TorsionalFlutter.Strip(it.topLeft, it.topRight, mainBay) }
+    val flutterModes = TACOMA_1950_TORSION_MODE_FREQUENCIES.withIndex().map { (k, f) ->
+        TorsionalFlutter.Mode(DoubleArray(flutterRows.size) { sin((k + 1) * Math.PI * (it + 1) / mainBays) }, f)
+    }
+    val flutterForce = if (!flutter) null else if (shared != null) {
+        shared.flutter.also { it.addSection(flutterStrips, flutterModes, TACOMA_1950_RESIDUAL_TORSION_FREQUENCY) }
+    } else TorsionalFlutter(
+        strips = flutterStrips,
         windVelocity = wind::currentVelocity,
         frequency = TACOMA_1950_RESIDUAL_TORSION_FREQUENCY,
-        modes = TACOMA_1950_TORSION_MODE_FREQUENCIES.withIndex().map { (k, f) ->
-            TorsionalFlutter.Mode(DoubleArray(flutterRows.size) { sin((k + 1) * Math.PI * (it + 1) / mainBays) }, f)
-        },
+        modes = flutterModes,
         density = flutterDensity,
         slope = flutterSlope,
         criticalReducedVelocity = flutterCriticalReducedVelocity,
@@ -321,7 +331,8 @@ fun buildTacomaNarrows1950(
     val deckStructure = MeshSprings(deckEdges, store, stiffness = deckStiffness, damping = structuralDamping, name = placement.name("deck-structure"))
     val chords = MeshSprings(chordEdges, store, stiffness = trussChordStiffness, damping = structuralDamping, name = placement.name("truss-chords"))
 
-    val forces = listOfNotNull(
+    if (shared != null) for (id in groups.membersOf(deckGroup) + groups.membersOf(cableGroup)) groups.add(shared.gravityGroup, id)
+    val forces = if (shared != null) listOf(deckStructure, chords) + suspension.cableSprings + suspension.hangerSprings else listOfNotNull(
         deckStructure,
         chords,
         UniformGravity(deckGroup, Vector3(0.0, -g, 0.0), name = placement.name("gravity")),
@@ -359,7 +370,7 @@ fun buildTacomaNarrows1950(
 }
 
 /** Roadway height above the water, ~200 ft: the towers' 507 ft above the water less their
- * 307 ft above the roadway (WSDOT). */
+ * 307 ft above the roadway (WSDOT) - 0.16 units higher than the 1940 deck. */
 const val TACOMA_1950_DECK_HEIGHT_ABOVE_WATER = 6.1
 
 /** Starts the 1950 main span twisting in the shape `sin(halfWaves·πz/L)` at peak rate [rate]

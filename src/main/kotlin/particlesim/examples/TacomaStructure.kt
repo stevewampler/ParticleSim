@@ -210,3 +210,40 @@ internal fun tacomaMemberUtilization(
     }
     return result
 }
+
+/**
+ * One wind, one gravity and one flutter force shared by several Tacoma Narrows bridges in one
+ * scene (built with `shared = ` this), so each force has a single set of editable values that
+ * acts on every bridge: changing the wind's velocity or density, gravity, or a flutter
+ * coefficient changes it for all of them at once. Each bridge adds its own surfaces to [wind]
+ * (weighted by how much of them catches the wind), its deck sections to [flutter] (with its own
+ * mode shapes and frequencies), and its deck and cable particles to [gravityGroup]; it then
+ * leaves these three out of its own forces. Physically identical to each bridge having its own
+ * copies of the three.
+ */
+class TacomaSharedForces(
+    /** The wind's initial velocity expression. */
+    val windVelocity: String,
+    windDensity: Double = TACOMA_WIND_DENSITY,
+    flutterDensity: Double = FLUTTER_DENSITY,
+    flutterSlope: Double = FLUTTER_SLOPE,
+    flutterCriticalReducedVelocity: Double = FLUTTER_CRITICAL_VR,
+    flutterSaturationTwist: Double = FLUTTER_SATURATION_TWIST,
+    g: Double = 9.8,
+) {
+    val gravityGroup = "bridges"
+    val wind = particlesim.physics.Wind(emptyList(), particlesim.expr.ExpressionParser.parseVector(windVelocity), density = windDensity, name = "wind")
+    val flutter = particlesim.physics.TorsionalFlutter(
+        strips = emptyList(),
+        windVelocity = wind::currentVelocity,
+        // Unused: every section added brings its own residual frequency.
+        frequency = 1.0,
+        density = flutterDensity,
+        slope = flutterSlope,
+        criticalReducedVelocity = flutterCriticalReducedVelocity,
+        saturationTwist = flutterSaturationTwist,
+        name = "flutter",
+    )
+    val gravity = particlesim.physics.UniformGravity(gravityGroup, Vector3(0.0, -g, 0.0), name = "gravity")
+    val forces: List<particlesim.physics.Force> get() = listOf(gravity, wind, flutter)
+}

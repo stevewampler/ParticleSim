@@ -831,6 +831,13 @@ itself.
   instance name and offset, §4.5) and are stepped together in one
   integrator step, their frames merged; a scene made of components is
   then just the list of them plus a camera and lights.
+  Components may also **share forces**: one wind, one gravity and one
+  flutter force acting on several structures, so editing one value in the
+  outliner changes it for all of them (the user's case: comparing the two
+  Tacoma bridges in the same conditions). A shared force has to give each
+  structure exactly what its own copy would - so a wind can weight each
+  surface's share of its density (an open truss catches less), and a
+  flutter force keeps each structure's own mode shapes and frequencies.
 
 ## 10. Visualization & Rendering
 

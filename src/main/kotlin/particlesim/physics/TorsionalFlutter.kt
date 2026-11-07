@@ -62,7 +62,7 @@ import kotlin.math.sqrt
  * it chunks and checkpoints like every other force.
  */
 class TorsionalFlutter(
-    private val strips: List<Strip>,
+    strips: List<Strip>,
     private val windVelocity: (Double) -> Vector3,
     private var frequency: Double,
     private var density: Double = 1.0,
@@ -73,7 +73,7 @@ class TorsionalFlutter(
     private val spanAxis: Vector3 = Vector3(0.0, 0.0, 1.0),
     /** Mode shapes (one value per strip) and their frequencies, for per-mode reduced velocity;
      * empty = frozen [frequency] for everything. */
-    private val modes: List<Mode> = emptyList(),
+    modes: List<Mode> = emptyList(),
     override val name: String? = null,
 ) : Force, EditableFields {
     data class Strip(val left: Int, val right: Int, val spanLength: Double)
@@ -85,12 +85,41 @@ class TorsionalFlutter(
         for (mode in modes) require(mode.shape.size == strips.size) { "a mode shape needs one value per strip" }
     }
 
+    private val strips = ArrayList(strips)
+    // Every mode's shape spans every strip (zero over strips of other sections).
+    private val modes = ArrayList(modes)
+    // Per strip: its section's own residual frequency, or null for [frequency].
+    private val residualFrequencies = ArrayList<Double?>(List(strips.size) { null })
+    private var started = false
+
     // Each mode's Σ φ² ℓ over the active strips - fixed until a strip is switched off.
-    private val stripActive = BooleanArray(strips.size) { true }
+    private var stripActive = BooleanArray(strips.size) { true }
     private var modeNorms = computeModeNorms()
 
     private fun computeModeNorms() = modes.map { m ->
         strips.indices.filter { stripActive[it] }.sumOf { m.shape[it] * m.shape[it] * strips[it].spanLength }
+    }
+
+    /**
+     * Adds a separately built deck - [strips] with its own [modes] (shapes over these strips
+     * only) and [residualFrequency] - to this force, so one force (and one set of editable
+     * coefficients) drives several structures in one wind, e.g. two bridges side by side. Each
+     * section's modes are zero over every other section's strips, so a section's motion is
+     * projected only onto its own modes: the moments are exactly what a separate force per
+     * section would give. Returns the index of the first added strip. Only before the first step.
+     */
+    fun addSection(strips: List<Strip>, modes: List<Mode>, residualFrequency: Double): Int {
+        check(!started) { "add sections before the first step" }
+        for (mode in modes) require(mode.shape.size == strips.size) { "a mode shape needs one value per strip" }
+        val offset = this.strips.size
+        val total = offset + strips.size
+        for (i in this.modes.indices) this.modes[i] = Mode(this.modes[i].shape.copyOf(total), this.modes[i].frequency)
+        for (mode in modes) this.modes += Mode(DoubleArray(total) { if (it >= offset) mode.shape[it - offset] else 0.0 }, mode.frequency)
+        this.strips += strips
+        repeat(strips.size) { residualFrequencies += residualFrequency }
+        stripActive = stripActive.copyOf(total).also { for (i in offset until total) it[i] = true }
+        modeNorms = computeModeNorms()
+        return offset
     }
 
     /**
@@ -105,8 +134,8 @@ class TorsionalFlutter(
         modeNorms = computeModeNorms()
     }
 
-    override fun editableFields(): Map<String, FieldValue> = mapOf(
-        "frequency" to FieldValue.Scalar(frequency),
+    // "frequency" only while some strip uses it (one added by [addSection] has its own).
+    override fun editableFields(): Map<String, FieldValue> = (if (residualFrequencies.any { it == null }) mapOf("frequency" to FieldValue.Scalar(frequency)) else emptyMap()) + mapOf(
         "density" to FieldValue.Scalar(density),
         "a2Slope" to FieldValue.Scalar(slope),
         "criticalReducedVelocity" to FieldValue.Scalar(criticalReducedVelocity),
@@ -208,7 +237,7 @@ class TorsionalFlutter(
                 residual -= part
                 sum += gain(modes[m].frequency) * part
             }
-            sum += gain(frequency) * residual
+            sum += gain(residualFrequencies[i] ?: frequency) * residual
             val b2 = chord * chord
             moments[i] = 0.5 * density * b2 * b2 * sum * strips[i].spanLength
         }
@@ -219,6 +248,7 @@ class TorsionalFlutter(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
     ) {
+        started = true
         val state = compute(store, windVelocity(t))
         var i = chunkIndex
         while (i < strips.size) {

@@ -5974,6 +5974,26 @@ load. Full `./gradlew test -q` suite green throughout.
       peak ~0.23, cables ~0.26; chords ~0.08 in the main-span interior but up
       to ~0.2-0.6 in the bays at the towers - the rigid end pins clamp the
       deck in plan (the artifact 1940's breakage excludes those bays for).
+- [x] **Side-by-side scene `tacomaNarrowsComparison`** — breakable 1940 (as
+      `tacomaNarrowsBreakable`) and stress-colored 1950 (as
+      `tacomaNarrows1950Stress`) 50 m apart, steady failure wind, with **one**
+      `wind`, `gravity` and `flutter` force for both (`TacomaSharedForces`,
+      drawn/settled by `TacomaSharedForcesComponent`; builders take
+      `shared =` and then leave those three out of their own forces).
+      Needed: `Wind.addTriangles(triangles, weight)` (per-triangle density
+      multiplier - 1950 truss at solidity 0.3 against the shared 0.24; kept
+      aligned through `removeTriangles`) and
+      `TorsionalFlutter.addSection(strips, modes, residualFrequency)` (each
+      section's modes zero-padded over the others, per-strip residual
+      frequency; `frequency` leaves the editable fields once every strip has
+      its own). `TacomaComparisonSceneTest` checks the shared flutter moments
+      and wind/gravity forces equal each bridge's own to 1e-12, and that one
+      wind density edit scales both decks. Layout is a comparison only (the
+      bridges shared piers); no wind sheltering. Headless browser ~70 steps/s.
+- [x] **Fix: `TACOMA_DECK_HEIGHT_ABOVE_WATER` was 19.5** (feet/10, not
+      metres/10) - now 5.94, so `tacomaNarrowsBreakable`'s pieces fall 195 ft
+      instead of ~640 ft. The 1950 roadway sits 0.16 higher over the same
+      water.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

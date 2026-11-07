@@ -8,6 +8,7 @@ import particlesim.examples.TACOMA_DT
 import particlesim.examples.TACOMA_GUSTY_WIND
 import particlesim.examples.TACOMA_SCENE_SEED_RATE
 import particlesim.examples.TacomaNarrows1950Scenario
+import particlesim.examples.TacomaSharedForces
 import particlesim.examples.buildTacomaNarrows1950
 import particlesim.examples.seedOneNodeTwist
 import particlesim.physics.Force
@@ -58,8 +59,13 @@ class Tacoma1950Bridge(
      * ([TacomaNarrows1950Scenario.utilization]), as [Tacoma1940Bridge] does for its breakable
      * members, with the viewer's break-proximity legend. */
     private val showStress: Boolean = false,
+    /** Wind, gravity and flutter shared with other bridges - then owned and drawn by a
+     * [TacomaSharedForcesComponent], not this one. */
+    private val shared: TacomaSharedForces? = null,
 ) : SceneComponent {
-    val scenario: TacomaNarrows1950Scenario = buildTacomaNarrows1950(windVelocity = windVelocity, store = store, groups = groups, placement = placement)
+    val scenario: TacomaNarrows1950Scenario = buildTacomaNarrows1950(
+        windVelocity = shared?.windVelocity ?: windVelocity, shared = shared, store = store, groups = groups, placement = placement,
+    )
 
     override val forces: List<Force> = scenario.forces
     override val constraints = scenario.constraints
@@ -104,8 +110,8 @@ class Tacoma1950Bridge(
             connectionStyles = connectionStyles,
             lineColors = stress.mapValues { (_, u) -> ColorRamp.greenYellowRed(u) },
             meshes = listOf(roadwayMesh),
-            arrowGroups = tacomaFlutterArrows(scenario.flutter, scenario.store, t),
-            shownByDefaultArrows = setOfNotNull(scenario.flutter?.name),
+            arrowGroups = if (shared != null) emptyList() else tacomaFlutterArrows(scenario.flutter, scenario.store, t),
+            shownByDefaultArrows = if (shared != null) emptySet() else setOfNotNull(scenario.flutter?.name),
         )
     }
 

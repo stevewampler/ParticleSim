@@ -9,6 +9,7 @@ import particlesim.examples.TACOMA_DT
 import particlesim.examples.TACOMA_GUSTY_WIND
 import particlesim.examples.TACOMA_SCENE_SEED_RATE
 import particlesim.examples.TacomaNarrowsScenario
+import particlesim.examples.TacomaSharedForces
 import particlesim.examples.buildTacomaNarrows
 import particlesim.examples.seedOneNodeTwist
 import particlesim.expr.ExpressionParser
@@ -88,8 +89,14 @@ class Tacoma1940Bridge(
      * ([particlesim.examples.TacomaBreakage.utilization]), green unstressed, yellow halfway, red
      * at breaking, with the viewer's break-proximity legend. */
     private val showStress: Boolean = breakable,
+    /** Wind, gravity and flutter shared with other bridges - then owned and drawn by a
+     * [TacomaSharedForcesComponent], not this one. */
+    private val shared: TacomaSharedForces? = null,
 ) : SceneComponent {
-    val scenario: TacomaNarrowsScenario = buildTacomaNarrows(windVelocity = windVelocity, breakable = breakable, store = store, groups = groups, placement = placement)
+    val scenario: TacomaNarrowsScenario = buildTacomaNarrows(
+        windVelocity = shared?.windVelocity ?: windVelocity, breakable = breakable, shared = shared,
+        store = store, groups = groups, placement = placement,
+    )
     private val instanceName = placement.instanceName
 
     override val forces: List<Force> = scenario.forces
@@ -99,8 +106,9 @@ class Tacoma1940Bridge(
     // The freshly built model rings for several seconds (hanger tension briefly ~2x its dead
     // load) - a breakable one settles in still air before anything can break.
     override val settleSeconds = if (breakable) BREAKABLE_SETTLE_SECONDS else 0.0
-    override fun beginSettle() = scenario.wind.setVelocity(VectorExpr.of(Vector3.ZERO))
-    override fun endSettle() = scenario.wind.setVelocity(ExpressionParser.parseVector(windVelocity))
+    // (A shared wind is calmed by its own component.)
+    override fun beginSettle() { if (shared == null) scenario.wind.setVelocity(VectorExpr.of(Vector3.ZERO)) }
+    override fun endSettle() { if (shared == null) scenario.wind.setVelocity(ExpressionParser.parseVector(windVelocity)) }
 
     // The model is symmetric, so the collapse-day mode needs a disturbance to grow from (on the
     // day, a slipped cable band at mid-span).
@@ -158,7 +166,7 @@ class Tacoma1940Bridge(
     // The flutter force drawn as its couple on each main-span slice: an arrow up on one girder
     // and down on the other, magenta where it's feeding energy into the twist (moment the same way
     // as the twist rate - negative aerodynamic damping) and cyan where it's taking it out.
-    private fun flutterArrows(t: Double): List<NamedArrowSamples> = tacomaFlutterArrows(scenario.flutter, scenario.store, t)
+    private fun flutterArrows(t: Double): List<NamedArrowSamples> = if (shared != null) emptyList() else tacomaFlutterArrows(scenario.flutter, scenario.store, t)
 
     // Broken hangers and cable segments stop being drawn; a torn-apart bay's roadway and girder
     // panels disappear (rebuilt only when something new has broken).
@@ -191,7 +199,7 @@ class Tacoma1940Bridge(
             lineColors = stress.mapValues { (_, u) -> ColorRamp.greenYellowRed(u) },
             meshes = meshes,
             arrowGroups = flutterArrows(t),
-            shownByDefaultArrows = setOfNotNull(scenario.flutter?.name),
+            shownByDefaultArrows = if (shared != null) emptySet() else setOfNotNull(scenario.flutter?.name),
         )
     }
 
