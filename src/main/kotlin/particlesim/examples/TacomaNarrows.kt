@@ -404,7 +404,9 @@ fun buildTacomaNarrows(
         flutter = flutterForce,
         breakage = breakage,
         collisions = if (!breakable) null else {
-            // The water of the Narrows, 195 ft (19.5 units) below the deck: falling pieces stop
+            // A collider only stops particles with a radius - a small contact one.
+            for (id in groups.membersOf(deckGroup) + groups.membersOf(cableGroup)) store.setRadius(id, ScalarExpr.of(TACOMA_CONTACT_RADIUS), 0.0)
+            // The water of the Narrows, 195 ft (5.94 units) below the deck: falling pieces stop
             // there instead of accelerating forever. (Particles aren't destroyed - the forces and
             // surfaces still reference them.)
             val water = PlaneCollider(VectorExpr.of(Vector3(0.0, -TACOMA_DECK_HEIGHT_ABOVE_WATER, 0.0) + placement.offset), normal = Vector3(0.0, 1.0, 0.0), name = placement.name("water"))
@@ -436,6 +438,10 @@ const val FLUTTER_SATURATION_TWIST = 0.31
  * weight per unit span - 1.3% at U = 5.9 needs ≈ 0.24. (It was 1.0, ~4x too strong.)
  */
 const val TACOMA_WIND_DENSITY = 0.24
+
+/** Contact radius of a breakable bridge's deck and cable particles, for landing on the water
+ * (20 cm - small beside the members it stands for). */
+const val TACOMA_CONTACT_RADIUS = 0.02
 
 /** Deck height above the water, 195 ft (WSDOT) - 5.94 units, the towers' depth below the deck.
  * (Was 19.5 - feet/10 rather than metres/10 - so falling pieces dropped ~3.3x too far.) */

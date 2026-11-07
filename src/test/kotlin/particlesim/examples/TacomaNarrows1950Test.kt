@@ -129,14 +129,15 @@ class TacomaNarrows1950Test {
     }
 
     @Test
-    fun `each cable, suspender and truss chord's stress is its load over its limit`() {
+    fun `each cable, suspender, truss chord and diagonal's stress is its load over its limit`() {
         assertEquals(3.84, TACOMA_1950_CABLE_ULTIMATE_TO_DEAD, 0.01)
         val s = buildTacomaNarrows1950()
         val u = s.utilization()
-        // As built, every cable and suspender carries exactly its dead load; chords are unstressed.
+        // As built, every cable and suspender carries exactly its dead load; truss members are unstressed.
         assertEquals(1.0 / TACOMA_1950_HANGER_ULTIMATE_TO_DEAD, u.getValue(s.hangerMembers[10].connection), 1e-9)
         assertEquals(1.0 / TACOMA_1950_CABLE_ULTIMATE_TO_DEAD, u.getValue(s.cableMembers[30].connection), 1e-9)
         assertEquals(0.0, u.getValue(s.trussChords[40]), 1e-9)
-        assertEquals(s.hangerMembers.size + s.cableMembers.size + s.trussChords.size, u.size)
+        assertEquals(0.0, u.getValue(s.trussDiagonals[40]), 1e-9)
+        assertEquals(s.hangerMembers.size + s.cableMembers.size + s.trussChords.size + s.trussDiagonals.size, u.size)
     }
 }

@@ -189,7 +189,8 @@
       <h4>display</h4>
       <label><input type="checkbox" id="gridToggle" checked> grid</label><br>
       <label><input type="checkbox" id="axesToggle" checked> axes</label><br>
-      <label><input type="checkbox" id="collidersToggle" checked> colliders</label>
+      <label><input type="checkbox" id="collidersToggle" checked> colliders</label><br>
+      <label title="Force arrows and stress / break-proximity colors, everywhere in the scene"><input type="checkbox" id="forcesStressesToggle" checked> forces &amp; stresses</label>
     </section>
     <section>
       <h4>time</h4>
@@ -311,6 +312,14 @@ document.getElementById("gridToggle").addEventListener("change", (e) => { gridHe
 document.getElementById("axesToggle").addEventListener("change", (e) => { axesHelper.visible = e.target.checked; });
 document.getElementById("collidersToggle").addEventListener("change", (e) => { colliderGroup.visible = e.target.checked; });
 document.getElementById("pauseOnEditToggle").addEventListener("change", (e) => { pauseOnEdit = e.target.checked; });
+
+// One switch for every force and stress visualization at once: off hides all force arrows and
+// draws every connection in its own style/default color instead of a stress (colorBy) color. A
+// master gate over the per-object state, not an edit of it - each force's own "show arrows"
+// choice (shownForces) is untouched, so turning this back on restores exactly what was showing.
+// Applies from the next frame, which the server sends even while paused.
+let showForcesAndStresses = true;
+document.getElementById("forcesStressesToggle").addEventListener("change", (e) => { showForcesAndStresses = e.target.checked; });
 
 // Lighting for §10.2's shaded surface meshes — MeshBasicMaterial (dots, wireframe meshes)
 // doesn't need this, but a solid MeshStandardMaterial surface would render pure black without
@@ -653,7 +662,7 @@ function isDefaultLineColor(color) {
 }
 
 function updateColorLegend(frame) {
-  const active = frame.connections.some((c) => !isDefaultLineColor(c.color));
+  const active = showForcesAndStresses && frame.connections.some((c) => !isDefaultLineColor(c.color));
   statusBarLegendEl.classList.toggle("active", active);
 }
 scene.add(lines);
@@ -975,7 +984,9 @@ function applyFrame(frame) {
     const declared = c.styleIndex >= 0 ? frame.connectionStyles[c.styleIndex] : null;
     const style = declared ? latestConnectionStyles.get(declared.name) : null;
     if (style && hiddenConnectionStyles.has(style.name)) continue;
-    const color = style && isDefaultLineColor(c.color) ? style.color : c.color;
+    // The global "forces & stresses" switch off: drop any colorBy color, as if uncolored.
+    const lineColor = showForcesAndStresses ? c.color : DEFAULT_LINE_COLOR;
+    const color = style && isDefaultLineColor(lineColor) ? style.color : lineColor;
     if (style && style.shape === "cylinder") {
       if (!cylinderBuckets.has(style.name)) cylinderBuckets.set(style.name, { style, items: [] });
       cylinderBuckets.get(style.name).items.push({ a, b, color, forceName: c.forceName });
@@ -1122,7 +1133,7 @@ function applyFrame(frame) {
   // defaulted off).
   latestArrowGroups = frame.arrowGroups;
   const visibleArrowSamples = [];
-  for (const group of frame.arrowGroups) {
+  for (const group of showForcesAndStresses ? frame.arrowGroups : []) {
     if (group.name !== "" && !shownForces.has(group.name)) continue;
     for (const sample of group.samples) visibleArrowSamples.push({ sample, forceName: group.name });
   }

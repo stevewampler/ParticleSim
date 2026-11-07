@@ -3,6 +3,9 @@ package particlesim.debug
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
+import particlesim.examples.TACOMA_DECK_HEIGHT_ABOVE_WATER
+import particlesim.examples.TACOMA_DT
+import particlesim.examples.TACOMA_FAILURE_WIND
 import particlesim.examples.TacomaSharedForces
 import particlesim.examples.ShapePlacement
 import particlesim.examples.buildTacomaNarrows
@@ -74,7 +77,9 @@ class TacomaComparisonSceneTest {
         val store = scene.store
         val groups = Groups()
         val ids = scene.ids()
-        val sample = listOf(ids.first { store.position(it).x > 2.0 && store.position(it).y < -0.1 }, ids.first { store.position(it).x < -2.0 && store.position(it).y < -0.1 })
+        // A girder/truss particle of each deck (well above the water).
+        fun deckParticle(onSide: (Double) -> Boolean) = ids.first { store.position(it).let { p -> onSide(p.x) && p.y < -0.1 && p.y > -2.0 } }
+        val sample = listOf(deckParticle { it > 2.0 }, deckParticle { it < -2.0 })
         val before = forceOn(wind, store, groups, sample)
         wind.setField("density", FieldValue.Scalar(2 * (wind.editableFields().getValue("density") as FieldValue.Scalar).value))
         val after = forceOn(wind, store, groups, sample)
@@ -88,5 +93,52 @@ class TacomaComparisonSceneTest {
         var t = 0.0
         repeat(500) { scene.step(t); t += scene.dt }
         assertTrue(scene.ids().all { store.position(it).y.isFinite() })
+    }
+
+    private class Comparison {
+        val store = ParticleStore()
+        val groups = Groups()
+        val shared = TacomaSharedForces("[$TACOMA_FAILURE_WIND, 0.0, 0.0]")
+        val old = Tacoma1940Bridge(store, groups, ShapePlacement(Vector3(2.5, 0.0, 0.0), "1940"), breakable = true, shared = shared)
+        val new = Tacoma1950Bridge(store, groups, ShapePlacement(Vector3(-2.5, 0.16, 0.0), "1950"), showStress = true, shared = shared, breakable = true)
+    }
+
+    @Test
+    fun `a 1950 bay tearing apart stops only its own flutter strips, not the 1940 bridge's`() {
+        val c = Comparison()
+        val s = c.new.scenario
+        val (a, b) = s.mainSpan[20] to s.mainSpan[21]
+        for ((x, y) in s.trussDiagonals.filter { (x, y) -> setOf(x, y).let { e -> listOf(a.all, b.all).let { (ra, rb) -> e.any { it in ra } && e.any { it in rb } } } }) {
+            s.diagonals.breakEdge(s.diagonals.edgeIndexOf(x, y))
+        }
+        val events = c.new.afterStep(0.0, TACOMA_DT, emptyList())
+        assertTrue(events.any { it is SimEvent.ForceBreak && it.name == "1950: deck tore apart in main span bay 20" }, "events: $events")
+        val oldStrips = c.old.scenario.mainSpan.size - 2
+        val newStrips = s.mainSpan.size - 2
+        val inactive = (0 until oldStrips + newStrips).filter { !c.shared.flutter.isStripActive(it) }
+        // Rows 20 and 21 of the 1950 main span are its strips 19 and 20, after the 1940 bridge's.
+        assertEquals(listOf(oldStrips + 19, oldStrips + 20), inactive)
+    }
+
+    @Test
+    fun `raising the one gravity breaks the 1950 bridge too, and its pieces stop at the shared water`() {
+        val scene = tacomaComparisonScene()
+        var t = 0.0
+        repeat((6.0 / scene.dt).toInt()) { scene.step(t); t += scene.dt }
+        scene.handleControl(SceneControlMessage.SetVectorField("force", "gravity", "acceleration", Vector3(0.0, -40.0, 0.0)), t)
+        val events = ArrayList<SimEvent>()
+        repeat((15.0 / scene.dt).toInt()) { scene.step(t); t += scene.dt; if (it % 100 == 0) events += scene.frame(t).events }
+        val names = events.filterIsInstance<SimEvent.ForceBreak>().map { it.name }
+        assertTrue(names.any { it.startsWith("1950: ") }, "1950 breaks: $names")
+        assertTrue(names.any { it.startsWith("1940: ") }, "1940 breaks: $names")
+        // One water surface, at both bridges' collision planes' height; nothing falls through.
+        val water = scene.frame(t).meshes.single { it.surface.name == "water" }
+        val waterY = -TACOMA_DECK_HEIGHT_ABOVE_WATER
+        assertTrue(water.surface.triangles.flatMap { listOf(it.a, it.b, it.c) }.all { scene.store.position(it).y == waterY })
+        val corners = water.surface.triangles.flatMap { listOf(it.a, it.b, it.c) }.toSet()
+        val pieces = scene.ids().filter { it !in corners }
+        val lowest = pieces.minBy { scene.store.position(it).y }
+        assertTrue(scene.store.position(lowest).y > waterY - 0.05, "lowest: $lowest at ${scene.store.position(lowest)}, groups ${(scene as ComponentScene).groupsOf(lowest)}")
+        assertTrue(scene.store.position(lowest).y < waterY + 0.05, "something has landed on the water")
     }
 }

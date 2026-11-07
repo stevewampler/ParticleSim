@@ -48,6 +48,11 @@ import particlesim.surface.Triangle
  * Thresholds start **unarmed** (infinite), because the model rings for several seconds after
  * it's built - hanger tension briefly reaches ~2.1x dead load in still air - so a scene settles
  * first and then calls [arm].
+ *
+ * The 1950 bridge ([buildTacomaNarrows1950]) uses the same machinery with its own cable limit
+ * ([cableUltimateToDead]) and its stiffening trusses in place of the girders ([girderName]): a
+ * truss fails in a bay when one of its chords **or its Warren diagonal** there ([webs]) breaks -
+ * the diagonals carry a truss's shear, so a truss without one is a mechanism.
  */
 class TacomaBreakage internal constructor(
     val hangers: List<Member>,
@@ -60,6 +65,15 @@ class TacomaBreakage internal constructor(
     private val flutter: TorsionalFlutter?,
     private val flutterStripOfMainRow: Map<Int, Int>,
     private val wind: Wind,
+    /** Suspender breaking tension over dead-load tension. */
+    val hangerUltimateToDead: Double = HANGER_ULTIMATE_TO_DEAD,
+    /** Main cable breaking tension over dead-load tension. */
+    val cableUltimateToDead: Double = CABLE_ULTIMATE_TO_DEAD,
+    /** Truss diagonals, rated and breaking at the same steel strain limits as the chords; a
+     * broken one fails its truss in its bay ([Bay.leftWebs], [Bay.rightWebs]). None for 1940. */
+    private val webs: MeshSprings? = null,
+    /** What the stiffening members are called in events: "girder" (1940) or "truss" (1950). */
+    private val girderName: String = "girder",
 ) {
     /** A cable segment or hanger: its spring, its two particles, its dead-load stretch T₀/k and
      * its spring's (unstressed) rest length. */
@@ -79,6 +93,9 @@ class TacomaBreakage internal constructor(
          * neighbouring bay far beyond what the real bearings did (they failed there within 2 s
          * of the twist being seeded - an artifact). */
         val atSupport: Boolean,
+        /** This bay's truss diagonals (in [webs]), per side. */
+        val leftWebs: IntArray = IntArray(0),
+        val rightWebs: IntArray = IntArray(0),
     )
 
     var armed = false
@@ -107,15 +124,17 @@ class TacomaBreakage internal constructor(
      * limit for its direction - ultimate in tension, flange buckling in compression.
      */
     fun utilization(store: ParticleStore): Map<Pair<Int, Int>, Double> = tacomaMemberUtilization(
-        store, hangers, HANGER_ULTIMATE_TO_DEAD, cables, CABLE_ULTIMATE_TO_DEAD, chords, isBroken = ::isBroken,
+        store, hangers, hangerUltimateToDead, cables, cableUltimateToDead, chords, webs, isBroken = ::isBroken,
     )
 
     /** Turns the real limits on. */
     fun arm() {
-        for (m in hangers) m.spring.setField("extensionBreakThreshold", FieldValue.Scalar(HANGER_ULTIMATE_TO_DEAD * m.deadLoadStretch))
-        for (m in cables) m.spring.setField("extensionBreakThreshold", FieldValue.Scalar(CABLE_ULTIMATE_TO_DEAD * m.deadLoadStretch))
-        chords.setField("extensionBreakThreshold", FieldValue.Scalar(GIRDER_ULTIMATE_STRAIN))
-        chords.setField("compressionBreakThreshold", FieldValue.Scalar(GIRDER_BUCKLING_STRAIN))
+        for (m in hangers) m.spring.setField("extensionBreakThreshold", FieldValue.Scalar(hangerUltimateToDead * m.deadLoadStretch))
+        for (m in cables) m.spring.setField("extensionBreakThreshold", FieldValue.Scalar(cableUltimateToDead * m.deadLoadStretch))
+        for (members in listOfNotNull(chords, webs)) {
+            members.setField("extensionBreakThreshold", FieldValue.Scalar(GIRDER_ULTIMATE_STRAIN))
+            members.setField("compressionBreakThreshold", FieldValue.Scalar(GIRDER_BUCKLING_STRAIN))
+        }
         armed = true
     }
 
@@ -135,16 +154,17 @@ class TacomaBreakage internal constructor(
         }
         for (bay in bays) {
             if (bay in separated || bay.atSupport) continue
-            for ((isLeft, edges) in listOf(true to bay.leftChords, false to bay.rightChords)) {
-                if ((bay to isLeft) !in failedGirders && edges.any { !chords.isActive(it) }) {
+            for ((isLeft, edges, webEdges) in listOf(Triple(true, bay.leftChords, bay.leftWebs), Triple(false, bay.rightChords, bay.rightWebs))) {
+                if ((bay to isLeft) !in failedGirders && (edges.any { !chords.isActive(it) } || webEdges.any { !webs!!.isActive(it) })) {
                     failedGirders += bay to isLeft
-                    events += "${if (isLeft) "left" else "right"} girder failed in ${SPAN_NAMES[bay.span]} bay ${bay.index}"
+                    events += "${if (isLeft) "left" else "right"} $girderName failed in ${SPAN_NAMES[bay.span]} bay ${bay.index}"
                 }
             }
             if ((bay to true) in failedGirders && (bay to false) in failedGirders) {
                 separated += bay
                 for (e in bay.deckEdges) deck.breakEdge(e)
                 for (e in bay.leftChords + bay.rightChords) chords.breakEdge(e)
+                for (e in bay.leftWebs + bay.rightWebs) webs!!.breakEdge(e)
                 wind.removeTriangles(bay.triangles)
                 if (bay.span == 1) for (row in listOf(bay.index, bay.index + 1)) flutterStripOfMainRow[row]?.let { flutter?.deactivateStrip(it) }
                 events += "deck tore apart in ${SPAN_NAMES[bay.span]} bay ${bay.index}"

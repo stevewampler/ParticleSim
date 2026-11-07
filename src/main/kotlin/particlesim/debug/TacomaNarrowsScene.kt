@@ -5,6 +5,7 @@ import particlesim.core.ParticleStore
 import particlesim.core.Vector3
 import particlesim.core.VectorExpr
 import particlesim.examples.ShapePlacement
+import particlesim.examples.TACOMA_DECK_HEIGHT_ABOVE_WATER
 import particlesim.examples.TACOMA_DT
 import particlesim.examples.TACOMA_GUSTY_WIND
 import particlesim.examples.TACOMA_SCENE_SEED_RATE
@@ -57,12 +58,21 @@ fun tacomaNarrowsScene(
     val store = ParticleStore()
     val groups = Groups()
     val bridge = Tacoma1940Bridge(store, groups, windVelocity = windVelocity, breakable = breakable, showStress = showStress)
+    val water = TacomaWater(store, groups, y = -TACOMA_DECK_HEIGHT_ABOVE_WATER)
     // Close in on the west half of the main span, looking along the deck from just above and
     // outside it, so a few degrees of twist read clearly - a plain overview of the bounding box
     // would make a 1:72 deck a hairline. Orbit/zoom out for the whole bridge.
     val camera = CameraFunction { _, _ -> CameraPose(position = Vector3(5.0, 3.0, -42.0), lookAt = Vector3(0.0, 0.0, -18.0)) }
-    return ComponentScene(store, groups, listOf(bridge), TACOMA_DT, camera, tacomaLights())
+    return ComponentScene(store, groups, listOf(water, bridge), TACOMA_DT, camera, tacomaLights())
 }
+
+/** Seconds a breakable Tacoma bridge settles in still air before its scene starts: the freshly
+ * built model rings for several seconds (hanger tension briefly ~2x its dead load). */
+internal const val TACOMA_BREAKABLE_SETTLE_SECONDS = 8.0
+
+/** Scene time at which a breakable Tacoma bridge's limits are armed - a few seconds in, so the
+ * starting twist's own sudden kick isn't what breaks anything. */
+internal const val TACOMA_ARM_AFTER_SECONDS = 5.0
 
 /** Soft sky fill and a low sun, for both Tacoma Narrows bridges. */
 fun tacomaLights(): List<Light> = listOf(
@@ -105,7 +115,7 @@ class Tacoma1940Bridge(
 
     // The freshly built model rings for several seconds (hanger tension briefly ~2x its dead
     // load) - a breakable one settles in still air before anything can break.
-    override val settleSeconds = if (breakable) BREAKABLE_SETTLE_SECONDS else 0.0
+    override val settleSeconds = if (breakable) TACOMA_BREAKABLE_SETTLE_SECONDS else 0.0
     // (A shared wind is calmed by its own component.)
     override fun beginSettle() { if (shared == null) scenario.wind.setVelocity(VectorExpr.of(Vector3.ZERO)) }
     override fun endSettle() { if (shared == null) scenario.wind.setVelocity(ExpressionParser.parseVector(windVelocity)) }
@@ -116,7 +126,7 @@ class Tacoma1940Bridge(
 
     override fun beforeStep(t: Double) {
         // Armed a few seconds in, so the seed's own sudden kick isn't what breaks anything.
-        if (breakable && !scenario.breakage.armed && t >= ARM_AFTER_SECONDS) scenario.breakage.arm()
+        if (breakable && !scenario.breakage.armed && t >= TACOMA_ARM_AFTER_SECONDS) scenario.breakage.arm()
     }
 
     private val ownForces = forces.toHashSet()
@@ -143,7 +153,8 @@ class Tacoma1940Bridge(
     private val towerConnections = scenario.towerLegs.flatMap { it.zipWithNext() } + scenario.towerBeamConnections
     private val structureConnections = cableConnections + scenario.hangerConnections + towerConnections
     // With stress colors on, the hangers are drawn thicker so their color reads, and the girder
-    // chords (otherwise only implied by the girder panels) are drawn too, just proud of them.
+    // chords (otherwise only implied by the girder panels) are drawn too, standing well proud of
+    // the panels' edges so their color reads.
     private val chordConnections = if (!showStress) emptyList() else {
         val chordPairs = HashSet<Pair<Int, Int>>()
         for (span in scenario.spans) for ((a, b) in span.zipWithNext()) {
@@ -156,7 +167,7 @@ class Tacoma1940Bridge(
         (cableConnections styledAs ConnectionStyles.steel(styleName("main-cables"), radius = 0.04)) +
             (scenario.hangerConnections styledAs ConnectionStyles.cable(styleName("hangers"), radius = if (showStress) 0.018 else 0.01)) +
             (towerConnections styledAs ConnectionStyles.paintedSteel(styleName("towers"), TOWER_GREY, radius = 0.18)) +
-            (chordConnections styledAs ConnectionStyles.paintedSteel(styleName("girder-chords"), GIRDER_GREEN, radius = 0.03, joints = false))
+            (chordConnections styledAs ConnectionStyles.paintedSteel(styleName("girder-chords"), GIRDER_GREEN, radius = 0.05, joints = false))
 
     private val deckIds = scenario.spans.flatten().flatMap { it.all }
     private val nonDeckIds = scenario.cables.flatten().distinct() + scenario.towerLegs.flatten()
@@ -207,8 +218,6 @@ class Tacoma1940Bridge(
     internal fun currentMeshes(): List<SurfaceRenderer> { refreshBrokenGeometry(); return meshes }
 
     private companion object {
-        const val BREAKABLE_SETTLE_SECONDS = 8.0
-        const val ARM_AFTER_SECONDS = 5.0
         val GIRDER_GREEN = Color(0.42, 0.47, 0.44)
         val TOWER_GREY = Color(0.5, 0.55, 0.55)
     }

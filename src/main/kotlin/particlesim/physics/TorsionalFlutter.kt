@@ -128,6 +128,8 @@ class TorsionalFlutter(
      * no longer applies: left on, a free fragment's own spin would be fed without limit. Call
      * between steps, not during [accumulate].
      */
+    fun isStripActive(index: Int): Boolean = stripActive[index]
+
     fun deactivateStrip(index: Int) {
         if (!stripActive[index]) return
         stripActive[index] = false

@@ -53,6 +53,7 @@ fun main(args: Array<String>) {
         "tacomaNarrows1950" to { tacomaNarrows1950Scene() },
         "tacomaNarrows1950Steady" to { tacomaNarrows1950Scene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]") },
         "tacomaNarrows1950Stress" to { tacomaNarrows1950Scene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]", showStress = true) },
+        "tacomaNarrows1950Breakable" to { tacomaNarrows1950Scene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]", breakable = true) },
         "tacomaNarrowsComparison" to { tacomaComparisonScene() },
     )
     val requestedScene = args.getOrNull(0)

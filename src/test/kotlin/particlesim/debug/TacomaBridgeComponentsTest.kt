@@ -53,9 +53,10 @@ class TacomaBridgeComponentsTest {
     fun `the 1950 bridge can show its members' stress`() {
         val bridge = Tacoma1950Bridge(ParticleStore(), Groups(), showStress = true)
         val frame = bridge.frame(0.0)
-        val rated = bridge.scenario.hangerConnections + bridge.scenario.trussChords
-        assertTrue(rated.all { it in frame.lineColors }, "every suspender and chord should be colored")
-        assertTrue(bridge.scenario.trussWebs.all { it in frame.connections && it !in frame.lineColors }, "webs drawn, unrated")
+        val rated = bridge.scenario.hangerConnections + bridge.scenario.trussChords + bridge.scenario.trussDiagonals
+        assertTrue(rated.all { it in frame.lineColors }, "every suspender, chord and diagonal should be colored")
+        val verticals = bridge.scenario.trussWebs.filter { it !in bridge.scenario.trussDiagonals }
+        assertTrue(verticals.isNotEmpty() && verticals.all { it in frame.connections && it !in frame.lineColors }, "verticals drawn, unrated")
         assertTrue(Tacoma1950Bridge(ParticleStore(), Groups()).frame(0.0).lineColors.isEmpty())
     }
 }

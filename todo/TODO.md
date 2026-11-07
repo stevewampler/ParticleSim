@@ -5974,6 +5974,7 @@ load. Full `./gradlew test -q` suite green throughout.
       peak ~0.23, cables ~0.26; chords ~0.08 in the main-span interior but up
       to ~0.2-0.6 in the bays at the towers - the rigid end pins clamp the
       deck in plan (the artifact 1940's breakage excludes those bays for).
+      (Superseded below: the 1950 bearings are now pinned, and it breaks.)
 - [x] **Side-by-side scene `tacomaNarrowsComparison`** — breakable 1940 (as
       `tacomaNarrowsBreakable`) and stress-colored 1950 (as
       `tacomaNarrows1950Stress`) 50 m apart, steady failure wind, with **one**
@@ -5994,6 +5995,39 @@ load. Full `./gradlew test -q` suite green throughout.
       metres/10) - now 5.94, so `tacomaNarrowsBreakable`'s pieces fall 195 ft
       instead of ~640 ft. The 1950 roadway sits 0.16 higher over the same
       water.
+- [x] **Breakable 1950 bridge, scene `tacomaNarrows1950Breakable`** (and the
+      comparison scene's 1950 bridge). `TacomaBreakage` is shared: it takes
+      per-bridge cable/suspender limits, an optional set of truss diagonals
+      (`webs`, rated and breaking at the chords' steel strain limits) and the
+      event name ("truss"). A truss fails in a bay when a chord or its
+      diagonal there breaks; both trusses failed -> the bay tears apart (its
+      span-wise members break, roadway hidden, flutter strips off, wind
+      removed). The diagonals got their own `truss-diagonals` MeshSprings; the
+      chords now have `breakThresholdsAreStrains = true` (they didn't). The
+      shared flutter's strip offset is kept, so a torn 1950 bay switches off
+      only its own strips. Verticals, floor system and bracing stay unrated.
+      Diagonals' strains: ~2e-4 at rest (~0.08), ~0.23 at 16 units/s.
+- [x] **1950 bearings pinned, not clamped**: each span's end row holds only its
+      two bottom-chord particles (was all five). Clamped, the chords in the
+      main-span bays at the towers reached ~5x their limit at 2g (gravity
+      ramped) against ~0.2 mid-span; pinned, ~0.6. Torsion frequencies and the
+      flutter tests unchanged. Under overload the short side spans are the weak
+      point (chords ~2x at 2g - they bend more sharply for the same sag). Stands
+      for a minute armed in the failure wind (peak < 0.7); 4g breaks it.
+- [x] **Fix: the water never stopped anything** - `CollisionSystem` skips
+      particles without a radius and no Tacoma particle had one, so falling
+      pieces fell forever. A breakable bridge's deck and cable particles now
+      get `TACOMA_CONTACT_RADIUS` (0.02, 20 cm). Tests now check pieces land.
+- [x] **Water drawn** (`TacomaWater` component, a flat blue-green sheet on
+      four pinned particles) under every Tacoma scene, one sheet for the
+      comparison scene at both bridges' collision-plane height.
+- [x] **1940 girder chords drawn thicker with stress on** (0.03 -> 0.05) - at
+      0.03 they hid along the solid girder panels' edges and their color
+      didn't read.
+- [x] **Viewer: global "forces & stresses" switch** (display section): off
+      hides every force arrow and drops every colorBy/stress color (and the
+      legend), as a master gate - each force's own "show arrows" is untouched
+      and comes back when it's switched on again.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

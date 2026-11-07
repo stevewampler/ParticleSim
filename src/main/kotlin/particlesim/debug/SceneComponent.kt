@@ -110,6 +110,8 @@ class ComponentScene(
 
     override fun ids(): List<Int> = allIds
 
+    internal fun groupsOf(id: Int): List<String> = groups.names().filter { id in groups.membersOf(it) }
+
     override fun step(t: Double) {
         for (c in components) c.beforeStep(t)
         val result = integrator.step(store, groups, forces, constraints, t, dt)

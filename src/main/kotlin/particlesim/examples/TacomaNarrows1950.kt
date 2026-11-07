@@ -4,6 +4,10 @@ import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
+import particlesim.core.VectorExpr
+import particlesim.collision.CollisionSystem
+import particlesim.collision.ParticleColliderRule
+import particlesim.collision.PlaneCollider
 import particlesim.expr.ExpressionParser
 import particlesim.physics.Constraint
 import particlesim.physics.FixedPosition
@@ -75,10 +79,22 @@ import kotlin.math.sin
  * model) are several times stiffer, so the same wind is at a much lower reduced velocity
  * `U/(fB)`.
  *
- * **Stress.** [TacomaNarrows1950Scenario.utilization] measures each cable segment, suspender and
- * truss chord against a breaking limit, as for the 1940 bridge - the cables' derived from the
- * 1950 figures ([TACOMA_1950_CABLE_ULTIMATE_TO_DEAD]), the suspenders' and the chords' steel
- * strain limits the 1940 report's, standing in. Nothing breaks: the limits are only shown.
+ * **Supports.** Each span's trusses rest on bearings at its ends: only the end row's two
+ * bottom-chord particles are held, so the trusses are pinned there, free to rotate. (Holding the
+ * whole end row, as the 1940 model does, clamps them - and once the deck deflects, e.g. under
+ * raised gravity, that loads the chords in the bays next to the supports several times over.)
+ *
+ * **Stress and breaking.** [TacomaNarrows1950Scenario.utilization] measures each cable segment,
+ * suspender, truss chord and Warren diagonal against a breaking limit, as for the 1940 bridge -
+ * the cables' derived from the 1950 figures ([TACOMA_1950_CABLE_ULTIMATE_TO_DEAD]), the
+ * suspenders' and the truss members' steel strain limits the 1940 report's, standing in. The
+ * diagonals' strains are less certain than the chords' (a chord's strain is geometric, the deck's
+ * curvature times the truss half-depth; a diagonal's depends on its stiffness, set for the deck's
+ * overall behavior rather than measured), but they sit at plausible levels - ~2·10⁻⁴ under dead
+ * load. The verticals, floor system and bracing are unrated. The same [TacomaBreakage] as 1940
+ * breaks them once [TacomaBreakage.arm]ed, with trusses for girders: a truss fails in a bay
+ * when a chord or the diagonal there breaks, and a bay whose two trusses have both failed tears
+ * apart. With `breakable`, falling pieces land in the water.
  */
 data class TacomaNarrows1950Scenario(
     val store: ParticleStore,
@@ -100,6 +116,8 @@ data class TacomaNarrows1950Scenario(
     val trussChords: List<Pair<Int, Int>>,
     /** Both trusses' verticals and Warren diagonals. */
     val trussWebs: List<Pair<Int, Int>>,
+    /** Both trusses' Warren diagonals (the edges of [diagonals]) - the rated part of [trussWebs]. */
+    val trussDiagonals: List<Pair<Int, Int>>,
     /** Floor beams and the roadway-plane lateral bracing. */
     val floorSystem: List<Pair<Int, Int>>,
     /** Bottom struts, cross-frame diagonals and the bottom lateral bracing. */
@@ -111,17 +129,23 @@ data class TacomaNarrows1950Scenario(
     val cableMembers: List<TacomaBreakage.Member>,
     /** The four truss chords' springs (the edges of [trussChords]). */
     val chords: MeshSprings,
+    /** The Warren diagonals' springs (the edges of [trussDiagonals]). */
+    val diagonals: MeshSprings,
+    /** Every other deck member: verticals, floor system, bracing (unrated). */
+    val deckStructure: MeshSprings,
+    /** The real breaking limits - inert until [TacomaBreakage.arm]ed. */
+    val breakage: TacomaBreakage,
+    /** The water below, for a breakable bridge (`breakable = true`); null otherwise. */
+    val collisions: CollisionSystem?,
 ) {
     val mainSpan: List<DeckRow> get() = spans[1]
 
     /**
-     * How close each cable segment, hanger and truss chord is to its breaking limit right now,
-     * `0` unstressed to `1` at breaking - the same measure as the 1940 bridge's
-     * [TacomaBreakage.utilization], with the limits below. Nothing actually breaks.
+     * How close each unbroken cable segment, hanger, truss chord and diagonal is to its breaking
+     * limit right now, `0` unstressed to `1` at breaking ([TacomaBreakage.utilization], with the
+     * limits below) - whether or not the limits are armed.
      */
-    fun utilization(): Map<Pair<Int, Int>, Double> = tacomaMemberUtilization(
-        store, hangerMembers, TACOMA_1950_HANGER_ULTIMATE_TO_DEAD, cableMembers, TACOMA_1950_CABLE_ULTIMATE_TO_DEAD, chords,
-    )
+    fun utilization(): Map<Pair<Int, Int>, Double> = breakage.utilization(store)
 }
 
 /**
@@ -182,6 +206,8 @@ fun buildTacomaNarrows1950(
     flutterSlope: Double = FLUTTER_SLOPE,
     flutterCriticalReducedVelocity: Double = FLUTTER_CRITICAL_VR,
     flutterSaturationTwist: Double = FLUTTER_SATURATION_TWIST,
+    /** Add the water below, for a bridge whose pieces can fall ([TacomaBreakage]). */
+    breakable: Boolean = false,
     /** Use these wind, gravity and flutter forces (shared with another bridge) instead of this
      * bridge's own; the wind and flutter parameters above are then unused. */
     shared: TacomaSharedForces? = null,
@@ -223,17 +249,30 @@ fun buildTacomaNarrows1950(
         buildSpan(zWestTower, mainBays, mainBay),
         buildSpan(zEastTower, sideBays, sideBay),
     )
-    for (span in spans) for (row in listOf(span.first(), span.last())) for (id in row.all) groups.add(anchorGroup, id)
+    // Each span's trusses rest on bearings at its two ends (tower / anchor pier): the bottom
+    // chords are held there, while the rest of the end cross-section can rotate about them - a
+    // pinned end. Holding the whole end row (as for 1940) would clamp the trusses, which loads the
+    // chords in the bays next to the supports many times over as soon as the deck deflects.
+    for (span in spans) for (row in listOf(span.first(), span.last())) for (id in listOf(row.bottomLeft, row.bottomRight)) groups.add(anchorGroup, id)
 
     val deckEdges = ArrayList<Grid.Edge>()
     val chordEdges = ArrayList<Grid.Edge>()
+    val diagonalEdges = ArrayList<Grid.Edge>()
     val trussWebs = ArrayList<Pair<Int, Int>>()
     val floorSystem = ArrayList<Pair<Int, Int>>()
     val bottomBracing = ArrayList<Pair<Int, Int>>()
     fun edge(a: Int, b: Int, into: MutableList<Pair<Int, Int>>) { deckEdges += Grid.Edge(a, b); into += a to b }
     val roadwayTriangles = ArrayList<Triangle>()
     val trussFaceTriangles = ArrayList<Triangle>()
-    for (span in spans) {
+    // Per-bay bookkeeping for [TacomaBreakage], as in the 1940 builder.
+    class BayParts(val span: Int, val index: Int) {
+        val leftChords = ArrayList<Int>(); val rightChords = ArrayList<Int>()
+        val leftWebs = ArrayList<Int>(); val rightWebs = ArrayList<Int>()
+        val deck = ArrayList<Int>()
+        val triangles = HashSet<Triangle>()
+    }
+    val bayParts = ArrayList<BayParts>()
+    for ((spanIndex, span) in spans.withIndex()) {
         for (row in span) {
             // The panel point's cross-frame: floor beam, truss verticals, bottom strut, X bracing,
             // and knee braces up to the roadway centreline.
@@ -245,26 +284,30 @@ fun buildTacomaNarrows1950(
         }
         for ((bayIndex, pair) in span.zipWithNext().withIndex()) {
             val (a, b) = pair
+            val bay = BayParts(spanIndex, bayIndex).also { bayParts += it }
+            fun spanEdge(x: Int, y: Int, into: MutableList<Pair<Int, Int>>) { bay.deck += deckEdges.size; edge(x, y, into) }
             // The four truss chords (their own MeshSprings), and the centreline stringer.
-            for ((x, y) in listOf(a.topLeft to b.topLeft, a.bottomLeft to b.bottomLeft, a.topRight to b.topRight, a.bottomRight to b.bottomRight)) {
-                chordEdges += Grid.Edge(x, y)
-            }
-            edge(a.centre, b.centre, floorSystem)
+            for ((x, y) in listOf(a.topLeft to b.topLeft, a.bottomLeft to b.bottomLeft)) { bay.leftChords += chordEdges.size; chordEdges += Grid.Edge(x, y) }
+            for ((x, y) in listOf(a.topRight to b.topRight, a.bottomRight to b.bottomRight)) { bay.rightChords += chordEdges.size; chordEdges += Grid.Edge(x, y) }
+            spanEdge(a.centre, b.centre, floorSystem)
             // Roadway-plane lateral bracing.
-            edge(a.topLeft, b.centre, floorSystem); edge(a.centre, b.topLeft, floorSystem)
-            edge(a.centre, b.topRight, floorSystem); edge(a.topRight, b.centre, floorSystem)
+            spanEdge(a.topLeft, b.centre, floorSystem); spanEdge(a.centre, b.topLeft, floorSystem)
+            spanEdge(a.centre, b.topRight, floorSystem); spanEdge(a.topRight, b.centre, floorSystem)
             // Bottom lateral bracing - what closes the section (the 1940 deck had none).
-            edge(a.bottomLeft, b.bottomRight, bottomBracing); edge(a.bottomRight, b.bottomLeft, bottomBracing)
-            // Warren diagonals: one per panel, alternating, the two trusses in step.
-            if (bayIndex % 2 == 0) {
-                edge(a.topLeft, b.bottomLeft, trussWebs); edge(a.topRight, b.bottomRight, trussWebs)
-            } else {
-                edge(a.bottomLeft, b.topLeft, trussWebs); edge(a.bottomRight, b.topRight, trussWebs)
-            }
+            spanEdge(a.bottomLeft, b.bottomRight, bottomBracing); spanEdge(a.bottomRight, b.bottomLeft, bottomBracing)
+            // Warren diagonals (their own MeshSprings): one per panel, alternating, the two
+            // trusses in step.
+            val (left, right) = if (bayIndex % 2 == 0) (a.topLeft to b.bottomLeft) to (a.topRight to b.bottomRight)
+            else (a.bottomLeft to b.topLeft) to (a.bottomRight to b.topRight)
+            bay.leftWebs += diagonalEdges.size; diagonalEdges += Grid.Edge(left.first, left.second); trussWebs += left
+            bay.rightWebs += diagonalEdges.size; diagonalEdges += Grid.Edge(right.first, right.second); trussWebs += right
 
-            roadwayTriangles += Grid.triangles(listOf(listOf(a.topLeft, a.centre, a.topRight), listOf(b.topLeft, b.centre, b.topRight)))
-            trussFaceTriangles += Grid.triangles(listOf(listOf(a.topLeft, b.topLeft), listOf(a.bottomLeft, b.bottomLeft))) +
+            val roadway = Grid.triangles(listOf(listOf(a.topLeft, a.centre, a.topRight), listOf(b.topLeft, b.centre, b.topRight)))
+            val faces = Grid.triangles(listOf(listOf(a.topLeft, b.topLeft), listOf(a.bottomLeft, b.bottomLeft))) +
                 Grid.triangles(listOf(listOf(a.topRight, b.topRight), listOf(a.bottomRight, b.bottomRight)))
+            roadwayTriangles += roadway
+            trussFaceTriangles += faces
+            bay.triangles += roadway + faces
         }
     }
     val roadwaySurface = Surface(roadwayTriangles, name = placement.name("roadway"), uvs = tacomaRoadwayUvs(spans, store, placement))
@@ -314,8 +357,10 @@ fun buildTacomaNarrows1950(
     val flutterModes = TACOMA_1950_TORSION_MODE_FREQUENCIES.withIndex().map { (k, f) ->
         TorsionalFlutter.Mode(DoubleArray(flutterRows.size) { sin((k + 1) * Math.PI * (it + 1) / mainBays) }, f)
     }
+    // Index of this bridge's first strip in the flutter force (non-zero when it's shared).
+    var flutterStripOffset = 0
     val flutterForce = if (!flutter) null else if (shared != null) {
-        shared.flutter.also { it.addSection(flutterStrips, flutterModes, TACOMA_1950_RESIDUAL_TORSION_FREQUENCY) }
+        shared.flutter.also { flutterStripOffset = it.addSection(flutterStrips, flutterModes, TACOMA_1950_RESIDUAL_TORSION_FREQUENCY) }
     } else TorsionalFlutter(
         strips = flutterStrips,
         windVelocity = wind::currentVelocity,
@@ -329,12 +374,38 @@ fun buildTacomaNarrows1950(
     )
 
     val deckStructure = MeshSprings(deckEdges, store, stiffness = deckStiffness, damping = structuralDamping, name = placement.name("deck-structure"))
-    val chords = MeshSprings(chordEdges, store, stiffness = trussChordStiffness, damping = structuralDamping, name = placement.name("truss-chords"))
+    // Strain break thresholds (armed later by TacomaBreakage), so one steel limit fits every member.
+    val chords = MeshSprings(
+        chordEdges, store, stiffness = trussChordStiffness, damping = structuralDamping, breakThresholdsAreStrains = true,
+        name = placement.name("truss-chords"),
+    )
+    val diagonals = MeshSprings(
+        diagonalEdges, store, stiffness = deckStiffness, damping = structuralDamping, breakThresholdsAreStrains = true,
+        name = placement.name("truss-diagonals"),
+    )
+    val breakage = TacomaBreakage(
+        hangers = suspension.hangerMembers, cables = suspension.cableMembers, chords = chords, deck = deckStructure,
+        bays = bayParts.map {
+            TacomaBreakage.Bay(
+                it.span, it.index, it.leftChords.toIntArray(), it.rightChords.toIntArray(), it.deck.toIntArray(), it.triangles,
+                atSupport = it.index == 0 || it.index == spans[it.span].lastIndex - 1,
+                leftWebs = it.leftWebs.toIntArray(), rightWebs = it.rightWebs.toIntArray(),
+            )
+        },
+        flutter = flutterForce,
+        flutterStripOfMainRow = (1 until spans[1].lastIndex).associateWith { flutterStripOffset + it - 1 },
+        wind = wind,
+        hangerUltimateToDead = TACOMA_1950_HANGER_ULTIMATE_TO_DEAD,
+        cableUltimateToDead = TACOMA_1950_CABLE_ULTIMATE_TO_DEAD,
+        webs = diagonals,
+        girderName = "truss",
+    )
 
     if (shared != null) for (id in groups.membersOf(deckGroup) + groups.membersOf(cableGroup)) groups.add(shared.gravityGroup, id)
-    val forces = if (shared != null) listOf(deckStructure, chords) + suspension.cableSprings + suspension.hangerSprings else listOfNotNull(
+    val forces = if (shared != null) listOf(deckStructure, chords, diagonals) + suspension.cableSprings + suspension.hangerSprings else listOfNotNull(
         deckStructure,
         chords,
+        diagonals,
         UniformGravity(deckGroup, Vector3(0.0, -g, 0.0), name = placement.name("gravity")),
         UniformGravity(cableGroup, Vector3(0.0, -g, 0.0), name = placement.name("cable-gravity")),
         wind,
@@ -359,6 +430,7 @@ fun buildTacomaNarrows1950(
         hangerConnections = suspension.hangerConnections,
         trussChords = chordEdges.map { it.a to it.b },
         trussWebs = trussWebs,
+        trussDiagonals = diagonalEdges.map { it.a to it.b },
         floorSystem = floorSystem,
         bottomBracing = bottomBracing,
         wind = wind,
@@ -366,6 +438,19 @@ fun buildTacomaNarrows1950(
         hangerMembers = suspension.hangerMembers,
         cableMembers = suspension.cableMembers,
         chords = chords,
+        diagonals = diagonals,
+        deckStructure = deckStructure,
+        breakage = breakage,
+        collisions = if (!breakable) null else {
+            // A collider only stops particles with a radius - a small contact one.
+            for (id in groups.membersOf(deckGroup) + groups.membersOf(cableGroup)) store.setRadius(id, ScalarExpr.of(TACOMA_CONTACT_RADIUS), 0.0)
+            // The water ~200 ft below the roadway: falling pieces stop there.
+            val water = PlaneCollider(
+                VectorExpr.of(Vector3(0.0, -TACOMA_1950_DECK_HEIGHT_ABOVE_WATER, 0.0) + placement.offset), normal = Vector3(0.0, 1.0, 0.0),
+                name = placement.name("water"),
+            )
+            CollisionSystem(listOf(deckGroup, cableGroup).map { ParticleColliderRule(it, water, restitution = 0.0, staticFriction = 0.5, kineticFriction = 1.0) })
+        },
     )
 }
 

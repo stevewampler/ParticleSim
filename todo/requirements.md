@@ -1086,7 +1086,12 @@ readout to debug a scene without a separate tool.
   is connected, not just at startup.
 - **Global toggles**: scene aids not tied to any particular object —
   the ground grid and axes (§10) — can be switched on/off independent of
-  everything else.
+  everything else. One more global switch, **forces & stresses**, hides
+  every force visualization (all arrow-sampled forces, §10.2) and every
+  colorBy color such as break proximity or member stress (§10.2, with its
+  legend) at once. It's a master gate over the per-object state, not an
+  edit of it: each force's own "show arrows" choice is kept and comes back
+  when the switch is turned on again.
 - **An outliner**: a persistent, always-available list of every group,
   named force, constraint, collider, surface, emitter, and light in the
   scene, regardless of whether anything currently renders it. This is the

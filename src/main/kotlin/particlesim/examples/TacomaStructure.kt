@@ -177,7 +177,8 @@ internal fun tacomaRoadwayUvs(spans: List<List<DeckRow>>, store: ParticleStore, 
 }
 
 /**
- * How close each unbroken cable segment, hanger and girder/truss chord is to its breaking limit,
+ * How close each unbroken cable segment, hanger, girder/truss chord and truss diagonal ([webs],
+ * the 1950 bridge's) is to its breaking limit,
  * `0` unstressed to `1` at breaking. Cables and hangers break at a multiple of their dead-load
  * tension ([cableUltimateToDead], [hangerUltimateToDead]), so each is its stretch over that
  * multiple of its dead-load stretch `T₀/k` (a slack one is 0). Chords: steel strain over the
@@ -191,6 +192,7 @@ internal fun tacomaMemberUtilization(
     cables: List<TacomaBreakage.Member>,
     cableUltimateToDead: Double,
     chords: MeshSprings,
+    webs: MeshSprings? = null,
     isBroken: (Spring) -> Boolean = { false },
 ): Map<Pair<Int, Int>, Double> {
     val result = LinkedHashMap<Pair<Int, Int>, Double>()
@@ -202,10 +204,10 @@ internal fun tacomaMemberUtilization(
             result[m.connection] = maxOf(0.0, stretch) / (factor * m.deadLoadStretch)
         }
     }
-    for (edge in 0 until chords.edgeCount) {
-        if (!chords.isActive(edge)) continue
-        val strain = chords.edgeStrain(store, edge)
-        result[chords.edgeEndpoints(edge)] =
+    for (members in listOfNotNull(chords, webs)) for (edge in 0 until members.edgeCount) {
+        if (!members.isActive(edge)) continue
+        val strain = members.edgeStrain(store, edge)
+        result[members.edgeEndpoints(edge)] =
             if (strain >= 0.0) strain / TacomaBreakage.GIRDER_ULTIMATE_STRAIN else -strain / TacomaBreakage.GIRDER_BUCKLING_STRAIN
     }
     return result
