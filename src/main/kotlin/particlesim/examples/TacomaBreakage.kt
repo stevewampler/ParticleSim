@@ -91,7 +91,10 @@ class TacomaBreakage internal constructor(
         /** Whether this bay touches a support (tower or anchor pier). Its girders can't fail:
          * the model pins the support row's particles rigidly, which concentrates strain in the
          * neighbouring bay far beyond what the real bearings did (they failed there within 2 s
-         * of the twist being seeded - an artifact). */
+         * of the twist being seeded - an artifact). The 1950 model pins only its trusses'
+         * bottom chords there, which removes most of that, but its end bays still peak highest
+         * (~0.6 against ~0.2 mid-span at 2g), so they're exempt too - its trusses fail in the
+         * span, not at the bearings. (Their members can still break individually.) */
         val atSupport: Boolean,
         /** This bay's truss diagonals (in [webs]), per side. */
         val leftWebs: IntArray = IntArray(0),
