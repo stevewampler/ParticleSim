@@ -106,23 +106,9 @@ class TacomaBreakage internal constructor(
      * 1/6.24 ≈ 0.16, a cable at 1/3.47 ≈ 0.29). Girder chords: strain over the steel strain
      * limit for its direction - ultimate in tension, flange buckling in compression.
      */
-    fun utilization(store: ParticleStore): Map<Pair<Int, Int>, Double> {
-        val result = LinkedHashMap<Pair<Int, Int>, Double>()
-        for ((members, factor) in listOf(hangers to HANGER_ULTIMATE_TO_DEAD, cables to CABLE_ULTIMATE_TO_DEAD)) {
-            for (m in members) {
-                if (m.spring in brokenSprings) continue
-                val (a, b) = m.connection
-                val stretch = (store.position(b) - store.position(a)).length() - m.restLength
-                result[m.connection] = maxOf(0.0, stretch) / (factor * m.deadLoadStretch)
-            }
-        }
-        for (edge in 0 until chords.edgeCount) {
-            if (!chords.isActive(edge)) continue
-            val strain = chords.edgeStrain(store, edge)
-            result[chords.edgeEndpoints(edge)] = if (strain >= 0.0) strain / GIRDER_ULTIMATE_STRAIN else -strain / GIRDER_BUCKLING_STRAIN
-        }
-        return result
-    }
+    fun utilization(store: ParticleStore): Map<Pair<Int, Int>, Double> = tacomaMemberUtilization(
+        store, hangers, HANGER_ULTIMATE_TO_DEAD, cables, CABLE_ULTIMATE_TO_DEAD, chords, isBroken = ::isBroken,
+    )
 
     /** Turns the real limits on. */
     fun arm() {

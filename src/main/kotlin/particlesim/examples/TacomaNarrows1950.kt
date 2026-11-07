@@ -75,7 +75,10 @@ import kotlin.math.sin
  * model) are several times stiffer, so the same wind is at a much lower reduced velocity
  * `U/(fB)`.
  *
- * No breaking limits ([TacomaBreakage] is for the 1940 bridge only).
+ * **Stress.** [TacomaNarrows1950Scenario.utilization] measures each cable segment, suspender and
+ * truss chord against a breaking limit, as for the 1940 bridge - the cables' derived from the
+ * 1950 figures ([TACOMA_1950_CABLE_ULTIMATE_TO_DEAD]), the suspenders' and the chords' steel
+ * strain limits the 1940 report's, standing in. Nothing breaks: the limits are only shown.
  */
 data class TacomaNarrows1950Scenario(
     val store: ParticleStore,
@@ -104,9 +107,36 @@ data class TacomaNarrows1950Scenario(
     val wind: Wind,
     /** The self-excited twisting moment on the deck, or null when built with `flutter = false`. */
     val flutter: TorsionalFlutter?,
+    val hangerMembers: List<TacomaBreakage.Member>,
+    val cableMembers: List<TacomaBreakage.Member>,
+    /** The four truss chords' springs (the edges of [trussChords]). */
+    val chords: MeshSprings,
 ) {
     val mainSpan: List<DeckRow> get() = spans[1]
+
+    /**
+     * How close each cable segment, hanger and truss chord is to its breaking limit right now,
+     * `0` unstressed to `1` at breaking - the same measure as the 1940 bridge's
+     * [TacomaBreakage.utilization], with the limits below. Nothing actually breaks.
+     */
+    fun utilization(): Map<Pair<Int, Int>, Double> = tacomaMemberUtilization(
+        store, hangerMembers, TACOMA_1950_HANGER_ULTIMATE_TO_DEAD, cableMembers, TACOMA_1950_CABLE_ULTIMATE_TO_DEAD, chords,
+    )
 }
+
+/**
+ * The 1950 main cables' breaking tension over their dead-load tension. Not published as such, so
+ * derived: each cable is 8,705 No. 6 gauge (0.192 in) wires, 252 in² of steel (Wikipedia), and the
+ * two cables' design load is 36 million lb (WSDOT) - 71,400 psi. Taking the dead load as 6/7 of
+ * the total cable stress, as in the 1940 design (Structure magazine; the 1941 report's 67,700 psi
+ * dead-load stress bears that out), leaves ~61,200 psi from dead load; against wire of the 1940
+ * cables' tested 235,000 psi (an assumption - the 1950 wire's strength isn't given), **3.84x**.
+ */
+const val TACOMA_1950_CABLE_ULTIMATE_TO_DEAD = 235_000.0 / (36_000_000.0 / (2 * 8_705 * Math.PI / 4 * 0.192 * 0.192) * 6.0 / 7.0)
+
+/** The 1950 suspenders' breaking tension over their dead-load tension - no source found, so the
+ * 1940 suspenders' ratio ([TacomaBreakage.HANGER_ULTIMATE_TO_DEAD], 6.24x) stands in. */
+const val TACOMA_1950_HANGER_ULTIMATE_TO_DEAD = TacomaBreakage.HANGER_ULTIMATE_TO_DEAD
 
 /** How much of a truss face is steel rather than air - typical for a stiffening truss. */
 const val TACOMA_1950_TRUSS_SOLIDITY = 0.3
@@ -322,6 +352,9 @@ fun buildTacomaNarrows1950(
         bottomBracing = bottomBracing,
         wind = wind,
         flutter = flutterForce,
+        hangerMembers = suspension.hangerMembers,
+        cableMembers = suspension.cableMembers,
+        chords = chords,
     )
 }
 

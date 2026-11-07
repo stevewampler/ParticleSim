@@ -48,4 +48,14 @@ class TacomaBridgeComponentsTest {
         assertEquals(bridge.scenario.deckSurface.triangles.size - 4, roadway.surface.triangles.size)
         assertEquals(bridge.scenario.deckSurface.uvs, roadway.surface.uvs)
     }
+
+    @Test
+    fun `the 1950 bridge can show its members' stress`() {
+        val bridge = Tacoma1950Bridge(ParticleStore(), Groups(), showStress = true)
+        val frame = bridge.frame(0.0)
+        val rated = bridge.scenario.hangerConnections + bridge.scenario.trussChords
+        assertTrue(rated.all { it in frame.lineColors }, "every suspender and chord should be colored")
+        assertTrue(bridge.scenario.trussWebs.all { it in frame.connections && it !in frame.lineColors }, "webs drawn, unrated")
+        assertTrue(Tacoma1950Bridge(ParticleStore(), Groups()).frame(0.0).lineColors.isEmpty())
+    }
 }

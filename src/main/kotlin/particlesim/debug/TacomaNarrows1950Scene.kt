@@ -14,6 +14,7 @@ import particlesim.physics.Force
 import particlesim.render.CameraFunction
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.ColorRamp
 import particlesim.render.Material
 import particlesim.render.SurfaceRenderer
 import particlesim.render.TextureAssets
@@ -26,11 +27,16 @@ import particlesim.render.TextureAssets
  *
  * The `wind` force's velocity is live-editable, as for 1940; this deck's flutter only sets in
  * above ~13 units/s (~94 mph at full scale), so try e.g. `[16, 0, 0]` to see it.
+ *
+ * With `showStress` (the `tacomaNarrows1950Stress` scene, steady failure wind - the 1940
+ * breakable scene's conditions) the cables, suspenders and truss chords are colored by how close
+ * each is to its breaking limit ([TacomaNarrows1950Scenario.utilization]), green unstressed,
+ * yellow halfway, red at breaking. Nothing breaks.
  */
-fun tacomaNarrows1950Scene(windVelocity: String = TACOMA_GUSTY_WIND): DemoScene {
+fun tacomaNarrows1950Scene(windVelocity: String = TACOMA_GUSTY_WIND, showStress: Boolean = false): DemoScene {
     val store = ParticleStore()
     val groups = Groups()
-    val bridge = Tacoma1950Bridge(store, groups, windVelocity = windVelocity)
+    val bridge = Tacoma1950Bridge(store, groups, windVelocity = windVelocity, showStress = showStress)
     // The same close view along the west half of the main span as the 1940 scene, a little
     // further out for the wider, deeper deck.
     val camera = CameraFunction { _, _ -> CameraPose(position = Vector3(6.5, 3.0, -43.0), lookAt = Vector3(0.0, -0.5, -18.0)) }
@@ -48,6 +54,10 @@ class Tacoma1950Bridge(
     groups: Groups,
     placement: ShapePlacement = ShapePlacement(),
     windVelocity: String = TACOMA_GUSTY_WIND,
+    /** Color the cables, suspenders and truss chords by how close each is to its breaking limit
+     * ([TacomaNarrows1950Scenario.utilization]), as [Tacoma1940Bridge] does for its breakable
+     * members, with the viewer's break-proximity legend. */
+    private val showStress: Boolean = false,
 ) : SceneComponent {
     val scenario: TacomaNarrows1950Scenario = buildTacomaNarrows1950(windVelocity = windVelocity, store = store, groups = groups, placement = placement)
 
@@ -71,7 +81,8 @@ class Tacoma1950Bridge(
     // ones, as they were), heavy truss chords, lighter web members and bracing.
     private val connectionStyles =
         (cableConnections styledAs ConnectionStyles.steel(name("main-cables"), radius = 0.046)) +
-            (scenario.hangerConnections styledAs ConnectionStyles.cable(name("hangers"), radius = 0.01)) +
+            // Thicker with stress colors on, so their color reads.
+            (scenario.hangerConnections styledAs ConnectionStyles.cable(name("hangers"), radius = if (showStress) 0.018 else 0.01)) +
             (scenario.towerLegs.flatMap { it.zipWithNext() } styledAs ConnectionStyles.paintedSteel(name("towers"), BRIDGE_GREEN, radius = 0.2)) +
             (scenario.towerBracing styledAs ConnectionStyles.paintedSteel(name("tower-bracing"), BRIDGE_GREEN, radius = 0.07, joints = false)) +
             (scenario.trussChords styledAs ConnectionStyles.paintedSteel(name("truss-chords"), BRIDGE_GREEN, radius = 0.035, joints = false)) +
@@ -83,13 +94,20 @@ class Tacoma1950Bridge(
     override val ids = (deckIds + nonDeckIds).distinct()
     override val visibleIds = nonDeckIds.toSet()
 
-    override fun frame(t: Double) = ComponentFrame(
-        connections = connections,
-        connectionStyles = connectionStyles,
-        meshes = listOf(roadwayMesh),
-        arrowGroups = tacomaFlutterArrows(scenario.flutter, scenario.store, t),
-        shownByDefaultArrows = setOfNotNull(scenario.flutter?.name),
-    )
+    // Drawn whatever the stress: the towers, truss webs and bracing (no limits on these).
+    private val unratedConnections = towerConnections + scenario.trussWebs + scenario.bottomBracing
+
+    override fun frame(t: Double): ComponentFrame {
+        val stress = if (showStress) scenario.utilization() else emptyMap()
+        return ComponentFrame(
+            connections = if (showStress) unratedConnections + stress.keys else connections,
+            connectionStyles = connectionStyles,
+            lineColors = stress.mapValues { (_, u) -> ColorRamp.greenYellowRed(u) },
+            meshes = listOf(roadwayMesh),
+            arrowGroups = tacomaFlutterArrows(scenario.flutter, scenario.store, t),
+            shownByDefaultArrows = setOfNotNull(scenario.flutter?.name),
+        )
+    }
 
     private companion object {
         /** The bridge's green paint (after photographs). */

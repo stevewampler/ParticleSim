@@ -127,4 +127,16 @@ class TacomaNarrows1950Test {
         assertEquals(0.0, uvs.getValue(row.topLeft).u); assertEquals(1.0, uvs.getValue(row.topRight).u)
         assertEquals(s.store.position(row.centre).z / TACOMA_ROADWAY_TILE_LENGTH, uvs.getValue(row.centre).v, 1e-12)
     }
+
+    @Test
+    fun `each cable, suspender and truss chord's stress is its load over its limit`() {
+        assertEquals(3.84, TACOMA_1950_CABLE_ULTIMATE_TO_DEAD, 0.01)
+        val s = buildTacomaNarrows1950()
+        val u = s.utilization()
+        // As built, every cable and suspender carries exactly its dead load; chords are unstressed.
+        assertEquals(1.0 / TACOMA_1950_HANGER_ULTIMATE_TO_DEAD, u.getValue(s.hangerMembers[10].connection), 1e-9)
+        assertEquals(1.0 / TACOMA_1950_CABLE_ULTIMATE_TO_DEAD, u.getValue(s.cableMembers[30].connection), 1e-9)
+        assertEquals(0.0, u.getValue(s.trussChords[40]), 1e-9)
+        assertEquals(s.hangerMembers.size + s.cableMembers.size + s.trussChords.size, u.size)
+    }
 }

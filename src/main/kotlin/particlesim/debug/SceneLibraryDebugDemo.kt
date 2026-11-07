@@ -52,6 +52,7 @@ fun main(args: Array<String>) {
         "tacomaNarrowsBreakable" to { tacomaNarrowsScene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]", breakable = true) },
         "tacomaNarrows1950" to { tacomaNarrows1950Scene() },
         "tacomaNarrows1950Steady" to { tacomaNarrows1950Scene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]") },
+        "tacomaNarrows1950Stress" to { tacomaNarrows1950Scene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]", showStress = true) },
     )
     val requestedScene = args.getOrNull(0)
     if (requestedScene != null && requestedScene !in factories) {

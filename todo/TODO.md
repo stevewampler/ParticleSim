@@ -5962,6 +5962,18 @@ load. Full `./gradlew test -q` suite green throughout.
       keeps the rest of the roadway's UVs (was dropped before).
       Headless-browser steps/s ~125 for either scene (software GL); the JVM
       alone does 2,100-3,600 steps/s with frames.
+- [x] **1950 stress visualisation, scene `tacomaNarrows1950Stress`** (steady
+      failure wind, as `tacomaNarrowsBreakable`): cables, suspenders and truss
+      chords colored by load over a breaking limit, via the same
+      `tacomaMemberUtilization` the 1940 `TacomaBreakage.utilization` now
+      uses. Cable limit derived (3.84x dead load): 8,705 No. 6 wires = 252 in²
+      per cable, 36 Mlb design load -> 71,400 psi, dead load 6/7 of it (as
+      1940) -> 61,200 psi, vs 1940's 235,000 psi wire (assumed). Suspenders
+      (6.24x) and chord strain limits are 1940's, standing in - no 1950
+      figures found. Nothing breaks. Measured in the failure wind: suspenders
+      peak ~0.23, cables ~0.26; chords ~0.08 in the main-span interior but up
+      to ~0.2-0.6 in the bays at the towers - the rigid end pins clamp the
+      deck in plan (the artifact 1940's breakage excludes those bays for).
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
