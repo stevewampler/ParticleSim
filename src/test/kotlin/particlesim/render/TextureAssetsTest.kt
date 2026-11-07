@@ -36,6 +36,15 @@ class TextureAssetsTest {
     }
 
     @Test
+    fun `the two Tacoma roadways are generated - one 40 ft repeat, wider across for the wider 1950 deck`() {
+        for ((name, width) in listOf(TextureAssets.TACOMA_1940_ROADWAY to 512, TextureAssets.TACOMA_1950_ROADWAY to 1024)) {
+            val image = ImageIO.read(ByteArrayInputStream(assertNotNull(TextureAssets.pngBytes(name))))
+            assertNotNull(image, "$name should decode")
+            assertEquals(width to 512, image.width to image.height)
+        }
+    }
+
+    @Test
     fun `an unknown texture name returns null`() {
         assertNull(TextureAssets.pngBytes("not-a-real-texture"))
     }

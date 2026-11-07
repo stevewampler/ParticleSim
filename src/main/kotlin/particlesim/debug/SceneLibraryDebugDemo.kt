@@ -47,9 +47,11 @@ fun main(args: Array<String>) {
         "trainTrestle" to { TrainTrestleScene() },
         "archBridge" to { ArchBridgeScene() },
         "cableStayedBridge" to { CableStayedBridgeScene() },
-        "tacomaNarrows" to { TacomaNarrowsScene() },
-        "tacomaNarrowsSteady" to { TacomaNarrowsScene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]") },
-        "tacomaNarrowsBreakable" to { TacomaNarrowsScene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]", breakable = true) },
+        "tacomaNarrows" to { tacomaNarrowsScene() },
+        "tacomaNarrowsSteady" to { tacomaNarrowsScene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]") },
+        "tacomaNarrowsBreakable" to { tacomaNarrowsScene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]", breakable = true) },
+        "tacomaNarrows1950" to { tacomaNarrows1950Scene() },
+        "tacomaNarrows1950Steady" to { tacomaNarrows1950Scene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]") },
     )
     val requestedScene = args.getOrNull(0)
     if (requestedScene != null && requestedScene !in factories) {

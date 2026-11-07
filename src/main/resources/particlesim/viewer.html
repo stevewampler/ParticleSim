@@ -692,19 +692,29 @@ const wireframeMeshMaterial = (material) => new THREE.MeshBasicMaterial({
 // THREE.TextureLoader().load() every frame would be pure waste, not a correctness issue.
 const textureCache = new Map(); // url -> THREE.Texture
 const textureLoader = new THREE.TextureLoader();
-function getTexture(url) {
+function getTexture(url, repeats) {
   if (!textureCache.has(url)) {
     const texture = textureLoader.load(url);
+    // Sharp at grazing angles - a long roadway seen from near deck level is mostly that.
+    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
     // A color map (as opposed to e.g. a normal/roughness map) needs its color space declared
     // explicitly since three.js r152 - without this it renders through the wrong gamma (visibly
     // dark/desaturated), not an obvious error, just wrong-looking output.
     texture.colorSpace = THREE.SRGBColorSpace;
     textureCache.set(url, texture);
   }
-  return textureCache.get(url);
+  const texture = textureCache.get(url);
+  // A mesh whose UVs run past [0,1] tiles its texture (a roadway's markings repeat along the
+  // span). Only then: a [0,1]-mapped image (e.g. a flag) would otherwise bleed its opposite edge
+  // into the outermost texels under linear filtering.
+  if (repeats && texture.wrapT !== THREE.RepeatWrapping) {
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.needsUpdate = true;
+  }
+  return texture;
 }
-const texturedMeshMaterial = (url, material) => new THREE.MeshStandardMaterial({
-  map: getTexture(url),
+const texturedMeshMaterial = (url, material, repeats) => new THREE.MeshStandardMaterial({
+  map: getTexture(url, repeats),
   color: new THREE.Color(material.color.r, material.color.g, material.color.b), // untinted (white) by default - see SurfaceRenderer.effectiveMaterial
   side: THREE.DoubleSide, roughness: material.roughness,
   opacity: material.opacity, transparent: material.opacity < 1,
@@ -1016,7 +1026,7 @@ function applyFrame(frame) {
     // §10.2's texture-mapped surfaces: wireframe still wins outright (there's no such thing as
     // a textured wireframe here) - a texture only applies to the solid-shaded case.
     obj.material = wireframe ? wireframeMeshMaterial(meshDecl.material)
-      : meshDecl.textureUrl ? texturedMeshMaterial(meshDecl.textureUrl, meshDecl.material)
+      : meshDecl.textureUrl ? texturedMeshMaterial(meshDecl.textureUrl, meshDecl.material, meshDecl.uvRepeats)
       : solidMeshMaterial(meshDecl.material);
 
     const overlay = meshEdgeOverlays[i];
@@ -1353,11 +1363,13 @@ function decodeFrame(buffer) {
     const textureUrl = readString(); // "" = flat shaded color (§10.2's texture-mapped surfaces)
     const uvCount = view.getInt32(offset, true); offset += 4;
     const uvs = new Map(); // particleId -> {u, v}
+    let uvRepeats = false; // any coordinate outside [0,1] - the texture tiles (e.g. a long roadway)
     for (let j = 0; j < uvCount; j++) {
       const particleId = view.getInt32(offset, true); offset += 4;
       const u = view.getFloat64(offset, true); offset += 8;
       const v = view.getFloat64(offset, true); offset += 8;
       uvs.set(particleId, { u, v });
+      if (u < 0 || u > 1 || v < 0 || v > 1) uvRepeats = true;
     }
     // §10.2's `[stretch]` "Lighting & materials" - always present (SurfaceRenderer.
     // effectiveMaterial resolves a concrete value server-side even when nothing was declared),
@@ -1367,7 +1379,7 @@ function decodeFrame(buffer) {
     const matB = view.getFloat64(offset, true); offset += 8;
     const roughness = view.getFloat64(offset, true); offset += 8;
     const opacity = view.getFloat64(offset, true); offset += 8;
-    meshes[i] = { wireframe, name, triangles, textureUrl, uvs, material: { color: { r: matR, g: matG, b: matB }, roughness, opacity } };
+    meshes[i] = { wireframe, name, triangles, textureUrl, uvs, uvRepeats, material: { color: { r: matR, g: matG, b: matB }, roughness, opacity } };
   }
 
   // Arrow samples grouped by their source force's name (§10.3's per-force visibility toggle -

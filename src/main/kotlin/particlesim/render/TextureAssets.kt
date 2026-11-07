@@ -19,6 +19,8 @@ import javax.imageio.ImageIO
 object TextureAssets {
     const val FLAG_STRIPES = "flag-stripes"
     const val USA_FLAG = "us-flag"
+    const val TACOMA_1940_ROADWAY = "tacoma-1940-roadway"
+    const val TACOMA_1950_ROADWAY = "tacoma-1950-roadway"
 
     private val cache = HashMap<String, ByteArray>()
 
@@ -27,6 +29,8 @@ object TextureAssets {
     fun pngBytes(name: String): ByteArray? = when (name) {
         FLAG_STRIPES -> cache.getOrPut(name) { generateFlagStripes() }
         USA_FLAG -> cache.getOrPut(name) { loadUsaFlag() }
+        TACOMA_1940_ROADWAY -> cache.getOrPut(name) { RoadwayTextures.tacoma1940() }
+        TACOMA_1950_ROADWAY -> cache.getOrPut(name) { RoadwayTextures.tacoma1950() }
         else -> null
     }
 

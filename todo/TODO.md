@@ -5907,7 +5907,7 @@ load. Full `./gradlew test -q` suite green throughout.
       bay separation, the support exclusion, still-air safety and 2 min at 45°
       with nothing broken.
 
-- [x] **Stress visualisation** (breakable scene; `TacomaNarrowsScene(showStress)`):
+- [x] **Stress visualisation** (breakable scene; `Tacoma1940Bridge(showStress)`):
       every unbroken hanger, cable segment and girder chord (chords drawn as
       thin cylinders only in this mode) is colored by
       `TacomaBreakage.utilization` - load over the report's limit, 0 unstressed
@@ -5918,6 +5918,50 @@ load. Full `./gradlew test -q` suite green throughout.
       gained `edgeEndpoints`/`edgeStrain`. Test pins the at-rest values, a
       chord at half each limit, and broken members dropping out. Headless
       steps/s fell ~880 -> ~720 with ~400 more cylinders (CPU-rendered).
+
+## Tacoma Narrows Bridge (1950) and reusable bridge components — not yet phased
+- [x] **`buildTacomaNarrows1950` + scenes `tacomaNarrows1950` (gusty, as
+      `tacomaNarrows`) and `tacomaNarrows1950Steady`** — the replacement
+      bridge, same 1:10 Froude scale. Dimensions double-checked on the web
+      (WSDOT "Tale of three bridges - 1950" and its comparison table,
+      Wikipedia "Tacoma Narrows Bridge (1950)"): same spans and piers,
+      cables 60 ft apart and 20¼ in thick, **33 ft** deep Warren trusses
+      (the user's comparison graphic said 25 ft; both sources say 33),
+      suspenders every 32 ft (87 panels - 87.5 rounds down), sag 1:10
+      (280 ft), towers 307 ft above the roadway, roadway 49 ft 10 in = four
+      9⅝ ft lanes + three 33 in and two 19 in grates. Dead load 1.55x 1940
+      from the cables' 36 vs 28 Mlb design load at the deeper sag. Same
+      five-particle row as 1940 plus **bottom lateral bracing** (closed
+      box section) and Warren diagonals + verticals; truss chords and
+      lattice keep 1940's EA, so the extra stiffness is geometric. Wind on
+      roadway + truss faces at 0.3 solidity. **Same flutter model and
+      coefficients** as 1940 (H-section A2*, conservative for a truss), fed
+      this deck's measured torsion modes (1.25, 2.03, 3.045, 4.04 Hz vs
+      1940's 0.835/0.645/...): at the 1940 failure wind the twist decays
+      (-0.095/s, -0.20/s); onset ~13 units/s (~94 mph full scale) vs 4.7.
+      No breaking limits. `TacomaNarrows1950Test` pins dimensions,
+      still-air equilibrium, the mode frequencies, decay at 5.9 and growth
+      at 18.
+- [x] **Reusable components** (`SceneComponent`, `ComponentScene`):
+      `Tacoma1940Bridge` (extracted from the old `TacomaNarrowsScene`, now
+      `tacomaNarrowsScene()`; behavior unchanged - the existing Tacoma
+      tests pass untouched) and `Tacoma1950Bridge`, each taking a store,
+      groups and `ShapePlacement`. Towers, pretensioned cables/hangers and
+      twist seeding are shared builders (`TacomaStructure.kt`).
+      `TacomaBridgeComponentsTest` builds both side by side in one scene
+      (no name clashes, both textured, each stays put). The side-by-side
+      scene itself is still to do: it'll want one water plane for both and
+      one wind expression driving both bridges.
+- [x] **Roadway textures** — generated (`RoadwayTextures`), one 40 ft
+      repeat each, UVs `u` across / `v` along in repeats: 1940 concrete,
+      white centre line, curbs, sidewalks, slab joints (after the user's
+      1940 WSDOT photo); 1950 four lanes, white edge and dashed lane lines,
+      double yellow centre (as-built two-way traffic), sidewalks, green top
+      chords (after the user's recent photo). Viewer: repeat wrapping for
+      meshes whose UVs leave [0,1], max anisotropy. A torn-away 1940 bay
+      keeps the rest of the roadway's UVs (was dropped before).
+      Headless-browser steps/s ~125 for either scene (software GL); the JVM
+      alone does 2,100-3,600 steps/s with frames.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

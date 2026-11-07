@@ -819,6 +819,18 @@ itself.
 - A scene-library entry is addressed by name and backed by a Kotlin DSL
   function returning a scenario (e.g. the existing `buildFlag`-style
   builders, §4.4) — one catalog, one authoring surface.
+- **Reusable scene components**: a structure that's meant to appear in
+  more than one scene — the user's case is the 1940 and 1950 Tacoma
+  Narrows bridges, each its own scene now and later side by side in one —
+  is packaged with everything a scene would otherwise hand-roll for it,
+  not just its physics (that's §4.5's shape): how it's drawn (meshes,
+  styled connections, arrows, colors) and what it does around each step
+  (arming break limits, reacting to broken members, collisions, an
+  initial disturbance, settling time it needs). Several components share
+  one particle store and group namespace (each placed with its own
+  instance name and offset, §4.5) and are stepped together in one
+  integrator step, their frames merged; a scene made of components is
+  then just the list of them plus a camera and lights.
 
 ## 10. Visualization & Rendering
 
@@ -948,6 +960,12 @@ the way vertex positions do; `BinaryFrame` gates emitting a mesh's
 isn't textured — e.g. §7.3's rope/pole reusing the flag's surface — sends
 none of this over the wire). See `todo/TODO.md`'s own entry for the
 wire-cost-gating regression test and the client-side colorSpace fix.
+UVs may also run past `[0, 1]`, meaning the image **tiles**: a long
+surface (a bridge roadway, its lane markings repeating every 40 ft) maps
+one repeat of road per image rather than stretching one image over the
+whole span. The viewer switches a texture to repeat wrapping only for
+meshes whose UVs leave `[0, 1]`, so a `[0, 1]`-mapped image (the flag)
+keeps clamped edges.
 Related to, but distinct from, the `[stretch]` **Lighting & materials**
 item below: that's about general per-object material properties (color,
 shininess) with no asset involved, this is specifically about mapping an

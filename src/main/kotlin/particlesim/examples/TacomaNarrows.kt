@@ -9,7 +9,6 @@ import particlesim.physics.Constraint
 import particlesim.physics.FixedPosition
 import particlesim.physics.Force
 import particlesim.physics.MeshSprings
-import particlesim.physics.Spring
 import particlesim.physics.TorsionalFlutter
 import particlesim.physics.UniformGravity
 import particlesim.physics.Wind
@@ -287,20 +286,14 @@ fun buildTacomaNarrows(
             bay.triangles += roadway + webs
         }
     }
-    val deckSurface = Surface(deckTriangles, name = placement.name("roadway"))
+    val deckSurface = Surface(deckTriangles, name = placement.name("roadway"), uvs = tacomaRoadwayUvs(spans, store, placement))
     val girderSurface = Surface(girderTriangles, name = placement.name("girders"))
 
     // --- Towers (static) --------------------------------------------------------------------
     val legSegments = 12
-    val towerLegs = listOf(
-        "tower-west-left" to Vector3(-halfWidth, 0.0, zWestTower), "tower-west-right" to Vector3(halfWidth, 0.0, zWestTower),
-        "tower-east-left" to Vector3(-halfWidth, 0.0, zEastTower), "tower-east-right" to Vector3(halfWidth, 0.0, zEastTower),
-    ).map { (name, base) ->
-        buildFlagpole(
-            height = towerDepthBelowDeck + towerHeightAboveDeck, segments = legSegments, store = store, groups = groups,
-            placement = ShapePlacement(offset = placement.offset + Vector3(base.x, -towerDepthBelowDeck, base.z), instanceName = placement.name(name)),
-        )
-    }
+    val towerLegs = buildTacomaTowerLegs(
+        halfWidth, zWestTower, zEastTower, towerDepthBelowDeck, towerHeightAboveDeck, legSegments, store, groups, placement,
+    )
     val legIds = towerLegs.map { it.poleIds }
     fun legIndexAt(y: Double) = Math.round((y + towerDepthBelowDeck) / (towerDepthBelowDeck + towerHeightAboveDeck) * legSegments).toInt()
     val towerBeamConnections = listOf(0 to 1, 2 to 3).flatMap { (l, r) ->
@@ -312,79 +305,21 @@ fun buildTacomaNarrows(
     }
 
     // --- Cables (pretensioned) and hangers ---------------------------------------------------
-    // Weight per unit length each cable carries: its own particles plus half of each deck row
-    // (the two girder-side particles on its side, half the centreline).
+    // Each hanger carries half its deck row: the two girder-side particles on its side and half
+    // the centreline.
     val deckWeightPerHanger = (2.0 * girderMassPerParticle + 0.5 * roadwayMassPerParticle) * g
-    val w = (deckWeightPerHanger + cableMassPerParticle * g) / mainBay
-    val horizontalTension = w * mainSpan * mainSpan / (8.0 * sag)
-    val sideSag = sag * (sideSpan / mainSpan) * (sideSpan / mainSpan)
-    val towerTopY = towerHeightAboveDeck
-    val anchorY = 0.4
-
-    val cableForces = ArrayList<Force>()
-    val cables = ArrayList<List<Int>>()
-    val hangerConnections = ArrayList<Pair<Int, Int>>()
-    val hangerForces = ArrayList<Force>()
-    val cableMembers = ArrayList<TacomaBreakage.Member>()
-    val hangerMembers = ArrayList<TacomaBreakage.Member>()
-    for ((side, x) in listOf("left" to -halfWidth, "right" to halfWidth)) {
-        val westTop = legIds[if (side == "left") 0 else 1].last()
-        val eastTop = legIds[if (side == "left") 2 else 3].last()
-        fun cablePoint(y: Double, z: Double): Int {
-            val id = store.create(position = at(x, y, z), mass = ScalarExpr.of(cableMassPerParticle))
-            groups.add(cableGroup, id)
-            return id
-        }
-        // Parabola between two supports at heights yA, yB over horizontal length `len`, with
-        // mid-chord sag `f`: y(u) = yA + (yB - yA) u - 4 f u (1 - u).
-        fun spanCable(rows: List<DeckRow>, yA: Double, yB: Double, f: Double, startId: Int?, endId: Int?): List<Int> {
-            val zA = store.position(rows.first().topLeft).z
-            val zB = store.position(rows.last().topLeft).z
-            return rows.mapIndexed { r, row ->
-                val z = store.position(row.topLeft).z
-                val u = (z - zA) / (zB - zA)
-                when {
-                    r == 0 && startId != null -> startId
-                    r == rows.lastIndex && endId != null -> endId
-                    else -> cablePoint(yA + (yB - yA) * u - 4.0 * f * u * (1.0 - u), z - placement.offset.z)
-                }
-            }
-        }
-        val westSide = spanCable(spans[0], anchorY, towerTopY, sideSag, null, westTop)
-        val main = spanCable(spans[1], towerTopY, towerTopY, sag, westTop, eastTop)
-        val eastSide = spanCable(spans[2], towerTopY, anchorY, sideSag, eastTop, null)
-        groups.add(cableAnchorGroup, westSide.first())
-        groups.add(cableAnchorGroup, eastSide.last())
-        val cable = westSide + main.drop(1) + eastSide.drop(1)
-        cables += cable
-
-        // Segment tension = H / cos(slope) = H * length / horizontal length; rest = length - T/k.
-        val springs = cable.zipWithNext().map { (a, b) ->
-            val d = store.position(b) - store.position(a)
-            val length = d.length()
-            val tension = horizontalTension * length / kotlin.math.abs(d.z)
-            // Unnamed: ~400 individually named cable/hanger springs would flood the viewer's
-            // outliner and every frame's registry (they were most of a 180 KB frame).
-            Spring(a, b, restLength = length - tension / cableStiffness, stiffness = cableStiffness, compressionStiffness = 0.0)
-                .also { cableMembers += TacomaBreakage.Member(it, a to b, tension / cableStiffness, length - tension / cableStiffness) }
-        }
-        cableForces += springs
-
-        // Hangers: every interior row of every span, cable point straight down to the girder top.
-        for ((spanIndex, span) in spans.withIndex()) {
-            val cableIds = listOf(westSide, main, eastSide)[spanIndex]
-            for (r in 1 until span.lastIndex) {
-                val deckId = if (side == "left") span[r].topLeft else span[r].topRight
-                val cableId = cableIds[r]
-                val length = (store.position(cableId) - store.position(deckId)).length()
-                hangerForces += Spring(
-                    cableId, deckId, restLength = length - deckWeightPerHanger / hangerStiffness, stiffness = hangerStiffness,
-                    compressionStiffness = 0.0,
-                ).also { hangerMembers += TacomaBreakage.Member(it, cableId to deckId, deckWeightPerHanger / hangerStiffness, length - deckWeightPerHanger / hangerStiffness) }
-                hangerConnections += cableId to deckId
-            }
-        }
-    }
+    val suspension = hangTacomaCables(
+        spans, towerTops = legIds.map { it.last() }, halfWidth = halfWidth, mainSpan = mainSpan, sideSpan = sideSpan,
+        sag = sag, towerTopY = towerHeightAboveDeck, anchorY = 0.4, deckWeightPerHanger = deckWeightPerHanger,
+        cableMassPerParticle = cableMassPerParticle, cableStiffness = cableStiffness, hangerStiffness = hangerStiffness, g = g,
+        cableGroup = cableGroup, cableAnchorGroup = cableAnchorGroup, store = store, groups = groups, placement = placement,
+    )
+    val cables = suspension.cables
+    val hangerConnections = suspension.hangerConnections
+    val cableForces = suspension.cableSprings
+    val hangerForces = suspension.hangerSprings
+    val cableMembers = suspension.cableMembers
+    val hangerMembers = suspension.hangerMembers
 
     val wind = Wind(deckTriangles + girderTriangles, ExpressionParser.parseVector(windVelocity), density = windDensity, name = placement.name("wind"))
 
@@ -504,9 +439,13 @@ fun TacomaNarrowsScenario.seedOneNodeTwist(rate: Double) = seedTwist(halfWaves =
 
 /** Starts the main span twisting in the shape `sin(halfWaves·πz/L)` at peak rate [rate] rad/s,
  * about each row's centreline: 1 = the whole span together, 2 = the one-node mode. */
-fun TacomaNarrowsScenario.seedTwist(halfWaves: Int, rate: Double) {
-    for ((r, row) in mainSpan.withIndex()) {
-        val k = rate * sin(halfWaves * Math.PI * r / mainSpan.lastIndex)
+fun TacomaNarrowsScenario.seedTwist(halfWaves: Int, rate: Double) = seedTwist(mainSpan, store, halfWaves, rate)
+
+/** Adds a twisting velocity in the shape `sin(halfWaves·πz/L)`, peak [rate] rad/s, to a span's
+ * [rows], each about its own centreline. */
+internal fun seedTwist(rows: List<DeckRow>, store: ParticleStore, halfWaves: Int, rate: Double) {
+    for ((r, row) in rows.withIndex()) {
+        val k = rate * sin(halfWaves * Math.PI * r / rows.lastIndex)
         val c = store.position(row.centre)
         for (id in row.all) {
             val p = store.position(id) - c
