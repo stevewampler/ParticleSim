@@ -6029,6 +6029,64 @@ load. Full `./gradlew test -q` suite green throughout.
       legend), as a master gate - each force's own "show arrows" is untouched
       and comes back when it's switched on again.
 
+## Starling murmuration (§5.6/§9.6/§10.2, new requirement) — not yet phased
+- [x] **`Flocking` force** (`particlesim.physics`), with these terms:
+      - topological neighbours (k nearest, 7 by default, after Ballerini
+        et al. 2008);
+      - separation, alignment and cohesion;
+      - relaxation to cruise speed;
+      - roost attraction, horizontal and to the display altitude, after
+        Hildenbrandt, Carere & Hemelrijk 2010;
+      - flight from a predator group;
+      - a capped total acceleration.
+
+      All weights are `EditableFields`. Strided across chunks, each chunk
+      building its own grid; bit-identical for 1 or 4 chunks and with a
+      thread pool (tested). Each term has its own component test.
+- [x] **`Pursuit` force**: a predator chases the nearest target at
+      `chaseSpeed` with a response time, capped. It hunts in bouts (rest
+      first, then hunt); while resting it heads for an optional rest point
+      at half speed, else coasts. Tested.
+- [x] **`SpatialGrid.nearest`**: an exact k-nearest search that expands
+      ring by ring, with id tie-breaks. Tested against brute force at three
+      cell sizes.
+- [x] **`buildMurmuration` + `murmuration` scene**:
+      - 1500 starlings (80 g, 10 m/s) 60 m over a roost.
+      - They start 40 m off the roost, flying across it. Starting at the
+        roost, they only swung back and forth through it.
+      - A peregrine (0.8 kg, 20 m/s chase) waits 50 m above. It rests 12 s,
+        then hunts for 8 s.
+      - Tuned with a diagnostic run:
+        - at `separationDistance` 1 m the flock packed into a ~7 m ball, so
+          it is now 2 m, giving nearest neighbours about 1.8 m apart;
+        - `altitudeStrength` 0.15 flattens the flock;
+        - the falcon's passes stretch and split it, and it re-forms during
+          rests.
+
+      Scene details:
+      - the camera stands at head height 130 m from the roost, looking up
+        at the flock;
+      - a dark field for scale;
+      - `MURMURATION_DT` = 1/60 s, exactly one step per viewer frame.
+
+      A step takes about 7 ms. In the headless browser it ran about 17
+      steps/s, limited by drawing 1,500 dot meshes in software; not checked
+      in a GPU browser yet.
+
+      Scenario tests: cohesion, polarization, speed, spacing and staying
+      over the roost; the falcon scatters the flock and it re-forms; the
+      same seed repeats exactly.
+- [x] **Viewer: scene sky color and solid particle colors** (§10.2):
+      `SceneFrame.skyColor` and `solidParticleColors`, appended to the end
+      of the binary frame (`u8 hasSky [f64 r,g,b] u8 solid`). The viewer
+      sets `scene.background` (falling back to `#111`), and `styleDot` draws
+      solid custom colors opaque instead of additive. Round-trip tested.
+- [ ] Possible next steps:
+      - instanced dot rendering, for flocks of 10k+;
+      - banking turns and a limited field of view, both in Hemelrijk's
+        model;
+      - a gradient dusk sky.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

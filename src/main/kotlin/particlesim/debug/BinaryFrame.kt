@@ -165,6 +165,10 @@ import kotlin.math.roundToInt
  * i32  shownByDefaultArrowCount; shownByDefaultArrowCount * { i32 nameLen, nameLen UTF-8 bytes }
  *                (forces whose "show arrows" toggle starts checked when this scene loads - the
  *                arrow counterpart of hiddenByDefaultGroups; arrows otherwise start hidden)
+ * u8   hasSky; if hasSky: f64 r, g, b
+ *                (the background color the scene asks for; absent, the viewer keeps its own)
+ * u8   solidParticleColors
+ *                (1: the per-particle colors above draw as opaque dots, not additive glow)
  * ```
  *
  * The event section is §9.1's discrete-event channel ([SimEvent]) — everything above it in this
@@ -337,6 +341,8 @@ object BinaryFrame {
         hiddenByDefaultGroups: Set<String> = emptySet(),
         connectionStyles: Map<Pair<Int, Int>, ConnectionStyle> = emptyMap(),
         shownByDefaultArrows: Set<String> = emptySet(),
+        skyColor: Color? = null,
+        solidParticleColors: Boolean = false,
     ): ByteBuffer {
         val coloredArrowGroups = arrowGroups.withIndex().filter { (_, g) -> g.samples.any { it.color != null } }
         val styleTable = connectionStyles.values.distinct()
@@ -374,7 +380,8 @@ object BinaryFrame {
             LIGHT_HEADER_SIZE + lights.sumOf { LIGHT_ENTRY_SIZE + stringSize(it.name ?: "") } +
             nameListSize(hiddenByDefaultGroups) +
             4 + coloredArrowGroups.sumOf { 4 + it.value.samples.size * 3 } +
-            nameListSize(shownByDefaultArrows)
+            nameListSize(shownByDefaultArrows) +
+            1 + (if (skyColor != null) 24 else 0) + 1
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
         buffer.putDouble(t)
@@ -567,6 +574,9 @@ object BinaryFrame {
             }
         }
         putNameList(buffer, shownByDefaultArrows)
+        buffer.put(if (skyColor != null) 1 else 0)
+        if (skyColor != null) { buffer.putDouble(skyColor.r); buffer.putDouble(skyColor.g); buffer.putDouble(skyColor.b) }
+        buffer.put(if (solidParticleColors) 1 else 0)
 
         buffer.flip()
         return buffer
@@ -717,9 +727,12 @@ object BinaryFrame {
             group.copy(samples = group.samples.mapIndexed { j, sample -> sample.copy(color = colors[j]) })
         }
         val shownByDefaultArrows = getNameList(buf).toSet()
+        val skyColor = if (buf.get().toInt() != 0) Color(buf.double, buf.double, buf.double) else null
+        val solidParticleColors = buf.get().toInt() != 0
         return DecodedFrame(
             t, step, particles, connections, camera, spheres, particleColors, meshes, coloredArrowGroups, visibleIds, registry,
             colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
+            skyColor, solidParticleColors,
         )
     }
 
@@ -1089,4 +1102,6 @@ data class DecodedFrame(
     /** Indexed by [DecodedConnection.styleIndex]. */
     val connectionStyles: List<ConnectionStyle> = emptyList(),
     val shownByDefaultArrows: Set<String> = emptySet(),
+    val skyColor: Color? = null,
+    val solidParticleColors: Boolean = false,
 )

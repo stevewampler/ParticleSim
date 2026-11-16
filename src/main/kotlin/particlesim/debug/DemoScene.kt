@@ -54,6 +54,12 @@ data class SceneFrame(
      * waiting for their "show arrows" box to be checked - a default only, like
      * [hiddenByDefaultGroups]. */
     val shownByDefaultArrows: Set<String> = emptySet(),
+    /** The sky the viewer draws behind everything (§10.2) - null keeps the viewer's own dark
+     * default. E.g. [MurmurationScene]'s dusk. */
+    val skyColor: Color? = null,
+    /** Draw [particleColors] as plain opaque dots instead of the additive glow fire and sparks
+     * use - for something solid seen against a bright sky, like [MurmurationScene]'s starlings. */
+    val solidParticleColors: Boolean = false,
     val registry: SceneRegistry = SceneRegistry.build(),
     val colliders: List<Collider> = emptyList(),
     val events: List<SimEvent> = emptyList(),

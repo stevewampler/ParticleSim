@@ -893,4 +893,18 @@ class BinaryFrameTest {
         BinaryFrame.decode(buffer)
         assertEquals(positionBefore, buffer.position(), "decode must not mutate the buffer a caller still needs to send")
     }
+
+    @Test
+    fun `a scene's sky color and solid particle colors round-trip, and default to none`() {
+        val store = ParticleStore()
+        val plain = BinaryFrame.decode(BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList()))
+        assertEquals(null, plain.skyColor)
+        assertEquals(false, plain.solidParticleColors)
+        val sky = Color(0.58, 0.28, 0.2)
+        val dusk = BinaryFrame.decode(
+            BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), skyColor = sky, solidParticleColors = true),
+        )
+        assertEquals(sky, dusk.skyColor)
+        assertEquals(true, dusk.solidParticleColors)
+    }
 }

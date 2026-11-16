@@ -476,10 +476,17 @@ scene.add(dots);
 // visually unchanged. Called every frame for every visible dot, not just newly-created ones -
 // the pool is index-keyed (dots.children[i] is a different particle each frame), so a slot
 // last styled for a fire particle must be explicitly reset when it's reused for a plain one.
-function styleDot(dot, customColor, dragged) {
+function styleDot(dot, customColor, dragged, solid = false) {
   const mat = dot.material;
   if (dragged) {
     mat.color.setHex(DRAGGED_DOT_COLOR);
+    mat.blending = THREE.NormalBlending;
+    mat.transparent = false;
+    mat.depthWrite = true;
+    mat.opacity = 1;
+  } else if (customColor && solid) {
+    // A scene's solid particle colors (e.g. dark birds against a sky): opaque, no glow.
+    mat.color.setRGB(customColor.r, customColor.g, customColor.b);
     mat.blending = THREE.NormalBlending;
     mat.transparent = false;
     mat.depthWrite = true;
@@ -849,6 +856,9 @@ function buildMeshGeometry(meshDecl, byId) {
 }
 
 function applyFrame(frame) {
+  // The scene's sky, or the viewer's own dark background.
+  if (frame.skyColor) scene.background.setRGB(frame.skyColor.r, frame.skyColor.g, frame.skyColor.b);
+  else scene.background.setHex(0x111111);
   latestStep = frame.step;
 
   // First frame ever received: pick the starting cameraMode from which scene is actually active,
@@ -925,7 +935,7 @@ function applyFrame(frame) {
     const dot = dots.children[i];
     dot.position.set(p.x, p.y, p.z);
     dot.userData.particleId = p.id;
-    styleDot(dot, particleColorMap.get(p.id), p.id === draggedParticleId);
+    styleDot(dot, particleColorMap.get(p.id), p.id === draggedParticleId, frame.solidParticleColors);
     // A demo's own explicit sphereRadii entry (a cosmetic render-size declaration, §10.2) wins
     // when present - e.g. TrampolineDebugDemo's rim anchors, which have no physics radius of
     // their own at all and would otherwise render at the plain default size. Otherwise the dot
@@ -1530,9 +1540,19 @@ function decodeFrame(buffer) {
   // Forces whose "show arrows" starts checked for this scene - seeded once per scene load.
   const shownByDefaultArrows = readNameList();
 
+  // The scene's sky color (or null for the viewer's own), and whether its particle colors are
+  // solid dots rather than glow.
+  let skyColor = null;
+  if (view.getUint8(offset++) !== 0) {
+    skyColor = { r: view.getFloat64(offset, true), g: view.getFloat64(offset + 8, true), b: view.getFloat64(offset + 16, true) };
+    offset += 24;
+  }
+  const solidParticleColors = view.getUint8(offset++) !== 0;
+
   return {
     t, step, particles, connections, camera: cam, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
     colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
+    skyColor, solidParticleColors,
   };
 }
 

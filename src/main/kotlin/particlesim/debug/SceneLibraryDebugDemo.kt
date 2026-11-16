@@ -55,6 +55,7 @@ fun main(args: Array<String>) {
         "tacomaNarrows1950Stress" to { tacomaNarrows1950Scene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]", showStress = true) },
         "tacomaNarrows1950Breakable" to { tacomaNarrows1950Scene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]", breakable = true) },
         "tacomaNarrowsComparison" to { tacomaComparisonScene() },
+        "murmuration" to { MurmurationScene() },
     )
     val requestedScene = args.getOrNull(0)
     if (requestedScene != null && requestedScene !in factories) {
@@ -111,6 +112,8 @@ fun main(args: Array<String>) {
                 hiddenByDefaultGroups = frame.hiddenByDefaultGroups,
                 connectionStyles = frame.connectionStyles,
                 shownByDefaultArrows = frame.shownByDefaultArrows,
+                skyColor = frame.skyColor,
+                solidParticleColors = frame.solidParticleColors,
             )
         } catch (e: Exception) {
             System.err.println("scene loop error on '${library.activeName}': $e")

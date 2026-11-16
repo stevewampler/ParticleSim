@@ -1,6 +1,8 @@
 package particlesim.collision
 
 import particlesim.core.Vector3
+import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.floor
 
 /**
@@ -69,5 +71,55 @@ class SpatialGrid(private val cellSize: Double) {
             buckets[Cell(center.x + dx, center.y + dy, center.z + dz)]?.let { result.addAll(it) }
         }
         return result
+    }
+
+    /**
+     * The (up to) [k] ids nearest [position] within [maxDistance] of it, nearest first, leaving
+     * out [exclude] - a topological neighbourhood (a fixed *count* of neighbours, however far
+     * apart they are, as starlings use: see [particlesim.physics.Flocking]) rather than
+     * [neighbors]' fixed radius. [positionOf] gives each inserted id's position (the grid keeps
+     * only ids).
+     *
+     * Exact: it searches outward ring by ring (the cells at Chebyshev distance 0, 1, 2, ... from
+     * [position]'s cell) and stops once it holds [k] candidates and the k-th is no farther than
+     * anything an unsearched ring could hold - every point beyond ring `r` is at least
+     * `r * cellSize` away, wherever in its cell [position] sits. So [cellSize] only affects speed:
+     * about the typical neighbour spacing is best. Ties in distance go to the lower id, so the
+     * result doesn't depend on insertion order (§11).
+     */
+    fun nearest(position: Vector3, k: Int, maxDistance: Double, exclude: Int, positionOf: (Int) -> Vector3): List<Int> {
+        if (k <= 0) return emptyList()
+        val center = cellOf(position)
+        val maxSq = maxDistance * maxDistance
+        val ids = IntArray(k)
+        val distSq = DoubleArray(k)
+        var count = 0
+        val maxRing = ceil(maxDistance / cellSize).toLong() + 1
+        var ring = 0L
+        while (ring <= maxRing) {
+            for (dx in -ring..ring) for (dy in -ring..ring) for (dz in -ring..ring) {
+                if (maxOf(abs(dx), abs(dy), abs(dz)) != ring) continue
+                val bucket = buckets[Cell(center.x + dx, center.y + dy, center.z + dz)] ?: continue
+                for (id in bucket) {
+                    if (id == exclude) continue
+                    val d = (positionOf(id) - position).lengthSquared()
+                    if (d > maxSq) continue
+                    if (count == k && (d > distSq[k - 1] || (d == distSq[k - 1] && id > ids[k - 1]))) continue
+                    // Insertion into the sorted (distance, id) list, dropping the farthest if full.
+                    var i = if (count < k) count++ else k - 1
+                    while (i > 0 && (distSq[i - 1] > d || (distSq[i - 1] == d && ids[i - 1] > id))) {
+                        distSq[i] = distSq[i - 1]
+                        ids[i] = ids[i - 1]
+                        i--
+                    }
+                    distSq[i] = d
+                    ids[i] = id
+                }
+            }
+            val reach = ring * cellSize
+            if (count == k && distSq[k - 1] <= reach * reach) break
+            ring++
+        }
+        return ids.take(count)
     }
 }

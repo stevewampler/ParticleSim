@@ -422,6 +422,47 @@ actually build (evaluate the kernel once against a real interior particle of
 the initial lattice) rather than guess a textbook figure — see the
 `buildFluid` worked example.
 
+### 5.6 Flocking
+
+A named group can be given **self-propelled flocking** behaviour: each
+member steers itself, like a bird in a starling murmuration. The steering
+terms are:
+
+- **Topological neighbours.** Each bird responds to a fixed *number* of
+  nearest flockmates (`neighbours`, 7 by default), however far apart they
+  are, rather than to everything within a radius. Ballerini et al. (PNAS
+  2008) measured about 6-7 for real starlings. This is what keeps a
+  stretched, thinning flock together. `perceptionRadius` only caps how far
+  a bird can see at all.
+- **Separation, alignment and cohesion** over those neighbours, after
+  Reynolds' boids.
+- **Cruise speed.** Each bird relaxes back toward a preferred speed.
+- **Roost attraction.** Birds are pulled back horizontally toward a roost
+  centre once outside a radius, and vertically toward its altitude, so the
+  flock stays over its site. This follows Hildenbrandt, Carere & Hemelrijk
+  (2010).
+- **Predator evasion.** Birds flee any member of an optional predator group
+  within a flee radius.
+
+Every term is an acceleration, and the total is capped. No gravity applies,
+since lift balances it. Every weight is live-editable (§10.4).
+
+A companion **pursuit** force makes a predator group chase the nearest
+member of a target group. It hunts in bouts: it rests, optionally waiting at
+a rest point, then chases. That gives the flock time to re-form.
+
+The k-nearest search is exact and is added to the same spatial grid that
+collision broad-phase and SPH use (§9.3's "shared spatial partitioning").
+It searches outward ring by ring and breaks distance ties by id (§11).
+Each bird reads only the state at the start of the step, so the work
+strides across chunks (§9.3), and results are bit-identical for any chunk
+count or thread count.
+
+Worked example: `buildMurmuration` and the `murmuration` scene (§9.6).
+Starlings fly at 10 m/s with about 1-2 m between neighbours, and a falcon
+makes passes. The scene's dusk sky and solid dark dots use §10.2's scene
+sky color and solid particle colors.
+
 ## 6. Constraints
 
 A constraint pins some aspect of a particle's state, overriding what the
@@ -1029,6 +1070,12 @@ external image onto a mesh's surface.
     somewhat). Same "map a derived attribute to
     color/thickness" idea as particle color-by-attribute, just applied to
     a connection instead of a single particle.
+- **Scene sky color and solid particle colors**: a scene may set the
+  background color the viewer draws (`SceneFrame.skyColor`, null = the
+  viewer's own dark default). It may also ask for its per-particle colors to
+  be drawn as plain opaque dots (`solidParticleColors`) instead of the
+  additive glow suited to fire and sparks. Both were added for the
+  `murmuration` scene's dark starlings against a dusk sky (§5.6).
 - N-body gravity and custom forces (§5.3) are lower priority / `[stretch]`
   — N-body isn't localized to a renderable pair (force exists between
   every pair), and custom forces don't have a defined shape yet.

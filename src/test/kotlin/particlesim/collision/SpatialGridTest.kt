@@ -76,4 +76,38 @@ class SpatialGridTest {
             // expected
         }
     }
+
+    @Test
+    fun `nearest matches a brute-force search, whatever the cell size`() {
+        val random = kotlin.random.Random(7)
+        val points = (0 until 400).associateWith { Vector3(random.nextDouble(-20.0, 20.0), random.nextDouble(-5.0, 5.0), random.nextDouble(-20.0, 20.0)) }
+        for (cellSize in listOf(0.5, 2.0, 9.0)) {
+            val grid = SpatialGrid(cellSize)
+            for ((id, p) in points) grid.insert(id, p)
+            for (query in listOf(0, 17, 211, 399)) {
+                val at = points.getValue(query)
+                for ((k, maxDistance) in listOf(1 to 100.0, 7 to 100.0, 20 to 4.0)) {
+                    val expected = points.filterKeys { it != query }.map { (id, p) -> id to (p - at).length() }
+                        .filter { it.second <= maxDistance }.sortedWith(compareBy({ it.second }, { it.first })).take(k).map { it.first }
+                    assertEquals(expected, grid.nearest(at, k, maxDistance, exclude = query) { points.getValue(it) }, "cell $cellSize, query $query, k $k")
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `nearest breaks distance ties by id and leaves out the excluded id`() {
+        val grid = SpatialGrid(cellSize = 1.0)
+        val points = mapOf(5 to Vector3(1.0, 0.0, 0.0), 3 to Vector3(-1.0, 0.0, 0.0), 4 to Vector3(0.0, 1.0, 0.0), 9 to Vector3.ZERO)
+        for ((id, p) in points) grid.insert(id, p)
+        assertEquals(listOf(3, 4), grid.nearest(Vector3.ZERO, 2, 10.0, exclude = 9) { points.getValue(it) })
+    }
+
+    @Test
+    fun `nearest returns fewer than k when fewer lie within reach`() {
+        val grid = SpatialGrid(cellSize = 1.0)
+        val points = mapOf(1 to Vector3(0.5, 0.0, 0.0), 2 to Vector3(30.0, 0.0, 0.0))
+        for ((id, p) in points) grid.insert(id, p)
+        assertEquals(listOf(1), grid.nearest(Vector3.ZERO, 5, 10.0, exclude = -1) { points.getValue(it) })
+    }
 }
