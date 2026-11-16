@@ -42,7 +42,7 @@ class MurmurationTest {
         assertTrue(run.spread(0.95) < 25.0, "95% of birds within ${run.spread(0.95)} m of the centroid")
         val speeds = s.birdIds.map { s.store.velocity(it).length() }
         assertEquals(10.0, speeds.average(), 0.5)
-        // Nearest neighbours a metre or two apart - Ballerini et al.'s starlings were ~0.7-1.5 m.
+        // Nearest neighbours a metre or two apart, as the scenario's spacing is tuned for.
         val ps = run.positions
         val nn = ps.take(100).map { p -> ps.filter { it !== p }.minOf { (it - p).length() } }.average()
         assertTrue(nn in 1.0..2.5, "mean nearest-neighbour distance $nn")

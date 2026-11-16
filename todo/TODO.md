@@ -6083,6 +6083,11 @@ load. Full `./gradlew test -q` suite green throughout.
       solid custom colors opaque instead of additive. Round-trip tested.
 - [ ] Possible next steps:
       - instanced dot rendering, for flocks of 10k+;
+      - `SpatialGrid.nearest` scans each whole (2r+1)³ cube and skips the
+        interior, rather than visiting only the shell. A lone straggler can
+        cost about 90k cell checks (perception 25 m, cells 2 m). That's
+        within budget today (107-170 steps/s with the falcon); visit only
+        the shell if flocks grow;
       - banking turns and a limited field of view, both in Hemelrijk's
         model;
       - a gradient dusk sky.

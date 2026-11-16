@@ -13,15 +13,18 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * A pre-roost starling murmuration (§5.2's [Flocking] worked example): [birdCount] starlings
+ * A pre-roost starling murmuration (§5.6's [Flocking] worked example): [birdCount] starlings
  * circling over their roost, with an optional peregrine falcon chasing them.
  *
  * Real units - metres, seconds, kilograms:
  * - A starling weighs about 75-90 g ([STARLING_MASS]).
  * - Cruise speed 10 m/s, as in Hildenbrandt, Carere & Hemelrijk's starling model (2010).
  * - 7 topological neighbours, after Ballerini et al. (PNAS 2008), who measured about 6-7.
- * - Birds keep about a metre apart (`separationDistance`): Ballerini et al.'s flocks had nearest
- *   neighbours roughly a metre away.
+ * - Nearest neighbours end up about 1.8 m apart (`separationDistance` 2 m). That's a modelling
+ *   choice, not a measurement: Ballerini et al. ("Empirical investigation of starling flocks",
+ *   Animal Behaviour 76(1), 2008) report birds keeping a minimum distance comparable to their
+ *   wingspan, but at that spacing 1500 birds pack into a ball ~7 m across; looser spacing lets a
+ *   flock this small spread into a murmuration's shape.
  * - The falcon chases at twice the starlings' cruise speed - a peregrine's level pursuit is
  *   faster than a starling's, though nothing like its 300+ km/h stoop.
  *

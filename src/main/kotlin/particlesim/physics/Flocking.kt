@@ -7,7 +7,7 @@ import particlesim.core.Vector3
 import kotlin.math.sqrt
 
 /**
- * Self-propelled flocking (§5.2) - the steering a bird in a starling murmuration applies to
+ * Self-propelled flocking (§5.6) - the steering a bird in a starling murmuration applies to
  * itself, after Reynolds' boids (1987) as refined for starlings by field measurement and
  * modelling:
  *
@@ -191,7 +191,7 @@ class Flocking(
 }
 
 /**
- * A predator's chase (§5.2): each particle in [group] steers toward the nearest particle of
+ * A predator's chase (§5.6): each particle in [group] steers toward the nearest particle of
  * [targetGroup], wanting to fly at [chaseSpeed] straight at it and closing the gap between that
  * and its current velocity over [responseTime] - so it overshoots and has to turn back, as a
  * real falcon's stoop through a flock does. The acceleration is capped at [maxAcceleration].
