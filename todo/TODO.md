@@ -6081,6 +6081,11 @@ load. Full `./gradlew test -q` suite green throughout.
       of the binary frame (`u8 hasSky [f64 r,g,b] u8 solid`). The viewer
       sets `scene.background` (falling back to `#111`), and `styleDot` draws
       solid custom colors opaque instead of additive. Round-trip tested.
+- [x] **Viewer: unpickable meshes** (§10.2): `SurfaceRenderer.pickable`
+      (default true), sent as a `u8` after each mesh's wireframe flag. The
+      viewer's `solidPickTargets()` leaves unpickable meshes out of every
+      mouse raycast. The murmuration ground uses it. Round-trip and scene
+      tested.
 - [ ] Possible next steps:
       - instanced dot rendering, for flocks of 10k+;
       - `SpatialGrid.nearest` scans each whole (2r+1)³ cube and skips the

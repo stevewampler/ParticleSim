@@ -1043,6 +1043,7 @@ function applyFrame(frame) {
     obj.geometry = built.geometry;
     obj.userData.triangleVertexIds = built.triangleVertexIds;
     obj.userData.surfaceName = meshDecl.name; // "" when unnamed - right-click resolves this to a panel
+    obj.userData.pickable = meshDecl.pickable;
     const wireframe = surfaceWireframeOverride.has(meshDecl.name) ? surfaceWireframeOverride.get(meshDecl.name) : meshDecl.wireframe;
     // §10.2's texture-mapped surfaces: wireframe still wins outright (there's no such thing as
     // a textured wireframe here) - a texture only applies to the solid-shaded case.
@@ -1372,6 +1373,7 @@ function decodeFrame(buffer) {
   const meshes = new Array(meshCount);
   for (let i = 0; i < meshCount; i++) {
     const wireframe = view.getUint8(offset) !== 0; offset += 1;
+    const pickable = view.getUint8(offset) !== 0; offset += 1; // false = mouse picking ignores it
     const name = readString(); // "" when the mesh's Surface is unnamed - never matches an outliner entry
     const triangleCount = view.getInt32(offset, true); offset += 4;
     const triangles = new Array(triangleCount);
@@ -1400,7 +1402,7 @@ function decodeFrame(buffer) {
     const matB = view.getFloat64(offset, true); offset += 8;
     const roughness = view.getFloat64(offset, true); offset += 8;
     const opacity = view.getFloat64(offset, true); offset += 8;
-    meshes[i] = { wireframe, name, triangles, textureUrl, uvs, uvRepeats, material: { color: { r: matR, g: matG, b: matB }, roughness, opacity } };
+    meshes[i] = { wireframe, pickable, name, triangles, textureUrl, uvs, uvRepeats, material: { color: { r: matR, g: matG, b: matB }, roughness, opacity } };
   }
 
   // Arrow samples grouped by their source force's name (§10.3's per-force visibility toggle -
@@ -3009,6 +3011,12 @@ connect();
 // low-frequency channel from the binary per-frame stream) — see DragMessage's own doc comment.
 
 const raycaster = new THREE.Raycaster();
+
+// Everything the mouse can grab: dots, styled connections, and every mesh not declared
+// unpickable (SurfaceRenderer.pickable - scenery like a ground plane, which clicks pass through).
+function solidPickTargets() {
+  return [...dots.children, ...meshObjects.filter((m) => m.userData.pickable !== false), ...connectionStyleGroup.children];
+}
 const pointerNdc = new THREE.Vector2();
 const dragPlane = new THREE.Plane();
 const dragPlaneHit = new THREE.Vector3();
@@ -3066,7 +3074,7 @@ function pointerToNdc(event) {
 // triangle — so pairing them positionally (not searching for a matching dot object) is exact,
 // not a guess, and works even for a vertex that has no dot of its own (§10.2 mesh-only render).
 function pickParticle() {
-  const hits = raycaster.intersectObjects([...dots.children, ...meshObjects, ...connectionStyleGroup.children]);
+  const hits = raycaster.intersectObjects(solidPickTargets());
   if (hits.length === 0) return null;
   const hit = hits[0];
   const connectionHit = resolveConnectionHit(hit);
@@ -3180,7 +3188,7 @@ renderer.domElement.addEventListener("contextmenu", (event) => {
   // noise, not something the user can aim at, and it was silently stealing right-clicks aimed at
   // the surface (reported as "selecting the flag selects the wind instead"). A solid hit is always
   // the more specific target, so arrows are only considered when nothing solid was hit at all.
-  const solidHits = raycaster.intersectObjects([...dots.children, ...meshObjects, ...connectionStyleGroup.children]);
+  const solidHits = raycaster.intersectObjects(solidPickTargets());
   if (solidHits.length > 0) {
     const hit = solidHits[0];
     // A styled cylinder/joint: its force's panel if it's tagged to one, else its style's panel.

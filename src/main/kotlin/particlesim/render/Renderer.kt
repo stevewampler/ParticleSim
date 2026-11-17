@@ -60,6 +60,11 @@ data class SurfaceRenderer(
     val wireframe: Boolean = false,
     val textureName: String? = null,
     val material: Material? = null,
+    /** False makes the viewer ignore this mesh when picking with the mouse - clicks, drags,
+     * double-click delete and right-click all go straight through it, as if it weren't there
+     * (e.g. [particlesim.debug.MurmurationScene]'s ground, scenery nobody should grab). It
+     * still draws, and stays reachable from the outliner. */
+    val pickable: Boolean = true,
 ) {
     /** §10.2's `[stretch]` "Lighting & materials": [material] verbatim when this renderer
      * declared one, otherwise the exact hardcoded appearance this class rendered with before

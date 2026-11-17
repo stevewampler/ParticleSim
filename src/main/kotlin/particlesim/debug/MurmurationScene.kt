@@ -45,7 +45,7 @@ class MurmurationScene(withFalcon: Boolean = true) : DemoScene {
         listOf(Triangle(groundIds[0], groundIds[2], groundIds[1]), Triangle(groundIds[0], groundIds[3], groundIds[2])),
         name = "ground",
     )
-    private val groundMesh = SurfaceRenderer(ground, material = Material(color = Color(0.10, 0.13, 0.07), roughness = 1.0))
+    private val groundMesh = SurfaceRenderer(ground, material = Material(color = Color(0.10, 0.13, 0.07), roughness = 1.0), pickable = false)
 
     private val birdIds = scenario.birdIds + listOfNotNull(scenario.falconId)
     private val sphereRadii = scenario.birdIds.associateWith { BIRD_DRAW_RADIUS } +

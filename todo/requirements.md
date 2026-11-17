@@ -1076,6 +1076,10 @@ external image onto a mesh's surface.
   be drawn as plain opaque dots (`solidParticleColors`) instead of the
   additive glow suited to fire and sparks. Both were added for the
   `murmuration` scene's dark starlings against a dusk sky (§5.6).
+- **Unpickable meshes**: a `SurfaceRenderer` may set `pickable = false` for
+  scenery (the `murmuration` scene's ground). The viewer's mouse picking
+  (§9.4 drag, double-click delete, §10.3 right-click) ignores that mesh, so
+  clicks pass through it. It still draws and stays in the outliner.
 - N-body gravity and custom forces (§5.3) are lower priority / `[stretch]`
   — N-body isn't localized to a renderable pair (force exists between
   every pair), and custom forces don't have a defined shape yet.

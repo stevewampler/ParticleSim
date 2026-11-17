@@ -64,7 +64,7 @@ import kotlin.math.roundToInt
  *                        channel could show anyway. A particle with no entry here keeps the
  *                        viewer's default dot color.)
  * i32  meshCount
- * meshCount * { u8 wireframe, i32 nameLen, nameLen UTF-8 bytes, i32 triangleCount,
+ * meshCount * { u8 wireframe, u8 pickable, i32 nameLen, nameLen UTF-8 bytes, i32 triangleCount,
  *               triangleCount * { i32 a, i32 b, i32 c },
  *               i32 textureUrlLen, textureUrlLen UTF-8 bytes, i32 uvCount,
  *               uvCount * { i32 particleId, f64 u, f64 v },
@@ -276,7 +276,7 @@ object BinaryFrame {
     private const val PARTICLE_COLOR_HEADER_SIZE = 4
     private const val PARTICLE_COLOR_SIZE = 4 + 1 + 1 + 1 // id, r, g, b (u8 channels)
     private const val MESH_HEADER_SIZE = 4
-    private const val MESH_ENTRY_HEADER_SIZE = 1 + 4 // wireframe, triangleCount
+    private const val MESH_ENTRY_HEADER_SIZE = 1 + 1 + 4 // wireframe, pickable, triangleCount
     private const val TRIANGLE_SIZE = 4 + 4 + 4 // a, b, c
     private const val MESH_UV_HEADER_SIZE = 4 // uvCount
     private const val MESH_UV_ENTRY_SIZE = 4 + 8 + 8 // particleId, u, v
@@ -427,6 +427,7 @@ object BinaryFrame {
         buffer.putInt(meshes.size)
         for (mesh in meshes) {
             buffer.put(if (mesh.wireframe) 1 else 0)
+            buffer.put(if (mesh.pickable) 1 else 0)
             putString(buffer, mesh.surface.name ?: "")
             buffer.putInt(mesh.surface.triangles.size)
             for (tri in mesh.surface.triangles) {
@@ -632,6 +633,7 @@ object BinaryFrame {
         val meshCount = buf.int
         val meshes = (0 until meshCount).map {
             val wireframe = buf.get().toInt() != 0
+            val pickable = buf.get().toInt() != 0
             val name = getString(buf)
             val triangleCount = buf.int
             val triangles = (0 until triangleCount).map { Triangle(buf.int, buf.int, buf.int) }
@@ -639,7 +641,7 @@ object BinaryFrame {
             val uvCount = buf.int
             val uvs = (0 until uvCount).associate { buf.int to UV(buf.double, buf.double) }
             val material = Material(color = Color(buf.double, buf.double, buf.double), roughness = buf.double, opacity = buf.double)
-            DecodedMesh(wireframe, triangles, name, textureUrl, uvs, material)
+            DecodedMesh(wireframe, triangles, name, textureUrl, uvs, material, pickable)
         }
         val arrowGroupCount = buf.int
         val arrowGroups = (0 until arrowGroupCount).map {
@@ -994,6 +996,7 @@ data class DecodedMesh(
     val textureUrl: String = "",
     val uvs: Map<Int, UV> = emptyMap(),
     val material: Material = Material(),
+    val pickable: Boolean = true,
 )
 
 /** One named group and its current member ids (§10.3's group visibility toggle needs to know

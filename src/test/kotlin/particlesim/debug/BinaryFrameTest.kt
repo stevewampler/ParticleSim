@@ -248,6 +248,22 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `a mesh's pickable flag round-trips, defaulting to pickable`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+        val b = store.create(position = Vector3.ZERO)
+        val c = store.create(position = Vector3.ZERO)
+        val surface = Surface(listOf(Triangle(a, b, c)))
+
+        val buffer = BinaryFrame.encode(
+            t = 0.0, step = 0L, store = store, ids = listOf(a, b, c), connections = emptyList(),
+            meshes = listOf(SurfaceRenderer(surface), SurfaceRenderer(surface, pickable = false)),
+        )
+
+        assertEquals(listOf(true, false), BinaryFrame.decode(buffer).meshes.map { it.pickable })
+    }
+
+    @Test
     fun `a mesh's surface name round-trips, so the viewer can correlate a mesh back to its registry entry`() {
         val store = ParticleStore()
         val a = store.create(position = Vector3.ZERO)

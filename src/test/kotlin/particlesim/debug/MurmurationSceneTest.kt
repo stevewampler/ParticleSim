@@ -18,6 +18,7 @@ class MurmurationSceneTest {
         assertTrue(visible.all { it in frame.particleColors && it in frame.sphereRadii })
         assertEquals(4, scene.ids().size - visible.size, "the field's four corners")
         assertEquals(listOf("ground"), frame.meshes.map { it.surface.name })
+        assertTrue(frame.meshes.none { it.pickable }, "the ground is scenery - the mouse can't grab it")
     }
 
     @Test
