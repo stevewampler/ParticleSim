@@ -39,6 +39,9 @@
   #controlPanel section { margin-bottom: 10px; }
   #controlPanel section:last-child { margin-bottom: 0; }
   #statsPanel { white-space: pre; color: #9f9; }
+  .arrowScaleRow { display: flex; align-items: center; gap: 4px; margin: 0 0 2px 18px; }
+  .arrowScaleRow input[type=range] { width: 80px; margin: 0; }
+  .arrowScaleRow span { font-size: 10px; color: #aaa; white-space: nowrap; }
   #bookmarkList { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
   #bookmarkList .bookmarkRow { display: flex; gap: 4px; align-items: center; }
   #bookmarkList button, #bookmarkForm button {
@@ -190,7 +193,11 @@
       <label><input type="checkbox" id="gridToggle" checked> grid</label><br>
       <label><input type="checkbox" id="axesToggle" checked> axes</label><br>
       <label><input type="checkbox" id="collidersToggle" checked> colliders</label><br>
-      <label title="Force arrows and stress / break-proximity colors, everywhere in the scene"><input type="checkbox" id="forcesStressesToggle" checked> forces &amp; stresses</label>
+      <label title="Force arrows and stress / break-proximity colors, everywhere in the scene"><input type="checkbox" id="forcesStressesToggle" checked> forces &amp; stresses</label><br>
+      <label title="An arrow on every particle showing its velocity - each group's panel can leave its own out"><input type="checkbox" id="velocityArrowsToggle"> velocity arrows</label>
+      <div class="arrowScaleRow" title="Velocity arrow length"><input type="range" id="velocityScaleSlider" min="-2" max="2" step="0.05" value="0"><span id="velocityScaleText"></span></div>
+      <label title="An arrow on every particle showing its acceleration over the last step - each group's panel can leave its own out"><input type="checkbox" id="accelerationArrowsToggle"> acceleration arrows</label>
+      <div class="arrowScaleRow" title="Acceleration arrow length"><input type="range" id="accelerationScaleSlider" min="-2" max="2" step="0.05" value="0"><span id="accelerationScaleText"></span></div>
     </section>
     <section>
       <h4>time</h4>
@@ -320,6 +327,164 @@ document.getElementById("pauseOnEditToggle").addEventListener("change", (e) => {
 // Applies from the next frame, which the server sends even while paused.
 let showForcesAndStresses = true;
 document.getElementById("forcesStressesToggle").addEventListener("change", (e) => { showForcesAndStresses = e.target.checked; });
+
+// --- Velocity and acceleration arrows (§10.3) ----------------------------------------------
+// One arrow per particle, per kind. The Display panel's checkbox for each kind is the master
+// switch; each group's panel has its own (on by default) to leave that group out - an arrow is
+// left out if its particle is in any group whose box is unchecked, the same rule "show
+// particles" uses. Independent of whether the particle's dot is drawn: bridges hide their
+// structure's dots, but their arrows are still worth seeing.
+//
+// Velocity already arrives with every particle. Acceleration doesn't: the viewer asks the server
+// for it (set_send_accelerations) only while its arrows are switched on, since it adds 12 bytes
+// per particle per frame. It's measured server-side as the change in velocity over each frame's
+// last step (see SceneLibrary), so it includes constraints and collisions, not just forces.
+//
+// Drawn as one LineSegments per kind (shaft plus a two-stroke head, the head turned to face the
+// camera), not an ArrowHelper per particle: a flock of 1500 would be 1500 extra objects. Never
+// raycast - they're not in solidPickTargets or arrowObjects.
+//
+// Length: each kind gets an automatic scale, set from the first frame that has any motion so its
+// 95th-percentile arrow is about 5% of the spread of the particles carrying arrows, and reset
+// whenever arrows outgrow that by 3x (a bridge starts almost still and speeds up). The slider
+// multiplies that by 1/100 to 100. Both are global: one length scale per kind for the whole
+// scene, kept across frames so arrow lengths stay comparable over time.
+const motionArrowKinds = {
+  velocity: {
+    color: new THREE.Color(0x22ddff), unit: "m/s", vectorOf: (p) => [p.vx, p.vy, p.vz],
+    toggleId: "velocityArrowsToggle", sliderId: "velocityScaleSlider", textId: "velocityScaleText",
+  },
+  acceleration: {
+    color: new THREE.Color(0x99ff33), unit: "m/s²", vectorOf: (p) => (p.ax === undefined ? null : [p.ax, p.ay, p.az]),
+    toggleId: "accelerationArrowsToggle", sliderId: "accelerationScaleSlider", textId: "accelerationScaleText",
+  },
+};
+const MOTION_ARROW_TARGET_FRACTION = 0.05;
+const MOTION_ARROW_RESCALE_FACTOR = 3;
+for (const kind of Object.values(motionArrowKinds)) {
+  kind.enabled = false;
+  kind.hiddenGroups = new Set(); // groups whose own box is unchecked
+  kind.metresPerUnit = null; // the automatic scale, null until there's motion to set it from
+  kind.target = 1; // the arrow length that scale was set for, m
+  kind.capacity = 0;
+  kind.lines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ vertexColors: true }));
+  kind.lines.frustumCulled = false; // its bounding sphere is never recomputed
+  kind.lines.visible = false;
+  scene.add(kind.lines);
+  const slider = document.getElementById(kind.sliderId);
+  kind.sliderExponent = 0;
+  slider.addEventListener("input", () => { kind.sliderExponent = parseFloat(slider.value); updateMotionArrowScaleText(kind); });
+  updateMotionArrowScaleText(kind);
+}
+document.getElementById("velocityArrowsToggle").addEventListener("change", (e) => { motionArrowKinds.velocity.enabled = e.target.checked; });
+document.getElementById("accelerationArrowsToggle").addEventListener("change", (e) => {
+  motionArrowKinds.acceleration.enabled = e.target.checked;
+  sendAccelerationRequest();
+});
+function sendAccelerationRequest() {
+  send({ type: "set_send_accelerations", enabled: motionArrowKinds.acceleration.enabled });
+}
+
+function updateMotionArrowScaleText(kind) {
+  const el = document.getElementById(kind.textId);
+  if (kind.metresPerUnit === null) { el.textContent = kind.enabled ? "waiting for motion" : ""; return; }
+  el.textContent = `1 m = ${formatSigFigs(1 / (kind.metresPerUnit * 10 ** kind.sliderExponent))} ${kind.unit}`;
+}
+
+function percentile(sortedValues, fraction) {
+  return sortedValues[Math.min(sortedValues.length - 1, Math.floor(fraction * sortedValues.length))];
+}
+
+// Spread of the arrow-carrying particles: the diagonal of their 5th-95th percentile box, so one
+// straggler (the falcon off on its own) doesn't set every arrow's length.
+function robustSpread(arrows) {
+  let diagSq = 0;
+  for (const axis of [0, 1, 2]) {
+    const values = arrows.map((a) => a.origin[axis]).sort((x, y) => x - y);
+    const range = percentile(values, 0.95) - percentile(values, 0.05);
+    diagSq += range * range;
+  }
+  return Math.sqrt(diagSq);
+}
+
+function updateMotionArrows(frame) {
+  for (const kind of Object.values(motionArrowKinds)) {
+    const arrows = [];
+    if (kind.enabled) {
+      const left = new Set();
+      for (const group of frame.registry.groups) {
+        if (kind.hiddenGroups.has(group.name)) for (const id of group.memberIds) left.add(id);
+      }
+      for (const p of frame.particles) {
+        if (left.has(p.id)) continue;
+        const v = kind.vectorOf(p);
+        if (!v) continue;
+        const magnitude = Math.hypot(v[0], v[1], v[2]);
+        if (magnitude > 1e-9 && Number.isFinite(magnitude)) arrows.push({ origin: [p.x, p.y, p.z], v, magnitude });
+      }
+    }
+    if (arrows.length > 0) {
+      const p95 = percentile(arrows.map((a) => a.magnitude).sort((x, y) => x - y), 0.95);
+      if (kind.metresPerUnit === null || p95 * kind.metresPerUnit > MOTION_ARROW_RESCALE_FACTOR * kind.target) {
+        const spread = robustSpread(arrows);
+        kind.target = spread > 1e-6 ? MOTION_ARROW_TARGET_FRACTION * spread : 1;
+        kind.metresPerUnit = kind.target / p95;
+      }
+    }
+    updateMotionArrowScaleText(kind);
+    drawMotionArrows(kind, arrows);
+  }
+}
+
+function drawMotionArrows(kind, arrows) {
+  kind.lines.visible = arrows.length > 0;
+  if (arrows.length === 0) return;
+  const VERTICES_PER_ARROW = 6; // shaft, two head strokes
+  if (arrows.length > kind.capacity) {
+    kind.capacity = Math.max(arrows.length, kind.capacity * 2, 64);
+    kind.positions = new Float32Array(kind.capacity * VERTICES_PER_ARROW * 3);
+    kind.colors = new Float32Array(kind.capacity * VERTICES_PER_ARROW * 3);
+    kind.lines.geometry.dispose();
+    kind.lines.geometry = new THREE.BufferGeometry();
+    kind.lines.geometry.setAttribute("position", new THREE.BufferAttribute(kind.positions, 3));
+    kind.lines.geometry.setAttribute("color", new THREE.BufferAttribute(kind.colors, 3));
+  }
+  const scale = kind.metresPerUnit * 10 ** kind.sliderExponent;
+  const bright = kind.color;
+  const dim = kind.color.clone().multiplyScalar(0.35);
+  const pos = kind.positions;
+  const col = kind.colors;
+  const d = new THREE.Vector3();
+  const toCamera = new THREE.Vector3();
+  const side = new THREE.Vector3();
+  let o = 0;
+  const put = (x, y, z, c) => {
+    pos[o] = x; pos[o + 1] = y; pos[o + 2] = z;
+    col[o] = c.r; col[o + 1] = c.g; col[o + 2] = c.b;
+    o += 3;
+  };
+  for (const a of arrows) {
+    const length = a.magnitude * scale;
+    d.set(a.v[0], a.v[1], a.v[2]).divideScalar(a.magnitude);
+    const [x, y, z] = a.origin;
+    const tx = x + d.x * length, ty = y + d.y * length, tz = z + d.z * length;
+    // The head's two strokes spread across the line of sight, so it reads from any angle.
+    toCamera.set(camera.position.x - tx, camera.position.y - ty, camera.position.z - tz);
+    side.crossVectors(d, toCamera);
+    if (side.lengthSq() < 1e-12) side.set(1, 0, 0).cross(d);
+    if (side.lengthSq() < 1e-12) side.set(0, 1, 0).cross(d);
+    side.normalize();
+    const head = length * 0.22;
+    const bx = tx - d.x * head, by = ty - d.y * head, bz = tz - d.z * head;
+    const sx = side.x * head * 0.5, sy = side.y * head * 0.5, sz = side.z * head * 0.5;
+    put(x, y, z, dim); put(tx, ty, tz, bright);
+    put(tx, ty, tz, bright); put(bx + sx, by + sy, bz + sz, bright);
+    put(tx, ty, tz, bright); put(bx - sx, by - sy, bz - sz, bright);
+  }
+  kind.lines.geometry.attributes.position.needsUpdate = true;
+  kind.lines.geometry.attributes.color.needsUpdate = true;
+  kind.lines.geometry.setDrawRange(0, arrows.length * VERTICES_PER_ARROW);
+}
 
 // Lighting for §10.2's shaded surface meshes — MeshBasicMaterial (dots, wireframe meshes)
 // doesn't need this, but a solid MeshStandardMaterial surface would render pure black without
@@ -1180,6 +1345,7 @@ function applyFrame(frame) {
     }
   });
 
+  updateMotionArrows(frame);
   updateInspection(); // text-only refresh (info + live readout) - see each module's own updateLive
 }
 
@@ -1551,6 +1717,14 @@ function decodeFrame(buffer) {
   }
   const solidParticleColors = view.getUint8(offset++) !== 0;
 
+  // Each particle's acceleration, in particle order - only while this viewer asked for it.
+  if (view.getUint8(offset++) !== 0) {
+    for (const p of particles) {
+      p.ax = view.getFloat32(offset, true); p.ay = view.getFloat32(offset + 4, true); p.az = view.getFloat32(offset + 8, true);
+      offset += 12;
+    }
+  }
+
   return {
     t, step, particles, connections, camera: cam, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
     colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
@@ -1604,6 +1778,12 @@ function resetViewerStateForSceneChange(sceneName) {
   disabledLights.clear();
   connectionStyleOverrides.clear();
   hiddenConnectionStyles.clear();
+  // Arrow switches in the Display panel carry over (like grid and axes); each group's own box and
+  // the automatic arrow scale belong to the old scene.
+  for (const kind of Object.values(motionArrowKinds)) {
+    kind.hiddenGroups.clear();
+    kind.metresPerUnit = null;
+  }
   updateSelectionHighlight();
   renderObjectPanel();
   // applyFrame only ever writes the camera when frame.camera is non-null (§10.1's scripted
@@ -2335,6 +2515,9 @@ registerEntityKind({
   getNames: (registry) => registry.groups.map((g) => g.name),
   renderPanel: () => {
     addPanelToggle("show particles", hiddenGroups);
+    // This group's share of the Display panel's velocity/acceleration arrows (§10.3).
+    addPanelToggle("show velocity arrows", motionArrowKinds.velocity.hiddenGroups);
+    addPanelToggle("show acceleration arrows", motionArrowKinds.acceleration.hiddenGroups);
 
     // §10.4's group enable/disable - see Groups.isEnabled's own doc comment for what this does
     // and, just as importantly, what it doesn't (structural springs/wind keep acting on a
@@ -2979,6 +3162,8 @@ function connect() {
     statusEl.textContent = "connected";
     resetStats();
     lastRegistrySignature = null;
+    // A restarted server has forgotten this viewer wants accelerations.
+    if (motionArrowKinds.acceleration.enabled) sendAccelerationRequest();
     // A load_scene/restart that missed the socket while it was reconnecting (see send()'s own
     // comment) gets one retry here, now that there's actually a connection to carry it.
     if (pendingSceneMessage) {

@@ -91,7 +91,7 @@ fun main(args: Array<String>) {
             // whichever scene is currently loaded, since a scene switch can change dt (FLAG_DT and
             // TRAMPOLINE_DT differ by more than 10x).
             val stepsPerFrame = maxOf(1, ((1.0 / framesPerSecond) / library.scene.dt).toInt())
-            repeat(viewerInput.timeControl.stepsThisFrame(stepsPerFrame)) { library.advanceOneStep() }
+            library.advance(viewerInput.timeControl.stepsThisFrame(stepsPerFrame))
             val frame = library.scene.frame(library.t)
             renderer.broadcast(
                 library.t, library.step, library.scene.store, library.scene.ids(), frame.connections,
@@ -114,6 +114,7 @@ fun main(args: Array<String>) {
                 shownByDefaultArrows = frame.shownByDefaultArrows,
                 skyColor = frame.skyColor,
                 solidParticleColors = frame.solidParticleColors,
+                accelerations = library.accelerations,
             )
         } catch (e: Exception) {
             System.err.println("scene loop error on '${library.activeName}': $e")

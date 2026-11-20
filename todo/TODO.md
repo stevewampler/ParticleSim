@@ -6086,6 +6086,20 @@ load. Full `./gradlew test -q` suite green throughout.
       viewer's `solidPickTargets()` leaves unpickable meshes out of every
       mouse raycast. The murmuration ground uses it. Round-trip and scene
       tested.
+- [x] **Viewer: velocity and acceleration arrows** (§10.3): global
+      switches and a length slider for each kind in the Display panel,
+      plus per-group "show velocity/acceleration arrows" boxes.
+      - `SceneLibrary` measures accelerations as Δv/dt over each frame's
+        last step, only while the viewer has sent
+        `set_send_accelerations`. The setting survives scene switches.
+      - They're sent as `u8 hasAccelerations [particleCount × f32 xyz]` at
+        the end of the frame.
+      - The viewer draws each kind as one `LineSegments`, with heads that
+        face the camera. The automatic scale puts the 95th-percentile
+        arrow at about 5% of the particles' spread, and resets if arrows
+        grow past 3×.
+      - Tested: measurement, pause, scene switch, off, message parse, and
+        the wire round-trip.
 - [ ] Possible next steps:
       - instanced dot rendering, for flocks of 10k+;
       - `SpatialGrid.nearest` scans each whole (2r+1)³ cube and skips the

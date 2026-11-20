@@ -2,6 +2,7 @@ package particlesim.debug
 
 import particlesim.collision.Collider
 import particlesim.core.ParticleStore
+import particlesim.core.Vector3
 import particlesim.render.ArrowSampling
 import particlesim.render.CameraPose
 import particlesim.render.Color
@@ -64,6 +65,7 @@ class DebugRenderer(
         shownByDefaultArrows: Set<String> = emptySet(),
         skyColor: Color? = null,
         solidParticleColors: Boolean = false,
+        accelerations: Map<Int, Vector3>? = null,
     ) {
         // Fills in a default-region arrow group (§10.2) for any named UniformFieldForce the
         // registry carries that arrowGroups didn't already cover - this is the single call site
@@ -84,6 +86,7 @@ class DebugRenderer(
                 t, step, store, ids, connections, camera, lineColors, connectionNames, sphereRadii, particleColors, allMeshes,
                 allArrowGroups, visibleIds, registry, colliders.filter { it.active }, events, availableScenes, activeScene, lights,
                 hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows, skyColor, solidParticleColors,
+                accelerations,
             ),
         )
     }

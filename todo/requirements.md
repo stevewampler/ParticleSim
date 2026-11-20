@@ -1143,6 +1143,18 @@ readout to debug a scene without a separate tool.
   legend) at once. It's a master gate over the per-object state, not an
   edit of it: each force's own "show arrows" choice is kept and comes back
   when the switch is turned on again.
+- **Velocity and acceleration arrows**: two more global switches draw an
+  arrow on every particle for its velocity, and for its acceleration over
+  the last step. Each group's panel has its own "show velocity arrows" and
+  "show acceleration arrows" boxes (on by default) to leave that group
+  out; an arrow is left out if its particle is in any unchecked group,
+  the same rule as "show particles". Each kind has one global length
+  slider, on top of an automatic scale set per scene. Acceleration is
+  measured server-side as each particle's change in velocity over a
+  frame's last step, so it includes constraints and collisions, and it's
+  only sent while the viewer asks for it (§9.1's frame grows by 12 bytes
+  per particle while it is). The global switches carry over when the
+  scene changes; the group boxes and the automatic scale don't.
 - **An outliner**: a persistent, always-available list of every group,
   named force, constraint, collider, surface, emitter, and light in the
   scene, regardless of whether anything currently renders it. This is the

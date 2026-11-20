@@ -248,6 +248,24 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `accelerations round-trip in particle order, and are absent unless sent`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+        val b = store.create(position = Vector3.ZERO)
+
+        val without = BinaryFrame.decode(BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(a, b), connections = emptyList()))
+        assertEquals(null, without.accelerations)
+
+        val with = BinaryFrame.decode(
+            BinaryFrame.encode(
+                t = 0.0, step = 0L, store = store, ids = listOf(b, a), connections = emptyList(),
+                accelerations = mapOf(a to Vector3(1.5, -9.75, 0.25)),
+            ),
+        )
+        assertEquals(mapOf(b to Vector3.ZERO, a to Vector3(1.5, -9.75, 0.25)), with.accelerations, "b had no value, so it's sent as zero")
+    }
+
+    @Test
     fun `a mesh's pickable flag round-trips, defaulting to pickable`() {
         val store = ParticleStore()
         val a = store.create(position = Vector3.ZERO)

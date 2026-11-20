@@ -1,5 +1,6 @@
 package particlesim.debug
 
+import particlesim.core.Vector3
 import particlesim.physics.DragConstraint
 
 /**
@@ -27,6 +28,14 @@ import particlesim.physics.DragConstraint
  * (particle-particle/self collision) see the dragged particle as free rather than pinned, which
  * only changes how a collision with it splits the impulse - its position is overwritten by the
  * drag right afterward either way.
+ *
+ * **Accelerations for the viewer's arrows (§10.3) are measured here too**, also for every scene:
+ * while [sendAccelerations] is on, [advance] records each particle's change in velocity over
+ * the frame's last step, divided by that step's dt - its actual acceleration, whatever caused it
+ * (forces, constraints, collisions, a drag), and whichever way the scene steps itself. So a
+ * pinned particle shows none, even though gravity is pulling on it, and a bounce shows as one
+ * big arrow for the frame it happens in. Only the last step of each frame is measured, since
+ * that's the only one the frame shows.
  */
 class SceneLibrary(
     private val factories: Map<String, () -> DemoScene>,
@@ -48,6 +57,15 @@ class SceneLibrary(
 
     val sceneNames: List<String> get() = factories.keys.toList()
 
+    /** Whether the viewer wants [accelerations] - see this class's doc comment. Survives [load]. */
+    var sendAccelerations: Boolean = false
+        private set
+
+    /** Each particle's acceleration over the last step [advance] measured, by id - or null while
+     * [sendAccelerations] is off. Empty until a step has been measured. */
+    val accelerations: Map<Int, Vector3>? get() = if (sendAccelerations) measuredAccelerations else null
+    private var measuredAccelerations: Map<Int, Vector3> = emptyMap()
+
     /** Returns `false` (and changes nothing) for an unrecognized name - a client asking for a
      * scene that doesn't exist is a malformed request, the same "ignore it" stance
      * [SceneControlMessage.parse] already takes for anything it can't make sense of.
@@ -68,6 +86,7 @@ class SceneLibrary(
         // messages did too.
         activeDrag = null
         dragQueue.drainAll()
+        measuredAccelerations = emptyMap()
         return true
     }
 
@@ -77,6 +96,10 @@ class SceneLibrary(
         when (message) {
             is SceneControlMessage.LoadScene -> load(message.name)
             SceneControlMessage.Restart -> restart()
+            is SceneControlMessage.SetSendAccelerations -> {
+                sendAccelerations = message.enabled
+                measuredAccelerations = emptyMap()
+            }
             else -> scene.handleControl(message, t)
         }
     }
@@ -88,7 +111,16 @@ class SceneLibrary(
     /** The particle currently being dragged, if any. */
     val draggedParticleId: Int? get() = activeDrag?.particleId
 
-    fun advanceOneStep() {
+    /** One frame's worth of [steps] steps, measuring accelerations over the last one when
+     * [sendAccelerations] is on. Zero steps (paused) keeps the last measurement. */
+    fun advance(steps: Int) {
+        repeat(steps) { i -> advanceOneStep(measureAcceleration = sendAccelerations && i == steps - 1) }
+    }
+
+    fun advanceOneStep(measureAcceleration: Boolean = false) {
+        val store = scene.store
+        val dt = scene.dt
+        val before = if (measureAcceleration) scene.ids().associateWith { store.velocity(it) } else null
         handleDragMessages()
         scene.step(t)
         // Re-checked after the step, not just at drag_start: emitter/expiry scenes (sparks,
@@ -96,6 +128,10 @@ class SceneLibrary(
         activeDrag?.let { drag -> if (scene.store.contains(drag.particleId)) drag.applyTo(scene.store) else activeDrag = null }
         t += scene.dt
         step++
+        if (before != null) {
+            measuredAccelerations = before.filterKeys { store.contains(it) }
+                .mapValues { (id, v0) -> (store.velocity(id) - v0) * (1.0 / dt) }
+        }
     }
 
     private fun handleDragMessages() {

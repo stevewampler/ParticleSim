@@ -91,6 +91,11 @@ sealed interface SceneControlMessage {
      * `SetEmitterField`. */
     data class SetWindVelocity(val name: String, val expr: VectorExpr) : SceneControlMessage
 
+    /** The viewer asking for (or no longer needing) each particle's acceleration in every frame,
+     * for its acceleration arrows (§10.3). Handled by [SceneLibrary] itself, not the scene, and
+     * kept across scene switches - it's about what the viewer is drawing, not about any scene. */
+    data class SetSendAccelerations(val enabled: Boolean) : SceneControlMessage
+
     companion object {
         /** Returns `null` for anything malformed or unrecognized, same "ignore, don't tear down
          * the connection" stance as [DragMessage.parse]/[TimeControlMessage.parse]. */
@@ -172,6 +177,7 @@ sealed interface SceneControlMessage {
                     }
                     SetWindVelocity(name, expr)
                 }
+                "set_send_accelerations" -> (data["enabled"] as? Boolean)?.let { SetSendAccelerations(it) }
                 else -> null
             }
         }
