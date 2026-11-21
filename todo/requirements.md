@@ -1076,6 +1076,12 @@ external image onto a mesh's surface.
   be drawn as plain opaque dots (`solidParticleColors`) instead of the
   additive glow suited to fire and sparks. Both were added for the
   `murmuration` scene's dark starlings against a dusk sky (§5.6).
+- **Particle trails**: a scene may ask for `SceneFrame.trailSeconds` of
+  fading trail behind each visible particle, like a long exposure. The
+  viewer draws them from positions it has already been sent and prunes by
+  simulation time, so they add nothing to the wire but the one number. The
+  trails are additive, so overlapping ones brighten, and they're never
+  picked. Added for the `fireworks` scene (§14).
 - **Unpickable meshes**: a `SurfaceRenderer` may set `pickable = false` for
   scenery (the `murmuration` scene's ground). The viewer's mouse picking
   (§9.4 drag, double-click delete, §10.3 right-click) ignores that mesh, so
@@ -1760,6 +1766,9 @@ can be spawned during a simulation (sparks, smoke, fireworks) and existing
 ones removed (expired, left a region, destroyed on impact). This turns the
 particle set from a fixed collection declared once into a population that
 changes over time.
+
+Worked example: `FireworksShow` and the `fireworks` scene (§9.6), which
+spawn stars where each shell bursts and destroy them by lifetime (§14.2).
 
 ### 14.1 Creation: emitters
 

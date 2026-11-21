@@ -60,6 +60,10 @@ data class SceneFrame(
     /** Draw [particleColors] as plain opaque dots instead of the additive glow fire and sparks
      * use - for something solid seen against a bright sky, like [MurmurationScene]'s starlings. */
     val solidParticleColors: Boolean = false,
+    /** How many seconds of fading trail the viewer draws behind each visible particle (§10.2) -
+     * 0 for none. Drawn viewer-side from the positions it has already been sent, like a long
+     * exposure, so it costs nothing on the wire. E.g. [FireworksScene]'s streaking stars. */
+    val trailSeconds: Double = 0.0,
     val registry: SceneRegistry = SceneRegistry.build(),
     val colliders: List<Collider> = emptyList(),
     val events: List<SimEvent> = emptyList(),

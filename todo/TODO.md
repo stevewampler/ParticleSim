@@ -6029,6 +6029,41 @@ load. Full `./gradlew test -q` suite green throughout.
       legend), as a master gate - each force's own "show arrows" is untouched
       and comes back when it's switched on again.
 
+## Fireworks (§9.6/§10.2/§14, new requirement) — not yet phased
+- [x] **`FireworksShow`** (`particlesim.examples`): shells launched from
+      random mortars along the ground every 0.6-1.6 s (sometimes in salvos
+      of 2-3). Each rises under gravity to a random break height (90-140 m)
+      and bursts on a time fuse into stars, sent out in a jittered Fibonacci
+      sphere so the burst is round.
+      - Burst types: peony (one colour), two-tone, and willow (gold; light
+        stars that slow quickly, burn long and droop).
+      - Stars feel gravity and linear `Drag`. They burn out by §14.2
+        lifetime, and shells are destroyed explicitly as they burst; both go
+        through `DestructionSystem`, destroying before creating.
+      - Seeded, so a run repeats exactly. Heights, speeds and burn times are
+        modelling choices.
+      - Tested: launch schedule, break height, round burst centred on the
+        shell, burn-out with colour cleanup, a bounded population over
+        120 s, droop at terminal speed, and same seed giving the same run.
+- [x] **`fireworks` scene**: glowing dots with 0.7 s trails over a
+      night-navy sky and unpickable dark ground, seen from a fixed crowd
+      viewpoint. Stars flash white as they light and dim over the last third
+      of their burn. Scene tested.
+- [x] **Viewer: particle trails** (§10.2): `SceneFrame.trailSeconds`, sent
+      as an `f64` before the acceleration block and drawn viewer-side as
+      one additive `LineSegments`. History is dropped for particles that are
+      gone or hidden, and cleared on a restart or scene change. Round-trip
+      tested.
+- [ ] Gaps / possible next steps:
+      - the launcher isn't an `Emitter`, so it isn't in the outliner, can't
+        be edited live, and isn't in §9.5 checkpoints;
+      - `Drag` has no editable fields, so `star-drag` can't be tuned live;
+      - more burst types (ring, crossette, strobe/glitter, multi-break),
+        shell drag on the way up, and a light flash on the ground at each
+        burst;
+      - WebGL draws lines 1 pixel wide whatever the setting, so trails
+        stay thin; thicker ones would need ribbon geometry.
+
 ## Starling murmuration (§5.6/§9.6/§10.2, new requirement) — not yet phased
 - [x] **`Flocking` force** (`particlesim.physics`), with these terms:
       - topological neighbours (k nearest, 7 by default, after Ballerini

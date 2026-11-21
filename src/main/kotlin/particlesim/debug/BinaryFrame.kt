@@ -169,6 +169,9 @@ import kotlin.math.roundToInt
  *                (the background color the scene asks for; absent, the viewer keeps its own)
  * u8   solidParticleColors
  *                (1: the per-particle colors above draw as opaque dots, not additive glow)
+ * f64  trailSeconds
+ *                (seconds of fading trail the viewer draws behind each visible particle, from
+ *                positions it has already been sent; 0 = none)
  * u8   hasAccelerations; if set: particleCount * { f32 ax, ay, az }
  *                (each particle's acceleration over the last step, in the same order as the
  *                particle block at the top - only sent while the viewer asks for it, for its
@@ -349,6 +352,7 @@ object BinaryFrame {
         skyColor: Color? = null,
         solidParticleColors: Boolean = false,
         accelerations: Map<Int, Vector3>? = null,
+        trailSeconds: Double = 0.0,
     ): ByteBuffer {
         val coloredArrowGroups = arrowGroups.withIndex().filter { (_, g) -> g.samples.any { it.color != null } }
         val styleTable = connectionStyles.values.distinct()
@@ -387,7 +391,7 @@ object BinaryFrame {
             nameListSize(hiddenByDefaultGroups) +
             4 + coloredArrowGroups.sumOf { 4 + it.value.samples.size * 3 } +
             nameListSize(shownByDefaultArrows) +
-            1 + (if (skyColor != null) 24 else 0) + 1 +
+            1 + (if (skyColor != null) 24 else 0) + 1 + 8 +
             1 + (if (accelerations != null) ids.size * 12 else 0)
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
@@ -585,6 +589,7 @@ object BinaryFrame {
         buffer.put(if (skyColor != null) 1 else 0)
         if (skyColor != null) { buffer.putDouble(skyColor.r); buffer.putDouble(skyColor.g); buffer.putDouble(skyColor.b) }
         buffer.put(if (solidParticleColors) 1 else 0)
+        buffer.putDouble(trailSeconds)
         buffer.put(if (accelerations != null) 1 else 0)
         if (accelerations != null) {
             for (id in ids) {
@@ -745,6 +750,7 @@ object BinaryFrame {
         val shownByDefaultArrows = getNameList(buf).toSet()
         val skyColor = if (buf.get().toInt() != 0) Color(buf.double, buf.double, buf.double) else null
         val solidParticleColors = buf.get().toInt() != 0
+        val trailSeconds = buf.double
         val accelerations = if (buf.get().toInt() != 0) {
             particles.associate { it.id to Vector3(buf.float.toDouble(), buf.float.toDouble(), buf.float.toDouble()) }
         } else {
@@ -753,7 +759,7 @@ object BinaryFrame {
         return DecodedFrame(
             t, step, particles, connections, camera, spheres, particleColors, meshes, coloredArrowGroups, visibleIds, registry,
             colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
-            skyColor, solidParticleColors, accelerations,
+            skyColor, solidParticleColors, accelerations, trailSeconds,
         )
     }
 
@@ -1128,4 +1134,5 @@ data class DecodedFrame(
     val solidParticleColors: Boolean = false,
     /** Particle id to acceleration, or null when the frame carried none. */
     val accelerations: Map<Int, Vector3>? = null,
+    val trailSeconds: Double = 0.0,
 )

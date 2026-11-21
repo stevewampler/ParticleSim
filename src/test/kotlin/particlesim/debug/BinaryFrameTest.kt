@@ -248,6 +248,15 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `trail seconds round-trip, defaulting to none`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+        assertEquals(0.0, BinaryFrame.decode(BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(a), connections = emptyList())).trailSeconds)
+        val with = BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(a), connections = emptyList(), trailSeconds = 0.45)
+        assertEquals(0.45, BinaryFrame.decode(with).trailSeconds)
+    }
+
+    @Test
     fun `accelerations round-trip in particle order, and are absent unless sent`() {
         val store = ParticleStore()
         val a = store.create(position = Vector3.ZERO)

@@ -56,6 +56,7 @@ fun main(args: Array<String>) {
         "tacomaNarrows1950Breakable" to { tacomaNarrows1950Scene(windVelocity = "[$TACOMA_FAILURE_WIND, 0.0, 0.0]", breakable = true) },
         "tacomaNarrowsComparison" to { tacomaComparisonScene() },
         "murmuration" to { MurmurationScene() },
+        "fireworks" to { FireworksScene() },
     )
     val requestedScene = args.getOrNull(0)
     if (requestedScene != null && requestedScene !in factories) {
@@ -115,6 +116,7 @@ fun main(args: Array<String>) {
                 skyColor = frame.skyColor,
                 solidParticleColors = frame.solidParticleColors,
                 accelerations = library.accelerations,
+                trailSeconds = frame.trailSeconds,
             )
         } catch (e: Exception) {
             System.err.println("scene loop error on '${library.activeName}': $e")

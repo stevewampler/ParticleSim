@@ -436,6 +436,92 @@ function updateMotionArrows(frame) {
   }
 }
 
+// --- Particle trails (§10.2's SceneFrame.trailSeconds) --------------------------------------
+// A fading line behind each visible particle through the positions it has had over the last
+// trailSeconds of simulation time - what a long exposure (or the eye) sees of a fast spark, and
+// what makes a firework burst read as streaks rather than dots. Built entirely here, from
+// positions already sent in earlier frames, so it adds nothing to the wire. Pruned by sim time,
+// not frame count, so the trail is the same length however fast this viewer keeps up (a slow
+// viewer just gets a coarser one). Additive, so overlapping trails brighten like light does;
+// one LineSegments for every trail, never raycast.
+const trailHistory = new Map(); // particle id -> [{ t, x, y, z }], oldest first
+let trailLatestT = -Infinity;
+let trailCapacity = 0;
+let trailPositions = null;
+let trailColors = null;
+const trailLines = new THREE.LineSegments(
+  new THREE.BufferGeometry(),
+  new THREE.LineBasicMaterial({ vertexColors: true, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }),
+);
+trailLines.frustumCulled = false;
+trailLines.visible = false;
+scene.add(trailLines);
+
+function clearTrails() {
+  trailHistory.clear();
+  trailLatestT = -Infinity;
+}
+
+function updateTrails(frame, visibleIds, particleColorMap) {
+  const seconds = frame.trailSeconds;
+  if (!(seconds > 0)) {
+    if (trailHistory.size > 0) clearTrails();
+    trailLines.visible = false;
+    return;
+  }
+  if (frame.t < trailLatestT) clearTrails(); // a restart: the old positions belong to another run
+  const advanced = frame.t > trailLatestT;
+  trailLatestT = Math.max(trailLatestT, frame.t);
+  const oldest = frame.t - seconds;
+
+  // Particles gone from the frame (burnt out, destroyed) or hidden lose their trail.
+  for (const id of trailHistory.keys()) if (!visibleIds.has(id)) trailHistory.delete(id);
+
+  let segments = 0;
+  for (const id of visibleIds) {
+    const p = latestById.get(id);
+    if (!p) continue;
+    let points = trailHistory.get(id);
+    if (!points) { points = []; trailHistory.set(id, points); }
+    if (advanced) points.push({ t: frame.t, x: p.x, y: p.y, z: p.z });
+    let drop = 0;
+    while (drop < points.length - 1 && points[drop].t < oldest) drop++;
+    if (drop > 0) points.splice(0, drop);
+    segments += Math.max(0, points.length - 1);
+  }
+
+  trailLines.visible = segments > 0;
+  if (segments === 0) return;
+  if (segments > trailCapacity) {
+    trailCapacity = Math.max(segments, trailCapacity * 2, 1024);
+    trailPositions = new Float32Array(trailCapacity * 6);
+    trailColors = new Float32Array(trailCapacity * 6);
+    trailLines.geometry.dispose();
+    trailLines.geometry = new THREE.BufferGeometry();
+    trailLines.geometry.setAttribute("position", new THREE.BufferAttribute(trailPositions, 3));
+    trailLines.geometry.setAttribute("color", new THREE.BufferAttribute(trailColors, 3));
+  }
+  const defaultColor = new THREE.Color(DEFAULT_DOT_COLOR);
+  let o = 0;
+  for (const [id, points] of trailHistory) {
+    if (points.length < 2) continue;
+    const c = particleColorMap.get(id) ?? defaultColor;
+    for (let i = 1; i < points.length; i++) {
+      for (const point of [points[i - 1], points[i]]) {
+        // Brightest at the particle, fading to nothing trailSeconds back.
+        const fade = Math.max(0, 1 - (frame.t - point.t) / seconds);
+        const k = fade * fade;
+        trailPositions[o] = point.x; trailPositions[o + 1] = point.y; trailPositions[o + 2] = point.z;
+        trailColors[o] = c.r * k; trailColors[o + 1] = c.g * k; trailColors[o + 2] = c.b * k;
+        o += 3;
+      }
+    }
+  }
+  trailLines.geometry.attributes.position.needsUpdate = true;
+  trailLines.geometry.attributes.color.needsUpdate = true;
+  trailLines.geometry.setDrawRange(0, segments * 2);
+}
+
 function drawMotionArrows(kind, arrows) {
   kind.lines.visible = arrows.length > 0;
   if (arrows.length === 0) return;
@@ -1346,6 +1432,7 @@ function applyFrame(frame) {
   });
 
   updateMotionArrows(frame);
+  updateTrails(frame, visibleIdSet, particleColorMap);
   updateInspection(); // text-only refresh (info + live readout) - see each module's own updateLive
 }
 
@@ -1717,6 +1804,9 @@ function decodeFrame(buffer) {
   }
   const solidParticleColors = view.getUint8(offset++) !== 0;
 
+  // Seconds of fading trail to draw behind each visible particle (0 = none).
+  const trailSeconds = view.getFloat64(offset, true); offset += 8;
+
   // Each particle's acceleration, in particle order - only while this viewer asked for it.
   if (view.getUint8(offset++) !== 0) {
     for (const p of particles) {
@@ -1728,7 +1818,7 @@ function decodeFrame(buffer) {
   return {
     t, step, particles, connections, camera: cam, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
     colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
-    skyColor, solidParticleColors,
+    skyColor, solidParticleColors, trailSeconds,
   };
 }
 
@@ -1784,6 +1874,7 @@ function resetViewerStateForSceneChange(sceneName) {
     kind.hiddenGroups.clear();
     kind.metresPerUnit = null;
   }
+  clearTrails();
   updateSelectionHighlight();
   renderObjectPanel();
   // applyFrame only ever writes the camera when frame.camera is non-null (§10.1's scripted
