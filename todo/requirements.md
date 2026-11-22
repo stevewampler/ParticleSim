@@ -1082,6 +1082,15 @@ external image onto a mesh's surface.
   simulation time, so they add nothing to the wire but the one number. The
   trails are additive, so overlapping ones brighten, and they're never
   picked. Added for the `fireworks` scene (§14).
+- **Sound**: a scene may send `SimEvent.Sound` events on §9.1's event
+  channel: a kind (launch, boom, crackle), a position, a loudness and the
+  sim time it happened. The viewer synthesizes each one with the Web Audio
+  API (no audio files), pans it and fades it with distance from the camera,
+  and starts it late by its distance over the speed of sound (343 m/s),
+  divided by the playback speed. It's off until the display panel's
+  "sound" box is ticked, since browsers allow sound only after a click.
+  Pausing holds delayed sounds; unticking or a scene change cuts them off.
+  Sound never affects physics. Added for the `fireworks` scene (§14).
 - **Unpickable meshes**: a `SurfaceRenderer` may set `pickable = false` for
   scenery (the `murmuration` scene's ground). The viewer's mouse picking
   (§9.4 drag, double-click delete, §10.3 right-click) ignores that mesh, so

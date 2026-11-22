@@ -879,6 +879,22 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `sound events round-trip with their kind, position, loudness and time`() {
+        val events = listOf(
+            SimEvent.Sound(SoundKind.LAUNCH, Vector3(1.0, 0.5, -2.0), 1.0, 3.25),
+            SimEvent.ParticleSpawned(4),
+            SimEvent.Sound(SoundKind.BOOM, Vector3(-10.0, 120.0, 4.0), 0.3, 3.5),
+            SimEvent.Sound(SoundKind.CRACKLE, Vector3(0.0, 90.0, 0.0), 0.8, 3.75),
+        )
+        val buffer = BinaryFrame.encode(
+            t = 3.75, step = 9L, store = ParticleStore(), ids = emptyList(), connections = emptyList(),
+            events = events,
+        )
+        assertEquals(buffer.capacity(), buffer.limit(), "encoded size matches the computed size")
+        assertEquals(events, BinaryFrame.decode(buffer).events)
+    }
+
+    @Test
     fun `all three event kinds round-trip, in order, alongside continuous frame data`() {
         val store = ParticleStore()
         val events = listOf(

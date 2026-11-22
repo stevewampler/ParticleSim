@@ -364,6 +364,66 @@ class FireworksTest {
         assertTrue(show.recentFlashes.isEmpty())
     }
 
+    /** Steps [show] from [start] for [seconds], collecting every sound. */
+    private fun soundsOver(show: FireworksShow, seconds: Double, start: Double = 0.0): List<FireworkSound> {
+        val sounds = mutableListOf<FireworkSound>()
+        var t = start
+        repeat((seconds / FIREWORKS_DT).toInt()) {
+            sounds += show.step(t, FIREWORKS_DT).sounds
+            t += FIREWORKS_DT
+        }
+        return sounds
+    }
+
+    @Test
+    fun `every launch sounds at its mortar, and every shell burst booms where it bursts`() {
+        val show = FireworksShow()
+        val sounds = mutableListOf<FireworkSound>()
+        val launchedAt = mutableListOf<Vector3>()
+        val burstAt = mutableListOf<Vector3>()
+        var t = 0.0
+        var lastShells = emptyMap<Int, Vector3>()
+        repeat((20.0 / FIREWORKS_DT).toInt()) {
+            val result = show.step(t, FIREWORKS_DT)
+            t += FIREWORKS_DT
+            sounds += result.sounds
+            val shells = show.liveShells.associate { it.id to show.store.position(it.id) }
+            launchedAt += (shells.keys - lastShells.keys).map { shells.getValue(it) }
+            // A shell gone this step burst from where it was a step ago, moved on by one step.
+            burstAt += (lastShells.keys - shells.keys).map { lastShells.getValue(it) }
+            lastShells = shells
+        }
+        val launches = sounds.filter { it.noise == FireworkNoise.LAUNCH }
+        assertEquals(launchedAt, launches.map { it.position })
+        assertTrue(launches.all { it.loudness == 1.0 && it.position.y == FireworksShow.MORTAR_HEIGHT })
+        val shellBooms = sounds.filter { it.noise == FireworkNoise.BOOM && it.loudness == 1.0 }
+        assertEquals(burstAt.size, shellBooms.size)
+        for ((boom, at) in shellBooms.zip(burstAt)) assertTrue((boom.position - at).length() < 2.0)
+        // Each sound carries the time it happened: within the run, never decreasing.
+        assertEquals(sounds.map { it.time }.sorted(), sounds.map { it.time })
+    }
+
+    @Test
+    fun `split and crossette breaks give quieter booms, and each crackling star a crackle`() {
+        for ((type, loudness) in listOf(
+            BurstType.SPLIT to FireworksShow.SPLIT_BOOM_LOUDNESS,
+            BurstType.CROSSETTE to FireworksShow.CROSSETTE_BOOM_LOUDNESS,
+        )) {
+            val show = quietShow()
+            val (t, _) = burstOne(show, type)
+            val small = soundsOver(show, 1.0, start = t).filter { it.noise == FireworkNoise.BOOM }
+            assertEquals(FireworksShow.recipeFor(type).count, small.size, "$type breaks")
+            assertTrue(small.all { it.loudness == loudness })
+        }
+
+        val show = quietShow()
+        val (t, _) = burstOne(show, BurstType.CRACKLE)
+        val glitter = show.glitterIds.toSet()
+        val crackles = soundsOver(show, 2.0, start = t).filter { it.noise == FireworkNoise.CRACKLE }
+        assertEquals(glitter.size, crackles.size)
+        assertTrue(glitter.none { show.store.contains(it) })
+    }
+
     @Test
     fun `the same seed gives the same display`() {
         val a = FireworksShow(seed = 7L)

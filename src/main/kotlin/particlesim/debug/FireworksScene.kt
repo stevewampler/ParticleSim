@@ -25,6 +25,9 @@ import kotlin.math.exp
  * ignite and dim as they burn out; crackling glitter twinkles, strobes blink, and palm fronds are
  * drawn larger than other stars.
  *
+ * Every launch, burst and crackle is sent as a [SimEvent.Sound]; the viewer's "sound" checkbox
+ * plays them, each delayed by its distance from the camera over the speed of sound.
+ *
  * Each shell's burst lights the ground for a moment: a point light at the burst, in its colour,
  * fading over about a tenth of a second. The rest of the time a faint `moonlight` (an ambient
  * light, live-editable from the outliner) is all that shows the ground.
@@ -64,6 +67,7 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
         val result = show.step(t, dt)
         for (id in result.destroyedIds) events += SimEvent.ParticleDestroyed(id)
         for (id in result.spawnedIds) events += SimEvent.ParticleSpawned(id)
+        for (sound in result.sounds) events += SimEvent.Sound(soundKindOf(sound.noise), sound.position, sound.loudness, sound.time)
     }
 
     override fun frame(t: Double): SceneFrame {
@@ -177,6 +181,12 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
             h = (h xor (h ushr 31)) * -0x4b47d5b1c1c1c1c1L
             h = h xor (h ushr 29)
             return (h ushr 11).toDouble() / (1L shl 53).toDouble()
+        }
+
+        fun soundKindOf(noise: particlesim.examples.FireworkNoise): SoundKind = when (noise) {
+            particlesim.examples.FireworkNoise.LAUNCH -> SoundKind.LAUNCH
+            particlesim.examples.FireworkNoise.BOOM -> SoundKind.BOOM
+            particlesim.examples.FireworkNoise.CRACKLE -> SoundKind.CRACKLE
         }
 
         const val TWINKLE_RATE = 20.0

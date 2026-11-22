@@ -67,6 +67,22 @@ class FireworksSceneTest {
     }
 
     @Test
+    fun `launches and bursts reach the event channel as sounds`() {
+        val scene = FireworksScene()
+        val sounds = mutableListOf<SimEvent.Sound>()
+        var t = 0.0
+        repeat(600) {
+            scene.step(t); t += scene.dt
+            sounds += scene.frame(t).events.filterIsInstance<SimEvent.Sound>()
+        }
+        assertTrue(sounds.any { it.kind == SoundKind.LAUNCH })
+        assertTrue(sounds.any { it.kind == SoundKind.BOOM })
+        assertTrue(sounds.all { it.time in 0.0..t })
+        // Each frame passes its sounds on once, then forgets them.
+        assertTrue(scene.frame(t).events.isEmpty())
+    }
+
+    @Test
     fun `glitter twinkles between a quarter and full brightness, the same at the same time`() {
         val gold = FireworksShow.GLITTER_GOLD
         val levels = (0 until 200).map { FireworksScene.twinkle(gold, 17, it / FireworksScene.TWINKLE_RATE).r / gold.r }

@@ -1,5 +1,7 @@
 package particlesim.debug
 
+import particlesim.core.Vector3
+
 /**
  * §9.1's discrete-event channel: "each frame of state carries continuous data... plus discrete
  * events (e.g. force breaks, §5.4, and particle spawn/destroy, §14.2), so viewers and recordings
@@ -29,4 +31,21 @@ sealed class SimEvent {
 
     /** A particle created this step by an [particlesim.lifecycle.Emitter] (§14.1). */
     data class ParticleSpawned(val particleId: Int) : SimEvent()
+
+    /** Something that makes a noise (§10.2): a [kind] of sound at [position], [loudness] times
+     * its kind's usual level, at sim time [time]. The viewer synthesizes it, delays it by its
+     * distance from the camera over the speed of sound, and pans it by where it is. Carries
+     * no engine behaviour - sound is viewer-side only. */
+    data class Sound(val kind: SoundKind, val position: Vector3, val loudness: Double, val time: Double) : SimEvent()
+}
+
+/** The sounds a [SimEvent.Sound] can be. The wire carries the ordinal, so add new kinds at the
+ * end. */
+enum class SoundKind {
+    /** A firework shell leaving its mortar: a thump and a rising whoosh. */
+    LAUNCH,
+    /** A burst: a sharp crack and a deep, rumbling boom. */
+    BOOM,
+    /** A crackling star popping. */
+    CRACKLE,
 }

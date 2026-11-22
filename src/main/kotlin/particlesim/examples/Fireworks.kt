@@ -77,8 +77,26 @@ data class Shell(val id: Int, val burstTime: Double, val breakHeight: Double, va
  * each one into a brief point-light flash. */
 data class BurstFlash(val position: Vector3, val time: Double, val color: Color)
 
-/** What one [FireworksShow.step] created and destroyed - for the scene's §9.1 event channel. */
-data class FireworksStepResult(val spawnedIds: List<Int>, val destroyedIds: List<Int>)
+/** The noises a display makes. */
+enum class FireworkNoise {
+    /** A shell leaving its mortar. */
+    LAUNCH,
+    /** A burst - a shell's, or (quieter) a split sub-shell's or crossette comet's break. */
+    BOOM,
+    /** A crackling star popping as it burns out. */
+    CRACKLE,
+}
+
+/** A noise at [position] at [time], [loudness] times its kind's usual level. */
+data class FireworkSound(val noise: FireworkNoise, val position: Vector3, val loudness: Double, val time: Double)
+
+/** What one [FireworksShow.step] created, destroyed and sounded - for the scene's §9.1 event
+ * channel. */
+data class FireworksStepResult(
+    val spawnedIds: List<Int>,
+    val destroyedIds: List<Int>,
+    val sounds: List<FireworkSound> = emptyList(),
+)
 
 /**
  * A continuous fireworks display: shells launched from mortars spread along the ground, each
@@ -99,6 +117,8 @@ data class FireworksStepResult(val spawnedIds: List<Int>, val destroyedIds: List
  *   [BurstType.CROSSETTE] comet splits in a cross ([BurnoutEffect]). A [BurstType.PALM] frond
  *   sheds tail sparks all the while it burns.
  * - Every shell's burst is also recorded as a [BurstFlash] for a moment ([recentFlashes]).
+ * - Each step reports the noises it made ([FireworkSound]): a launch, a boom per burst (quieter
+ *   for split sub-shells and crossette breaks), and a crackle per crackling star.
  *
  * Break heights (90-140 m), star speeds (~30-42 m/s), burn times (~2 s, willows ~4 s) and every
  * burst type's star counts are modelling choices, picked to look right from the scene's
@@ -178,6 +198,7 @@ class FireworksShow(
         // Burnt-out stars go by lifetime; bursting shells go explicitly.
         val destroyed = destruction.resolve(store, groups, forces, now, dt, explicitIds = bursting.map { it.id }.toSet())
         val spawned = mutableListOf<Int>()
+        val sounds = mutableListOf<FireworkSound>()
         for (id in destroyed.destroyedIds) {
             starColors.remove(id)
             glitter.remove(id)
@@ -190,6 +211,11 @@ class FireworksShow(
                 is BurnoutEffect.Split -> splitBurst(effect.colors, position, velocity, now)
                 is BurnoutEffect.Crossette -> crossette(effect.color, position, velocity, now)
             }
+            sounds += when (effect) {
+                BurnoutEffect.Crackle -> FireworkSound(FireworkNoise.CRACKLE, position, 1.0, now)
+                is BurnoutEffect.Split -> FireworkSound(FireworkNoise.BOOM, position, SPLIT_BOOM_LOUDNESS, now)
+                is BurnoutEffect.Crossette -> FireworkSound(FireworkNoise.BOOM, position, CROSSETTE_BOOM_LOUDNESS, now)
+            }
         }
 
         // Burning palm fronds leave their tails behind them.
@@ -200,6 +226,7 @@ class FireworksShow(
         for ((shell, position, velocity) in bursts) {
             spawned += burst(shell, position, velocity, now)
             flashes.addLast(BurstFlash(position, now, shell.colors.first()))
+            sounds += FireworkSound(FireworkNoise.BOOM, position, 1.0, now)
         }
         while (flashes.isNotEmpty() && now - flashes.first().time > FLASH_MEMORY) flashes.removeFirst()
 
@@ -209,10 +236,14 @@ class FireworksShow(
                 in 0.7..0.9 -> 2
                 else -> 3
             }
-            repeat(salvo) { spawned += launch(now) }
+            repeat(salvo) {
+                val id = launch(now)
+                spawned += id
+                sounds += FireworkSound(FireworkNoise.LAUNCH, store.position(id), 1.0, now)
+            }
             nextLaunchTime = now + random.nextDouble(minLaunchInterval, maxLaunchInterval)
         }
-        return FireworksStepResult(spawned, destroyed.destroyedIds)
+        return FireworksStepResult(spawned, destroyed.destroyedIds, sounds)
     }
 
     /** Fires one shell from a random mortar, aimed to peak at a random break height. */
@@ -380,6 +411,9 @@ class FireworksShow(
         const val STAR_GROUP = "stars"
         const val MORTAR_HEIGHT = 0.5
         const val SHELL_MASS = 0.2
+        /** How loud a split sub-shell's and a crossette comet's breaks are, next to a shell's. */
+        const val SPLIT_BOOM_LOUDNESS = 0.35
+        const val CROSSETTE_BOOM_LOUDNESS = 0.2
         /** How long a burst stays in [recentFlashes], s - longer than the scene's flash lasts. */
         const val FLASH_MEMORY = 0.5
         /** How far into its climb a shell's fuse runs out. */

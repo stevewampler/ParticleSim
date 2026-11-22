@@ -6091,7 +6091,35 @@ load. Full `./gradlew test -q` suite green throughout.
       one additive `LineSegments`. History is dropped for particles that are
       gone or hidden, and cleared on a restart or scene change. Round-trip
       tested.
+- [x] **Sound** (§10.2): `SimEvent.Sound` (wire event kind 3: sound
+      kind, position, loudness, time) with `SoundKind` LAUNCH/BOOM/CRACKLE.
+      `FireworksShow.step` reports a launch per shell at its mortar, a
+      boom per shell burst (loudness 1), quieter booms for split sub-shell
+      (0.35) and crossette (0.2) breaks, and a crackle per crackling star
+      as it burns out; the scene forwards them.
+      - Viewer: a "sound" box in the display panel (off by default; the
+        click is what lets the page make sound). Each sound is synthesized
+        with the Web Audio API: launch = sine thump plus a rising
+        band-passed whoosh; boom = high-passed crack, a low-passed noise
+        rumble that darkens as it fades, and a sub-bass thump (quieter
+        booms are shorter and higher); crackle = three tiny high-passed
+        noise snaps over 80 ms.
+      - Placed with a `PannerNode` (inverse distance, 60 m reference) and
+        the listener on the camera; delayed by distance / 343 m/s, plus the
+        event's offset within a multi-step frame, over the playback speed.
+      - Pausing (or hiding the tab) suspends the audio clock; unticking or
+        a scene change swaps the output bus to cut everything off. At most
+        64 sounds at once, with 12 kept free of crackles for launches and
+        booms; a compressor keeps many booms from clipping.
+      - Tested: sound event round-trip and size, launch and boom sounds at
+        the right places and times, split/crossette break loudness, one
+        crackle per crackling star, and sounds reaching the scene's event
+        channel once. The synthesis itself isn't unit-tested; checked
+        headless for scheduling (0.4-0.6 s delays at 140-210 m), pause
+        and untick suspending, and no errors over 25 s and a scene
+        switch. How it sounds needs a person's ears.
 - [ ] Gaps / possible next steps:
+      - sounds' tone and levels are tuned by guesswork, not yet by ear;
       - the launcher isn't an `Emitter`, so it isn't in the outliner, can't
         be edited live, and isn't in §9.5 checkpoints;
       - `Drag` has no editable fields, so `star-drag` and `shell-drag`

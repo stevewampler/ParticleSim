@@ -127,9 +127,10 @@ import kotlin.math.roundToInt
  *                    kind==1: f64 radius
  *                    kind==2: f64 hx, hy, hz }
  * i32  eventCount
- * eventCount * { u8 kind (0=forceBreak, 1=particleDestroyed, 2=particleSpawned),
+ * eventCount * { u8 kind (0=forceBreak, 1=particleDestroyed, 2=particleSpawned, 3=sound),
  *                kind==0: i32 nameLen, nameLen UTF-8 bytes
- *                kind==1 or 2: i32 particleId }
+ *                kind==1 or 2: i32 particleId
+ *                kind==3: u8 soundKind (SoundKind ordinal), f64 x, y, z, f64 loudness, f64 time }
  * i32  availableSceneCount; availableSceneCount * { i32 nameLen, nameLen UTF-8 bytes }
  * i32  activeSceneNameLen; activeSceneNameLen UTF-8 bytes
  *                           (§9.6's scene library — an empty list and an empty name for every
@@ -312,6 +313,9 @@ object BinaryFrame {
     private const val FORCE_BREAK_KIND: Byte = 0
     private const val PARTICLE_DESTROYED_KIND: Byte = 1
     private const val PARTICLE_SPAWNED_KIND: Byte = 2
+    private const val SOUND_KIND: Byte = 3
+    /** u8 soundKind, f64 x, y, z, f64 loudness, f64 time. */
+    private const val EVENT_SOUND_SIZE = 1 + 8 * 5
     private const val FORCE_KIND: Byte = 0
     private const val CONSTRAINT_KIND: Byte = 1
     private const val LIGHT_FIELD_KIND: Byte = 2
@@ -547,6 +551,13 @@ object BinaryFrame {
                 is SimEvent.ForceBreak -> { buffer.put(FORCE_BREAK_KIND); putString(buffer, event.name) }
                 is SimEvent.ParticleDestroyed -> { buffer.put(PARTICLE_DESTROYED_KIND); buffer.putInt(event.particleId) }
                 is SimEvent.ParticleSpawned -> { buffer.put(PARTICLE_SPAWNED_KIND); buffer.putInt(event.particleId) }
+                is SimEvent.Sound -> {
+                    buffer.put(SOUND_KIND)
+                    buffer.put(event.kind.ordinal.toByte())
+                    buffer.putDouble(event.position.x); buffer.putDouble(event.position.y); buffer.putDouble(event.position.z)
+                    buffer.putDouble(event.loudness)
+                    buffer.putDouble(event.time)
+                }
             }
         }
         putNameList(buffer, availableScenes)
@@ -707,6 +718,12 @@ object BinaryFrame {
                 FORCE_BREAK_KIND -> SimEvent.ForceBreak(getString(buf))
                 PARTICLE_DESTROYED_KIND -> SimEvent.ParticleDestroyed(buf.int)
                 PARTICLE_SPAWNED_KIND -> SimEvent.ParticleSpawned(buf.int)
+                SOUND_KIND -> SimEvent.Sound(
+                    kind = SoundKind.entries[buf.get().toInt()],
+                    position = Vector3(buf.double, buf.double, buf.double),
+                    loudness = buf.double,
+                    time = buf.double,
+                )
                 else -> error("unknown event kind byte: $kind")
             }
         }
@@ -892,6 +909,7 @@ object BinaryFrame {
         is SimEvent.ForceBreak -> stringSize(event.name)
         is SimEvent.ParticleDestroyed -> EVENT_PARTICLE_ID_SIZE
         is SimEvent.ParticleSpawned -> EVENT_PARTICLE_ID_SIZE
+        is SimEvent.Sound -> EVENT_SOUND_SIZE
     }
 
     private fun putString(buffer: ByteBuffer, s: String) {

@@ -193,6 +193,7 @@
       <div class="arrowScaleRow" title="Velocity arrow length"><input type="range" id="velocityScaleSlider" min="-2" max="2" step="0.05" value="0"><span id="velocityScaleText"></span></div>
       <label title="An arrow on every particle showing its acceleration over the last step - each group's panel can leave its own out"><input type="checkbox" id="accelerationArrowsToggle"> acceleration arrows</label>
       <div class="arrowScaleRow" title="Acceleration arrow length"><input type="range" id="accelerationScaleSlider" min="-2" max="2" step="0.05" value="0"><span id="accelerationScaleText"></span></div>
+      <label title="Play the scene's sounds (e.g. fireworks), each heard from where it happens and delayed by its distance over the speed of sound"><input type="checkbox" id="soundToggle"> sound</label>
     </section>
     <section>
       <h4>time</h4>
@@ -1728,6 +1729,12 @@ function decodeFrame(buffer) {
     } else if (kind === 1) {
       events[i] = { kind: "destroyed", particleId: view.getInt32(offset, true) };
       offset += 4;
+    } else if (kind === 3) {
+      const soundKind = ["launch", "boom", "crackle"][view.getUint8(offset)]; offset += 1;
+      const x = view.getFloat64(offset, true), y = view.getFloat64(offset + 8, true), z = view.getFloat64(offset + 16, true);
+      const loudness = view.getFloat64(offset + 24, true), time = view.getFloat64(offset + 32, true);
+      offset += 40;
+      events[i] = { kind: "sound", soundKind, position: { x, y, z }, loudness, time };
     } else {
       events[i] = { kind: "spawned", particleId: view.getInt32(offset, true) };
       offset += 4;
@@ -1851,6 +1858,7 @@ document.getElementById("stepOnceBtn").addEventListener("click", () => {
 // same thing (or exist at all).
 function resetViewerStateForSceneChange(sceneName) {
   resetStats();
+  silenceSounds();
   selectedKind = null;
   selectedName = null;
   hiddenGroups.clear();
@@ -1978,7 +1986,8 @@ document.addEventListener("click", () => statusBarSceneMenuEl.classList.remove("
 
 document.querySelectorAll("#speedButtons button").forEach((btn) => {
   btn.addEventListener("click", () => {
-    send({ type: "set_speed", multiplier: parseFloat(btn.dataset.speed) });
+    currentSpeed = parseFloat(btn.dataset.speed);
+    send({ type: "set_speed", multiplier: currentSpeed });
     document.querySelectorAll("#speedButtons button").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
   });
@@ -3263,6 +3272,7 @@ function connect() {
   ws.onmessage = (event) => {
     const frame = decodeFrame(event.data);
     applyFrame(frame);
+    playFrameSounds(frame);
     updateStats(frame);
     clearSelectionIfParticleDestroyed(frame);
     updateOutliner(frame.registry);
@@ -3488,9 +3498,223 @@ renderer.domElement.addEventListener("contextmenu", (event) => {
   if (forceName) selectObject("forces", forceName); // "" (unnamed) has no panel to open
 });
 
+// --- Sound (§10.2) ------------------------------------------------------------------------
+// A scene's SimEvent.Sound events (fireworks launches, bursts, crackles), synthesized here with
+// the Web Audio API - no audio files. Each sound is placed where it happened (a PannerNode, with
+// the listener riding on the camera) and starts late by its distance from the camera over the
+// speed of sound, so a burst 170 m off booms half a second after its flash - in sim time, so
+// divided by the playback speed. Browsers only let a page make sound after a click, so it's off
+// until the "sound" box is ticked. Pausing suspends the audio clock (delayed sounds wait with
+// the picture); a scene change or unticking the box cuts everything off.
+const SPEED_OF_SOUND = 343; // m/s, in air at 20 °C
+const MAX_VOICES = 64;
+// Crackles are the many small sounds; they stop this far short of MAX_VOICES, so launches and
+// booms always find room.
+const CRACKLE_HEADROOM = 12;
+const soundToggleEl = document.getElementById("soundToggle");
+let currentSpeed = 1;
+let soundEnabled = false;
+let audioCtx = null;
+let audioOut = null;    // the compressor every sound ends in
+let soundBus = null;    // replaced (and the old one cut off) to silence everything at once
+let soundBusGeneration = 0;
+let activeVoices = 0;
+let noiseBuffer = null; // four seconds of white noise, shared by every sound (longer than any one)
+
+function ensureAudio() {
+  if (audioCtx) return;
+  audioCtx = new AudioContext();
+  // Many booms at once would clip; a compressor keeps the mix in range, as a recording would.
+  audioOut = audioCtx.createDynamicsCompressor();
+  audioOut.threshold.value = -20;
+  audioOut.ratio.value = 6;
+  audioOut.connect(audioCtx.destination);
+  noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 4, audioCtx.sampleRate);
+  const samples = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < samples.length; i++) samples[i] = Math.random() * 2 - 1;
+  newSoundBus();
+}
+
+function newSoundBus() {
+  if (soundBus) soundBus.disconnect();
+  soundBus = audioCtx.createGain();
+  soundBus.gain.value = 0.9;
+  soundBus.connect(audioOut);
+  soundBusGeneration++;
+  activeVoices = 0;
+}
+
+function silenceSounds() {
+  if (audioCtx) newSoundBus();
+}
+
+soundToggleEl.addEventListener("change", () => {
+  soundEnabled = soundToggleEl.checked;
+  if (soundEnabled) ensureAudio(); // inside the click, which is what lets the page make sound
+  else silenceSounds();
+  syncAudioRunning();
+});
+document.addEventListener("visibilitychange", () => syncAudioRunning());
+
+// The audio clock runs only while sound is on, the sim is running and the page is visible.
+function syncAudioRunning() {
+  if (!audioCtx) return;
+  const wanted = soundEnabled && !isPaused && !document.hidden;
+  if (wanted && audioCtx.state === "suspended") audioCtx.resume();
+  else if (!wanted && audioCtx.state === "running") audioCtx.suspend();
+}
+
+function updateAudioListener() {
+  if (!audioCtx || !soundEnabled) return;
+  const listener = audioCtx.listener;
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+  const p = camera.position;
+  if (listener.positionX) {
+    listener.positionX.value = p.x; listener.positionY.value = p.y; listener.positionZ.value = p.z;
+    listener.forwardX.value = forward.x; listener.forwardY.value = forward.y; listener.forwardZ.value = forward.z;
+    listener.upX.value = up.x; listener.upY.value = up.y; listener.upZ.value = up.z;
+  } else {
+    listener.setPosition(p.x, p.y, p.z);
+    listener.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z);
+  }
+}
+
+function playFrameSounds(frame) {
+  if (!soundEnabled || !audioCtx || isPaused || document.hidden) return;
+  const sounds = frame.events.filter((e) => e.kind === "sound");
+  if (sounds.length === 0) return;
+  // Launches and booms first, so crackles never crowd them out.
+  sounds.sort((a, b) => (a.soundKind === "crackle") - (b.soundKind === "crackle"));
+  for (const sound of sounds) {
+    const limit = sound.soundKind === "crackle" ? MAX_VOICES - CRACKLE_HEADROOM : MAX_VOICES;
+    if (activeVoices >= limit) continue;
+    const distance = Math.hypot(sound.position.x - camera.position.x, sound.position.y - camera.position.y, sound.position.z - camera.position.z);
+    // sound.time - frame.t (zero or negative) places sounds from a frame that covered several
+    // steps at the step they happened in.
+    const delay = Math.max(0, (distance / SPEED_OF_SOUND + (sound.time - frame.t)) / currentSpeed);
+    const start = audioCtx.currentTime + 0.02 + delay;
+    const out = soundPanner(sound.position);
+    const loudness = Math.max(0, sound.loudness);
+    const last = sound.soundKind === "launch" ? playLaunch(out, start, loudness)
+      : sound.soundKind === "boom" ? playBoom(out, start, loudness)
+      : playCrackle(out, start, loudness);
+    const generation = soundBusGeneration;
+    activeVoices++;
+    last.onended = () => {
+      if (generation === soundBusGeneration) activeVoices = Math.max(0, activeVoices - 1);
+      out.disconnect();
+    };
+  }
+}
+
+// Where a sound is: louder near the camera (1/distance beyond 60 m) and panned by direction.
+function soundPanner(position) {
+  const panner = audioCtx.createPanner();
+  panner.panningModel = "equalpower";
+  panner.distanceModel = "inverse";
+  panner.refDistance = 60;
+  panner.rolloffFactor = 1;
+  if (panner.positionX) {
+    panner.positionX.value = position.x; panner.positionY.value = position.y; panner.positionZ.value = position.z;
+  } else {
+    panner.setPosition(position.x, position.y, position.z);
+  }
+  panner.connect(soundBus);
+  return panner;
+}
+
+// A slice of the shared noise from a random point, playing [duration] seconds from [start].
+function noiseSource(start, duration) {
+  const source = audioCtx.createBufferSource();
+  source.buffer = noiseBuffer;
+  source.start(start, Math.random() * Math.max(0, noiseBuffer.duration - duration - 0.01), duration);
+  return source;
+}
+
+// A gain that rises to [peak] over [attack] seconds from [start], then dies away exponentially
+// to silence at [end].
+function envelope(start, attack, peak, end) {
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(Math.max(peak, 0.0002), start + attack);
+  gain.gain.exponentialRampToValueAtTime(0.0001, end);
+  return gain;
+}
+
+function filter(type, frequency, q = 0.7) {
+  const f = audioCtx.createBiquadFilter();
+  f.type = type;
+  f.frequency.value = frequency;
+  f.Q.value = q;
+  return f;
+}
+
+// Each play* function wires its sound into [out] and returns the source that finishes last.
+
+// A shell leaving its mortar: a low thump, then a whoosh climbing in pitch as it goes up.
+function playLaunch(out, start, loudness) {
+  const thump = audioCtx.createOscillator();
+  thump.frequency.setValueAtTime(110, start);
+  thump.frequency.exponentialRampToValueAtTime(45, start + 0.18);
+  thump.connect(envelope(start, 0.005, 0.9 * loudness, start + 0.35)).connect(out);
+  thump.start(start);
+  thump.stop(start + 0.4);
+
+  const whoosh = noiseSource(start, 1.4);
+  const band = filter("bandpass", 500, 2.5);
+  band.frequency.setValueAtTime(500, start);
+  band.frequency.exponentialRampToValueAtTime(2500, start + 1.2);
+  whoosh.connect(band).connect(envelope(start, 0.08, 0.3 * loudness, start + 1.35)).connect(out);
+  return whoosh;
+}
+
+// A burst: a sharp crack, a deep boom whose rumble darkens as it dies, and a sub-bass thump.
+// Quieter bursts (split and crossette breaks) are also shorter and higher - smaller charges.
+function playBoom(out, start, loudness) {
+  const length = 1.0 + 1.6 * loudness;
+  const crack = noiseSource(start, 0.08);
+  crack.connect(filter("highpass", 1200)).connect(envelope(start, 0.002, 0.8 * loudness, start + 0.07)).connect(out);
+
+  const body = noiseSource(start, length);
+  const low = filter("lowpass", 900);
+  const top = 900 + (1 - loudness) * 1500;
+  low.frequency.setValueAtTime(top, start);
+  low.frequency.exponentialRampToValueAtTime(110, start + length * 0.6);
+  body.connect(low).connect(envelope(start, 0.01, 1.4 * loudness, start + length)).connect(out);
+
+  const sub = audioCtx.createOscillator();
+  sub.frequency.setValueAtTime(65 + (1 - loudness) * 60, start);
+  sub.frequency.exponentialRampToValueAtTime(30, start + 0.8);
+  sub.connect(envelope(start, 0.01, 0.9 * loudness, start + 0.9)).connect(out);
+  sub.start(start);
+  sub.stop(start + 0.95);
+  return body;
+}
+
+// A crackling star popping: its three sparks' snaps, a few milliseconds of bright noise each,
+// scattered over 80 ms.
+function playCrackle(out, start, loudness) {
+  let last = null;
+  let lastEnd = -1;
+  for (let i = 0; i < 3; i++) {
+    const at = start + Math.random() * 0.08;
+    const length = 0.008 + Math.random() * 0.01;
+    const pop = noiseSource(at, length + 0.005);
+    pop.connect(filter("highpass", 2000 + Math.random() * 3000))
+      .connect(envelope(at, 0.001, 0.5 * loudness * (0.5 + Math.random()), at + length))
+      .connect(out);
+    if (at + length > lastEnd) { lastEnd = at + length; last = pop; }
+  }
+  return last;
+}
+
 function animate() {
   requestAnimationFrame(animate);
   if (cameraMode === "manual") controls.update();
+  syncAudioRunning();
+  updateAudioListener();
   renderer.render(scene, camera);
 }
 animate();
