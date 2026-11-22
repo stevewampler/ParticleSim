@@ -71,7 +71,16 @@ data class StarRecipe(
 )
 
 /** A shell on its way up, the height it's aimed to burst at, and what it will burst into. */
-data class Shell(val id: Int, val burstTime: Double, val breakHeight: Double, val type: BurstType, val colors: List<Color>)
+data class Shell(
+    val id: Int,
+    val burstTime: Double,
+    val breakHeight: Double,
+    val type: BurstType,
+    val colors: List<Color>,
+    /** When this shell starts whistling (it whistles until [whistleEnd]), or null if it doesn't. */
+    val whistleStart: Double? = null,
+    val whistleEnd: Double? = null,
+)
 
 /** A shell bursting at [position] at [time], lighting the ground in [color] - the scene turns
  * each one into a brief point-light flash. */
@@ -85,10 +94,13 @@ enum class FireworkNoise {
     BOOM,
     /** A crackling star popping as it burns out. */
     CRACKLE,
+    /** A whistling shell's whistle, over the last second or so of its climb. */
+    WHISTLE,
 }
 
-/** A noise at [position] at [time], [loudness] times its kind's usual level. */
-data class FireworkSound(val noise: FireworkNoise, val position: Vector3, val loudness: Double, val time: Double)
+/** A noise at [position] at [time], [loudness] times its kind's usual level, lasting [duration]
+ * seconds (0 for a noise whose length is its kind's own). */
+data class FireworkSound(val noise: FireworkNoise, val position: Vector3, val loudness: Double, val time: Double, val duration: Double = 0.0)
 
 /** What one [FireworksShow.step] created, destroyed and sounded - for the scene's §9.1 event
  * channel. */
@@ -118,7 +130,9 @@ data class FireworksStepResult(
  *   sheds tail sparks all the while it burns.
  * - Every shell's burst is also recorded as a [BurstFlash] for a moment ([recentFlashes]).
  * - Each step reports the noises it made ([FireworkSound]): a launch, a boom per burst (quieter
- *   for split sub-shells and crossette breaks), and a crackle per crackling star.
+ *   for split sub-shells and crossette breaks), a crackle per crackling star, and a whistle for
+ *   the shells that whistle ([WHISTLE_CHANCE]). A whistle runs over the last ~1 s of the climb
+ *   and stops just before the burst - as measured from a field recording of a display.
  *
  * Break heights (90-140 m), star speeds (~30-42 m/s), burn times (~2 s, willows ~4 s) and every
  * burst type's star counts are modelling choices, picked to look right from the scene's
@@ -187,6 +201,7 @@ class FireworksShow(
         val now = t + dt
 
         // Read each bursting shell before it's destroyed below.
+        val whistling = shells.filter { val start = it.whistleStart; start != null && start > t && start <= now }
         val bursting = shells.filter { now >= it.burstTime }
         val bursts = bursting.map { Triple(it, store.position(it.id), store.velocity(it.id)) }
         shells.removeAll(bursting)
@@ -199,6 +214,10 @@ class FireworksShow(
         val destroyed = destruction.resolve(store, groups, forces, now, dt, explicitIds = bursting.map { it.id }.toSet())
         val spawned = mutableListOf<Int>()
         val sounds = mutableListOf<FireworkSound>()
+        for (shell in whistling) {
+            val start = shell.whistleStart!!
+            sounds += FireworkSound(FireworkNoise.WHISTLE, store.position(shell.id), 1.0, start, duration = shell.whistleEnd!! - start)
+        }
         for (id in destroyed.destroyedIds) {
             starColors.remove(id)
             glitter.remove(id)
@@ -259,7 +278,14 @@ class FireworksShow(
         val id = store.create(position = position, velocity = velocity, mass = ScalarExpr.of(SHELL_MASS), spawnTime = now)
         groups.add(ALL_GROUP, id)
         groups.add(SHELL_GROUP, id)
-        shells += Shell(id, now + fuse, breakHeight, type, colorsFor(type))
+        val burstTime = now + fuse
+        var whistleStart: Double? = null
+        var whistleEnd: Double? = null
+        if (random.nextDouble() < WHISTLE_CHANCE) {
+            whistleEnd = burstTime - random.nextDouble(WHISTLE_MIN_GAP, WHISTLE_MAX_GAP)
+            whistleStart = whistleEnd - random.nextDouble(WHISTLE_MIN_LENGTH, WHISTLE_MAX_LENGTH)
+        }
+        shells += Shell(id, burstTime, breakHeight, type, colorsFor(type), whistleStart, whistleEnd)
         return id
     }
 
@@ -411,6 +437,15 @@ class FireworksShow(
         const val STAR_GROUP = "stars"
         const val MORTAR_HEIGHT = 0.5
         const val SHELL_MASS = 0.2
+        /** The share of shells that whistle on the way up. */
+        const val WHISTLE_CHANCE = 0.3
+        /** A whistle's length, s, and the gap between it stopping and the burst - from the
+         * whistles in a field recording, which ran 1.0-1.15 s and stopped 0.08-0.23 s before
+         * their booms. */
+        const val WHISTLE_MIN_LENGTH = 0.95
+        const val WHISTLE_MAX_LENGTH = 1.15
+        const val WHISTLE_MIN_GAP = 0.08
+        const val WHISTLE_MAX_GAP = 0.23
         /** How loud a split sub-shell's and a crossette comet's breaks are, next to a shell's. */
         const val SPLIT_BOOM_LOUDNESS = 0.35
         const val CROSSETTE_BOOM_LOUDNESS = 0.2

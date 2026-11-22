@@ -33,10 +33,11 @@ sealed class SimEvent {
     data class ParticleSpawned(val particleId: Int) : SimEvent()
 
     /** Something that makes a noise (§10.2): a [kind] of sound at [position], [loudness] times
-     * its kind's usual level, at sim time [time]. The viewer synthesizes it, delays it by its
-     * distance from the camera over the speed of sound, and pans it by where it is. Carries
-     * no engine behaviour - sound is viewer-side only. */
-    data class Sound(val kind: SoundKind, val position: Vector3, val loudness: Double, val time: Double) : SimEvent()
+     * its kind's usual level, at sim time [time], lasting [duration] seconds (0 for a sound whose
+     * length is its kind's own, e.g. a boom). The viewer synthesizes it, delays it by its
+     * distance from the camera over the speed of sound, and pans it by where it is. Carries no
+     * engine behaviour - sound is viewer-side only. */
+    data class Sound(val kind: SoundKind, val position: Vector3, val loudness: Double, val time: Double, val duration: Double = 0.0) : SimEvent()
 }
 
 /** The sounds a [SimEvent.Sound] can be. The wire carries the ordinal, so add new kinds at the
@@ -48,4 +49,6 @@ enum class SoundKind {
     BOOM,
     /** A crackling star popping. */
     CRACKLE,
+    /** A whistling shell's falling whistle, for the event's duration. */
+    WHISTLE,
 }

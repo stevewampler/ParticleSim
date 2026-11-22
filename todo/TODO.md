@@ -6092,11 +6092,14 @@ load. Full `./gradlew test -q` suite green throughout.
       gone or hidden, and cleared on a restart or scene change. Round-trip
       tested.
 - [x] **Sound** (§10.2): `SimEvent.Sound` (wire event kind 3: sound
-      kind, position, loudness, time) with `SoundKind` LAUNCH/BOOM/CRACKLE.
+      kind, position, loudness, time, duration) with `SoundKind`
+      LAUNCH/BOOM/CRACKLE/WHISTLE.
       `FireworksShow.step` reports a launch per shell at its mortar, a
       boom per shell burst (loudness 1), quieter booms for split sub-shell
-      (0.35) and crossette (0.2) breaks, and a crackle per crackling star
-      as it burns out; the scene forwards them.
+      (0.35) and crossette (0.2) breaks, a crackle per crackling star
+      as it burns out, and a whistle for the 30% of shells that whistle -
+      over the last 0.95-1.15 s of the climb, stopping 0.08-0.23 s before
+      the burst, as the recording's whistles did. The scene forwards them.
       - Viewer: a "sound" box in the display panel (off by default; the
         click is what lets the page make sound). Each sound is synthesized
         with the Web Audio API: launch = sine thump plus a rising
@@ -6111,7 +6114,15 @@ load. Full `./gradlew test -q` suite green throughout.
         ~500-540 Hz against the recording's 550-650 Hz, and the same band
         split (about 20/45/25% across 150-300/300-600/600-1200 Hz) and
         decay times. Two earlier attempts - bright noise ("rain on a tin
-        roof"), then sub-bass (too dull) - were both wrong. Booms fade with
+        roof"), then sub-bass (too dull) - were both wrong. Whistle and
+        crackle are matched to the same recording: the whistle is a
+        near-pure tone falling ~28% from 5.1-6.2 kHz over ~1 s, with a
+        second harmonic ~33 dB down, a little breath noise, a ~2 dB
+        waver, at ~39 dB below a boom (recording -38 to -40); the crackle
+        is 1-1.5 ms clicks band-limited to 1-6 kHz (centroid ~3.2 kHz
+        against the recording's 2.6-3.3 kHz), a 12 dB level spread, 1.6
+        clicks per popping star, from 24 pre-made click buffers.
+        Booms fade with
         distance from a 150 m reference (other sounds 60 m); crackle = three tiny high-passed
         noise snaps over 80 ms.
       - Placed with a `PannerNode` (inverse distance) and
@@ -6123,8 +6134,10 @@ load. Full `./gradlew test -q` suite green throughout.
         booms; a compressor keeps many booms from clipping.
       - Tested: sound event round-trip and size, launch and boom sounds at
         the right places and times, split/crossette break loudness, one
-        crackle per crackling star, and sounds reaching the scene's event
-        channel once. The synthesis itself isn't unit-tested; checked
+        crackle per crackling star, whistling share, length, gap and
+        event duration, and sounds reaching the scene's event channel
+        once. The synthesis itself isn't unit-tested; it was rendered
+        offline and measured against the recording, and checked
         headless for scheduling (0.4-0.6 s delays at 140-210 m), pause
         and untick suspending, and no errors over 25 s and a scene
         switch. How it sounds needs a person's ears.
@@ -6134,8 +6147,8 @@ load. Full `./gradlew test -q` suite green throughout.
       nothing. Tested by restarting on the same port after a client connected
       (fails without the flag).
 - [ ] Gaps / possible next steps:
-      - the launch whoosh and crackle are still tuned by guesswork; the
-        recording also has whistles, which the display doesn't make;
+      - the launch thump and whoosh are still tuned by guesswork (the
+        recording has no clear launches to measure);
       - the launcher isn't an `Emitter`, so it isn't in the outliner, can't
         be edited live, and isn't in §9.5 checkpoints;
       - `Drag` has no editable fields, so `star-drag` and `shell-drag`

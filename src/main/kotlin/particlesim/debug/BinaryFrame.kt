@@ -130,7 +130,8 @@ import kotlin.math.roundToInt
  * eventCount * { u8 kind (0=forceBreak, 1=particleDestroyed, 2=particleSpawned, 3=sound),
  *                kind==0: i32 nameLen, nameLen UTF-8 bytes
  *                kind==1 or 2: i32 particleId
- *                kind==3: u8 soundKind (SoundKind ordinal), f64 x, y, z, f64 loudness, f64 time }
+ *                kind==3: u8 soundKind (SoundKind ordinal), f64 x, y, z, f64 loudness, f64 time,
+ *                         f64 duration }
  * i32  availableSceneCount; availableSceneCount * { i32 nameLen, nameLen UTF-8 bytes }
  * i32  activeSceneNameLen; activeSceneNameLen UTF-8 bytes
  *                           (§9.6's scene library — an empty list and an empty name for every
@@ -314,8 +315,8 @@ object BinaryFrame {
     private const val PARTICLE_DESTROYED_KIND: Byte = 1
     private const val PARTICLE_SPAWNED_KIND: Byte = 2
     private const val SOUND_KIND: Byte = 3
-    /** u8 soundKind, f64 x, y, z, f64 loudness, f64 time. */
-    private const val EVENT_SOUND_SIZE = 1 + 8 * 5
+    /** u8 soundKind, f64 x, y, z, f64 loudness, f64 time, f64 duration. */
+    private const val EVENT_SOUND_SIZE = 1 + 8 * 6
     private const val FORCE_KIND: Byte = 0
     private const val CONSTRAINT_KIND: Byte = 1
     private const val LIGHT_FIELD_KIND: Byte = 2
@@ -557,6 +558,7 @@ object BinaryFrame {
                     buffer.putDouble(event.position.x); buffer.putDouble(event.position.y); buffer.putDouble(event.position.z)
                     buffer.putDouble(event.loudness)
                     buffer.putDouble(event.time)
+                    buffer.putDouble(event.duration)
                 }
             }
         }
@@ -723,6 +725,7 @@ object BinaryFrame {
                     position = Vector3(buf.double, buf.double, buf.double),
                     loudness = buf.double,
                     time = buf.double,
+                    duration = buf.double,
                 )
                 else -> error("unknown event kind byte: $kind")
             }

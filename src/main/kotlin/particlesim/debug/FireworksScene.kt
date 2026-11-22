@@ -25,7 +25,7 @@ import kotlin.math.exp
  * ignite and dim as they burn out; crackling glitter twinkles, strobes blink, and palm fronds are
  * drawn larger than other stars.
  *
- * Every launch, burst and crackle is sent as a [SimEvent.Sound]; the viewer's "sound" checkbox
+ * Every launch, burst, crackle and whistle is sent as a [SimEvent.Sound]; the viewer's "sound" checkbox
  * plays them, each delayed by its distance from the camera over the speed of sound.
  *
  * Each shell's burst lights the ground for a moment: a point light at the burst, in its colour,
@@ -67,7 +67,7 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
         val result = show.step(t, dt)
         for (id in result.destroyedIds) events += SimEvent.ParticleDestroyed(id)
         for (id in result.spawnedIds) events += SimEvent.ParticleSpawned(id)
-        for (sound in result.sounds) events += SimEvent.Sound(soundKindOf(sound.noise), sound.position, sound.loudness, sound.time)
+        for (sound in result.sounds) events += SimEvent.Sound(soundKindOf(sound.noise), sound.position, sound.loudness, sound.time, sound.duration)
     }
 
     override fun frame(t: Double): SceneFrame {
@@ -187,6 +187,7 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
             particlesim.examples.FireworkNoise.LAUNCH -> SoundKind.LAUNCH
             particlesim.examples.FireworkNoise.BOOM -> SoundKind.BOOM
             particlesim.examples.FireworkNoise.CRACKLE -> SoundKind.CRACKLE
+            particlesim.examples.FireworkNoise.WHISTLE -> SoundKind.WHISTLE
         }
 
         const val TWINKLE_RATE = 20.0

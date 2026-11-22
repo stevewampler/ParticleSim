@@ -1083,8 +1083,8 @@ external image onto a mesh's surface.
   trails are additive, so overlapping ones brighten, and they're never
   picked. Added for the `fireworks` scene (§14).
 - **Sound**: a scene may send `SimEvent.Sound` events on §9.1's event
-  channel: a kind (launch, boom, crackle), a position, a loudness and the
-  sim time it happened. The viewer synthesizes each one with the Web Audio
+  channel: a kind (launch, boom, crackle, whistle), a position, a
+  loudness, the sim time it happened and a duration (for a whistle). The viewer synthesizes each one with the Web Audio
   API (no audio files), pans it and fades it with distance from the camera,
   and starts it late by its distance over the speed of sound (343 m/s),
   divided by the playback speed. It's off until the display panel's

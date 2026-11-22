@@ -425,6 +425,39 @@ class FireworksTest {
     }
 
     @Test
+    fun `about 30% of shells whistle for about a second, stopping just before they burst`() {
+        val show = FireworksShow()
+        val sounds = mutableListOf<FireworkSound>()
+        val shells = mutableMapOf<Int, Shell>()
+        var t = 0.0
+        repeat((120.0 / FIREWORKS_DT).toInt()) {
+            sounds += show.step(t, FIREWORKS_DT).sounds
+            t += FIREWORKS_DT
+            for (s in show.liveShells) shells[s.id] = s
+        }
+        // Only shells that have burst, so every whistle has had its chance to sound.
+        val done = shells.values.filter { it.burstTime < t }
+        val whistlers = done.filter { it.whistleStart != null }
+        val share = whistlers.size.toDouble() / done.size
+        assertTrue(share in 0.2..0.4, "whistling share $share of ${done.size}")
+        for (s in whistlers) {
+            val length = s.whistleEnd!! - s.whistleStart!!
+            val gap = s.burstTime - s.whistleEnd!!
+            assertTrue(length in FireworksShow.WHISTLE_MIN_LENGTH..FireworksShow.WHISTLE_MAX_LENGTH)
+            assertTrue(gap in FireworksShow.WHISTLE_MIN_GAP..FireworksShow.WHISTLE_MAX_GAP)
+        }
+        // One whistle sound per whistling shell, at its start, from where the shell then was.
+        val whistles = sounds.filter { it.noise == FireworkNoise.WHISTLE && it.time < t - 2.0 }
+        val expected = whistlers.filter { it.whistleStart!! < t - 2.0 }
+        assertEquals(expected.map { it.whistleStart!! }.sorted(), whistles.map { it.time }.sorted())
+        for (w in whistles) {
+            val s = expected.single { it.whistleStart == w.time }
+            assertEquals(s.whistleEnd!! - s.whistleStart!!, w.duration, 1e-12)
+            assertTrue(w.position.y > 20.0, "whistling high up the climb, at ${w.position.y} m")
+        }
+    }
+
+    @Test
     fun `the same seed gives the same display`() {
         val a = FireworksShow(seed = 7L)
         val b = FireworksShow(seed = 7L)
