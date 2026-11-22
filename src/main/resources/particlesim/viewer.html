@@ -10,11 +10,6 @@
     font: 12px/1.4 monospace; color: #9f9; background: rgba(0,0,0,0.5);
     padding: 4px 8px; border-radius: 4px;
   }
-  #meshEdgesToggle {
-    position: fixed; top: 44px; right: 8px; z-index: 1;
-    font: 12px/1.4 monospace; color: #fff; background: rgba(0,0,0,0.5);
-    padding: 4px 8px; border-radius: 4px; display: none; align-items: center; gap: 6px;
-  }
   #leftColumn {
     /* Wraps #leftPanel (the outliner - §10.3's object panel is its own `position: fixed`
        flyout now, positioned beside whichever row is selected rather than stacked in this
@@ -154,7 +149,6 @@
 </head>
 <body>
 <div id="status">connecting…</div>
-<label id="meshEdgesToggle"><input type="checkbox" id="meshEdgesCheckbox"> show mesh edges</label>
 <div id="leftColumn">
   <div id="leftPanel">
     <div id="outliner">
@@ -193,6 +187,7 @@
       <label><input type="checkbox" id="gridToggle" checked> grid</label><br>
       <label><input type="checkbox" id="axesToggle" checked> axes</label><br>
       <label><input type="checkbox" id="collidersToggle" checked> colliders</label><br>
+      <span id="meshEdgesToggle" style="display:none;"><label title="Outline every triangle of the scene's meshes - only offered when the scene has any"><input type="checkbox" id="meshEdgesCheckbox"> show mesh edges</label><br></span>
       <label title="Force arrows and stress / break-proximity colors, everywhere in the scene"><input type="checkbox" id="forcesStressesToggle" checked> forces &amp; stresses</label><br>
       <label title="An arrow on every particle showing its velocity - each group's panel can leave its own out"><input type="checkbox" id="velocityArrowsToggle"> velocity arrows</label>
       <div class="arrowScaleRow" title="Velocity arrow length"><input type="range" id="velocityScaleSlider" min="-2" max="2" step="0.05" value="0"><span id="velocityScaleText"></span></div>
@@ -1286,7 +1281,7 @@ function applyFrame(frame) {
     meshGroup.remove(meshObjects.pop());
     meshGroup.remove(meshEdgeOverlays.pop());
   }
-  meshEdgesToggleEl.style.display = frame.meshes.length > 0 ? "flex" : "none";
+  meshEdgesToggleEl.style.display = frame.meshes.length > 0 ? "inline" : "none";
   frame.meshes.forEach((meshDecl, i) => {
     const obj = meshObjects[i];
     obj.geometry.dispose();

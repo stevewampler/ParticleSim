@@ -88,7 +88,7 @@ const COMMANDS = {
 
   // Toggles a labeled checkbox - e.g. "show arrows" (forces panel), "show mesh" /
   // "show polylines" / "wireframe" (surfaces panel), "show particles" (groups panel),
-  // "enabled" (groups panel), "show mesh edges" (top-right global toggle). Matches by the
+  // "enabled" (groups panel), "show mesh edges" (scene panel, display section). Matches by the
   // checkbox's own <label> text, same text a person would read next to it.
   async toggle(label) {
     if (!page) return console.log('ERROR: launch first');
