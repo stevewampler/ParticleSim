@@ -42,8 +42,23 @@ const val SHELL_DRAG = 0.0013
  * - [RING]: one flat circle of stars, tilted at random.
  * - [CRACKLE]: glittering gold stars that each pop into a few brief white sparks as they burn out.
  * - [SPLIT]: a round burst of a dozen bright sub-shells, each bursting again into a small peony
- *   of its own a moment later. */
-enum class BurstType { PEONY, TWO_TONE, WILLOW, RING, CRACKLE, SPLIT }
+ *   of its own a moment later.
+ * - [CROSSETTE]: a few comets that each split, a moment out, into four pieces flying apart in
+ *   a cross, square to the comet's path.
+ * - [STROBE]: slow, long-burning white stars that blink on and off.
+ * - [PALM]: a handful of heavy gold comets thrown up and out, each shedding a tail of sparks as
+ *   it arcs over and droops - the fronds of a palm tree. */
+enum class BurstType { PEONY, TWO_TONE, WILLOW, RING, CRACKLE, SPLIT, CROSSETTE, STROBE, PALM }
+
+/** What a star does as it burns out - see [FireworksShow]. */
+sealed interface BurnoutEffect {
+    /** A crackling star: pops into a few brief sparks. */
+    data object Crackle : BurnoutEffect
+    /** A split sub-shell: bursts into a small peony in [colors]. */
+    data class Split(val colors: List<Color>) : BurnoutEffect
+    /** A crossette comet: splits into four pieces of [color] in a cross. */
+    data class Crossette(val color: Color) : BurnoutEffect
+}
 
 /** The look and flight of one burst type's stars. [starMass] sets how quickly drag slows them
  * ([STAR_DRAG]); all values are modelling choices tuned by eye, not measured from real shells. */
@@ -80,7 +95,9 @@ data class FireworksStepResult(val spawnedIds: List<Int>, val destroyedIds: List
  *   shell's own velocity at the moment it bursts.
  * - Stars feel gravity and linear [Drag]; each burns for a set time ([particlesim.core.ParticleStore]
  *   lifetime, §14.2) and is then destroyed. Some stars do something as they burn out: a
- *   [BurstType.CRACKLE] star pops into sparks, and a [BurstType.SPLIT] sub-shell bursts again.
+ *   [BurstType.CRACKLE] star pops into sparks, a [BurstType.SPLIT] sub-shell bursts again, and a
+ *   [BurstType.CROSSETTE] comet splits in a cross ([BurnoutEffect]). A [BurstType.PALM] frond
+ *   sheds tail sparks all the while it burns.
  * - Every shell's burst is also recorded as a [BurstFlash] for a moment ([recentFlashes]).
  *
  * Break heights (90-140 m), star speeds (~30-42 m/s), burn times (~2 s, willows ~4 s) and every
@@ -118,9 +135,10 @@ class FireworksShow(
     private val shells = mutableListOf<Shell>()
     private val starColors = HashMap<Int, Color>()
     private val glitter = HashSet<Int>()
-    /** Stars that do something when they burn out, by id: the colours a split sub-shell bursts
-     * into, or [CRACKLE_SPARKS] for a crackling star. */
-    private val burnoutEffects = HashMap<Int, List<Color>>()
+    private val strobes = HashSet<Int>()
+    private val palmFronds = HashSet<Int>()
+    /** Stars that do something when they burn out, by id. */
+    private val burnoutEffects = HashMap<Int, BurnoutEffect>()
     private val flashes = ArrayDeque<BurstFlash>()
     private var nextLaunchTime = firstLaunchTime
 
@@ -132,6 +150,12 @@ class FireworksShow(
 
     /** The live [BurstType.CRACKLE] stars, which the scene draws twinkling. */
     val glitterIds: Set<Int> get() = glitter
+
+    /** The live [BurstType.STROBE] stars, which the scene draws blinking. */
+    val strobeIds: Set<Int> get() = strobes
+
+    /** The live [BurstType.PALM] fronds, which the scene draws larger. */
+    val palmFrondIds: Set<Int> get() = palmFronds
 
     /** Shell bursts in the last [FLASH_MEMORY] seconds, oldest first. */
     val recentFlashes: List<BurstFlash> get() = flashes.toList()
@@ -157,9 +181,20 @@ class FireworksShow(
         for (id in destroyed.destroyedIds) {
             starColors.remove(id)
             glitter.remove(id)
+            strobes.remove(id)
+            palmFronds.remove(id)
             val effect = burnoutEffects.remove(id) ?: continue
             val (position, velocity) = effectStates.getValue(id)
-            spawned += if (effect === CRACKLE_SPARKS) crackle(position, velocity, now) else splitBurst(effect, position, velocity, now)
+            spawned += when (effect) {
+                BurnoutEffect.Crackle -> crackle(position, velocity, now)
+                is BurnoutEffect.Split -> splitBurst(effect.colors, position, velocity, now)
+                is BurnoutEffect.Crossette -> crossette(effect.color, position, velocity, now)
+            }
+        }
+
+        // Burning palm fronds leave their tails behind them.
+        for (frond in palmFronds.sorted()) {
+            if (random.nextDouble() < PALM_TAIL_CHANCE) spawned += tailSpark(store.position(frond), store.velocity(frond), now)
         }
 
         for ((shell, position, velocity) in bursts) {
@@ -198,16 +233,19 @@ class FireworksShow(
     }
 
     private fun randomType(): BurstType = when (random.nextDouble()) {
-        in 0.0..0.3 -> BurstType.PEONY
-        in 0.3..0.48 -> BurstType.TWO_TONE
-        in 0.48..0.6 -> BurstType.WILLOW
-        in 0.6..0.74 -> BurstType.RING
-        in 0.74..0.87 -> BurstType.CRACKLE
-        else -> BurstType.SPLIT
+        in 0.0..0.22 -> BurstType.PEONY
+        in 0.22..0.36 -> BurstType.TWO_TONE
+        in 0.36..0.46 -> BurstType.WILLOW
+        in 0.46..0.56 -> BurstType.RING
+        in 0.56..0.66 -> BurstType.CRACKLE
+        in 0.66..0.76 -> BurstType.SPLIT
+        in 0.76..0.84 -> BurstType.CROSSETTE
+        in 0.84..0.92 -> BurstType.STROBE
+        else -> BurstType.PALM
     }
 
     private fun colorsFor(type: BurstType): List<Color> = when (type) {
-        BurstType.PEONY, BurstType.RING, BurstType.SPLIT -> listOf(PALETTE[random.nextInt(PALETTE.size)])
+        BurstType.PEONY, BurstType.RING, BurstType.SPLIT, BurstType.CROSSETTE -> listOf(PALETTE[random.nextInt(PALETTE.size)])
         BurstType.TWO_TONE -> {
             val first = random.nextInt(PALETTE.size)
             val second = (first + 1 + random.nextInt(PALETTE.size - 1)) % PALETTE.size
@@ -215,6 +253,8 @@ class FireworksShow(
         }
         BurstType.WILLOW -> listOf(WILLOW_GOLD)
         BurstType.CRACKLE -> listOf(GLITTER_GOLD)
+        BurstType.STROBE -> listOf(STROBE_WHITE)
+        BurstType.PALM -> listOf(WILLOW_GOLD)
     }
 
     private fun burst(shell: Shell, position: Vector3, velocity: Vector3, now: Double): List<Int> {
@@ -223,14 +263,18 @@ class FireworksShow(
         val spin = random.nextDouble(0.0, 2.0 * PI)
         val directions = when (shell.type) {
             BurstType.RING -> ringDirections(recipe.count)
+            BurstType.PALM -> palmDirections(recipe.count, spin)
             else -> (0 until recipe.count).map { fibonacciDirection(it, recipe.count, spin) }
         }
         return directions.mapIndexed { i, direction ->
             val color = if (shell.type == BurstType.SPLIT) SUBSHELL_COLOR else shell.colors[i % shell.colors.size]
             val id = star(position, velocity + direction * (recipe.speed * random.nextDouble(0.92, 1.08)), recipe, color, now)
             when (shell.type) {
-                BurstType.CRACKLE -> { glitter += id; burnoutEffects[id] = CRACKLE_SPARKS }
-                BurstType.SPLIT -> burnoutEffects[id] = shell.colors
+                BurstType.CRACKLE -> { glitter += id; burnoutEffects[id] = BurnoutEffect.Crackle }
+                BurstType.SPLIT -> burnoutEffects[id] = BurnoutEffect.Split(shell.colors)
+                BurstType.CROSSETTE -> burnoutEffects[id] = BurnoutEffect.Crossette(color)
+                BurstType.STROBE -> strobes += id
+                BurstType.PALM -> palmFronds += id
                 else -> {}
             }
             id
@@ -269,15 +313,44 @@ class FireworksShow(
         }
     }
 
+    /** A burnt-out crossette comet's split: four pieces flying apart in a cross, square to the
+     * comet's path, carrying on at half its speed - the cross turned at random about that path. */
+    private fun crossette(color: Color, position: Vector3, velocity: Vector3, now: Double): List<Int> {
+        val (u, w) = perpendicularPair(velocity)
+        val a = random.nextDouble(0.0, PI / 2.0)
+        val arm1 = u * cos(a) + w * sin(a)
+        val arm2 = w * cos(a) - u * sin(a)
+        return listOf(arm1, arm1 * -1.0, arm2, arm2 * -1.0).map { arm ->
+            star(position, velocity * CROSSETTE_CARRY + arm * CROSSETTE_PIECE_RECIPE.speed, CROSSETTE_PIECE_RECIPE, color, now)
+        }
+    }
+
+    /** One spark dropped behind a palm frond: drifting at a fraction of the frond's speed, so
+     * it hangs back along the frond's path and droops away. */
+    private fun tailSpark(position: Vector3, velocity: Vector3, now: Double): Int =
+        star(position, velocity * PALM_TAIL_CARRY + randomDirection() * PALM_TAIL_RECIPE.speed, PALM_TAIL_RECIPE, WILLOW_GOLD, now)
+
+    /** [n] palm fronds' directions: evenly round the vertical, each tipped out from it by
+     * 35-70°, so they rise up and out and gravity bends them over within their burn. */
+    private fun palmDirections(n: Int, spin: Double): List<Vector3> = (0 until n).map { i ->
+        val polar = random.nextDouble(PALM_MIN_TILT, PALM_MAX_TILT)
+        val azimuth = spin + 2.0 * PI * i / n + random.nextDouble(-0.15, 0.15)
+        Vector3(sin(polar) * cos(azimuth), cos(polar), sin(polar) * sin(azimuth))
+    }
+
+    /** Two unit vectors square to [direction] and to each other. */
+    private fun perpendicularPair(direction: Vector3): Pair<Vector3, Vector3> {
+        val d = if (direction.length() > 1e-9) direction.normalized() else Vector3(0.0, 1.0, 0.0)
+        val helper = if (kotlin.math.abs(d.y) < 0.9) Vector3(0.0, 1.0, 0.0) else Vector3(1.0, 0.0, 0.0)
+        val u = d.cross(helper).normalized()
+        return u to d.cross(u)
+    }
+
     /** [n] directions evenly round a circle whose plane is tilted at random - a ring burst.
      * The plane's normal is a random direction, so a ring may be seen face-on, edge-on, or
      * anything between. */
     private fun ringDirections(n: Int): List<Vector3> {
-        val normal = randomDirection()
-        // Two unit vectors spanning the ring's plane.
-        val helper = if (kotlin.math.abs(normal.y) < 0.9) Vector3(0.0, 1.0, 0.0) else Vector3(1.0, 0.0, 0.0)
-        val u = normal.cross(helper).normalized()
-        val w = normal.cross(u)
+        val (u, w) = perpendicularPair(randomDirection())
         val phase = random.nextDouble(0.0, 2.0 * PI)
         return (0 until n).map { i ->
             val a = phase + 2.0 * PI * i / n
@@ -327,14 +400,27 @@ class FireworksShow(
         val SPARK_WHITE = Color(1.0, 0.95, 0.85)
         /** A split shell's sub-shells, before they burst: bright, near-white comets. */
         val SUBSHELL_COLOR = Color(1.0, 0.9, 0.7)
-        /** The marker in burnoutEffects for a crackling star (compared by identity). */
-        private val CRACKLE_SPARKS = listOf(SPARK_WHITE)
+        val STROBE_WHITE = Color(0.95, 0.97, 1.0)
 
         /** A crackling star's sparks, per star: fast, light (so drag stops them within a few
          * metres) and gone in about a tenth of a second. */
         val CRACKLE_RECIPE = StarRecipe(count = 3, speed = 10.0, starMass = 0.002, minBurn = 0.06, maxBurn = 0.16)
         /** The stars each split sub-shell bursts into. */
         val SPLIT_STAR_RECIPE = StarRecipe(count = 22, speed = 13.0, starMass = 0.01, minBurn = 1.0, maxBurn = 1.4)
+        /** The four pieces each crossette comet splits into; [StarRecipe.speed] is exact, each
+         * piece's speed away from the others. */
+        val CROSSETTE_PIECE_RECIPE = StarRecipe(count = 4, speed = 16.0, starMass = 0.01, minBurn = 1.1, maxBurn = 1.5)
+        /** How much of a crossette comet's velocity its pieces keep. */
+        const val CROSSETTE_CARRY = 0.5
+        /** A palm frond's tail sparks: slow, short-lived, light enough for drag to hold them
+         * back along the frond's path. */
+        val PALM_TAIL_RECIPE = StarRecipe(count = 1, speed = 1.5, starMass = 0.004, minBurn = 1.2, maxBurn = 1.8)
+        /** The chance, each step, that a burning frond drops a tail spark. */
+        const val PALM_TAIL_CHANCE = 0.6
+        /** How much of a frond's velocity its tail sparks start with. */
+        const val PALM_TAIL_CARRY = 0.3
+        val PALM_MIN_TILT = 35.0 * PI / 180.0
+        val PALM_MAX_TILT = 70.0 * PI / 180.0
 
         fun recipeFor(type: BurstType): StarRecipe = when (type) {
             BurstType.PEONY -> StarRecipe(count = 170, speed = 36.0, starMass = 0.01, minBurn = 1.8, maxBurn = 2.4)
@@ -344,6 +430,12 @@ class FireworksShow(
             BurstType.CRACKLE -> StarRecipe(count = 110, speed = 30.0, starMass = 0.008, minBurn = 1.2, maxBurn = 1.9)
             // The sub-shells: their burn is their fuse, and burning out is their burst.
             BurstType.SPLIT -> StarRecipe(count = 12, speed = 24.0, starMass = 0.03, minBurn = 0.7, maxBurn = 0.95)
+            // Comets again: they split as they burn out.
+            BurstType.CROSSETTE -> StarRecipe(count = 10, speed = 30.0, starMass = 0.03, minBurn = 0.55, maxBurn = 0.75)
+            BurstType.STROBE -> StarRecipe(count = 90, speed = 26.0, starMass = 0.006, minBurn = 2.4, maxBurn = 3.2)
+            // Heavy, so drag hardly slows them (a 6 s drag time), and slow enough to top out
+            // within 2 s and arc over before they burn out.
+            BurstType.PALM -> StarRecipe(count = 7, speed = 20.0, starMass = 0.06, minBurn = 2.2, maxBurn = 2.8)
         }
 
         /** Terminal speed of a falling shell, where drag balances its weight: √(m·g/k). */

@@ -6044,8 +6044,14 @@ load. Full `./gradlew test -q` suite green throughout.
         of stars at a random tilt), crackle (twinkling gold glitter, each
         star popping into three ~0.1 s white sparks as it burns out), and
         split (a dozen bright sub-shells that each burst again into a
-        22-star peony 0.7-0.95 s later). Burn-out effects read each star's
-        position before `DestructionSystem` removes it.
+        22-star peony 0.7-0.95 s later), crossette (ten comets that each
+        split into four pieces in a cross, square to the comet's path),
+        strobe (slow, long-burning white stars that blink), and palm (seven
+        heavy gold fronds tipped 35-70° from vertical that arc over, each
+        dropping a tail spark on 60% of steps). Burn-out effects are a
+        sealed `BurnoutEffect` (crackle, split, crossette), applied from
+        each star's position and velocity read before `DestructionSystem`
+        removes it.
       - Each shell burst is kept for 0.5 s as a `BurstFlash` (position,
         time, colour) for the scene's ground flash.
       - Stars feel gravity and linear `Drag`. They burn out by §14.2
@@ -6061,18 +6067,25 @@ load. Full `./gradlew test -q` suite green throughout.
         with shell drag off, ring flatness and roundness, crackle sparks
         appearing where glitter burns out and dying within 0.16 s, split
         sub-shells bursting into the right number of stars around the
-        first burst, and burst flashes being recorded and pruned.
+        first burst, and burst flashes being recorded and pruned. Also:
+        crossette pieces leaving at the piece speed, square to the comet's
+        path and in a true cross; strobe stars marked and burning 2.4 s+;
+        palm fronds' tilt, going over the top within 2.1 s, and tail sparks
+        starting at burning fronds and stopping after them.
 - [x] **`fireworks` scene**: glowing dots with 0.7 s trails over a
       night-navy sky and unpickable ground, seen from a fixed crowd
       viewpoint tilted so a strip of ground shows. Stars flash white as they
       light and dim over the last third of their burn; glitter twinkles
-      (hashed from id and time, so a frame depends only on its time).
+      and strobes blink at 7 Hz, lit 30% of each cycle at a per-star phase
+      (both hashed from id and time, so a frame depends only on its time);
+      palm fronds are drawn at twice a star's radius.
       - Lighting: a faint editable ambient `moonlight`, plus one point
         light per recent burst at the burst, in its colour washed halfway
         to white. It peaks at 30,000 cd (about 3 lux on the ground from
         100 m) and fades by e every 0.1 s.
       - Scene tested: frame contents, flash light values and decay,
-        moonlight always present, and the twinkle's range and repeatability.
+        moonlight always present, the twinkle's range and repeatability,
+        the strobe's duty cycle and staggered phases, and frond radii.
 - [x] **Viewer: particle trails** (§10.2): `SceneFrame.trailSeconds`, sent
       as an `f64` before the acceleration block and drawn viewer-side as
       one additive `LineSegments`. History is dropped for particles that are
@@ -6084,7 +6097,7 @@ load. Full `./gradlew test -q` suite green throughout.
       - `Drag` has no editable fields, so `star-drag` and `shell-drag`
         can't be tuned live (unchecking the `stars` or `shells` group
         switches each off);
-      - other burst types (crossette, strobe, palm, multi-break shells);
+      - other burst types (multi-break shells, kamuro, horsetail);
       - flash point lights light only the ground mesh, not the smoke a real
         burst lights up (there is no smoke);
       - WebGL draws lines 1 pixel wide whatever the setting, so trails

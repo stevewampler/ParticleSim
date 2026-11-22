@@ -22,7 +22,8 @@ import kotlin.math.exp
  * Every shell and star is drawn as a glowing dot with a short fading trail behind it
  * ([SceneFrame.trailSeconds]) - the streaks a camera's exposure (or the eye) sees, which is what
  * makes a burst read as a chrysanthemum rather than a cloud of dots. Stars flash white as they
- * ignite and dim as they burn out; crackling glitter twinkles.
+ * ignite and dim as they burn out; crackling glitter twinkles, strobes blink, and palm fronds are
+ * drawn larger than other stars.
  *
  * Each shell's burst lights the ground for a moment: a point light at the burst, in its colour,
  * fading over about a tenth of a second. The rest of the time a faint `moonlight` (an ambient
@@ -34,7 +35,7 @@ import kotlin.math.exp
  * still climbing.
  */
 class FireworksScene(seed: Long = 1L) : DemoScene {
-    private val show = FireworksShow(seed)
+    internal val show = FireworksShow(seed)
     private val events = mutableListOf<SimEvent>()
 
     // Dark ground under the mortars, on four particles nothing acts on.
@@ -74,10 +75,16 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
             radii[shell.id] = SHELL_DRAW_RADIUS
         }
         val glitter = show.glitterIds
+        val strobes = show.strobeIds
+        val fronds = show.palmFrondIds
         for ((id, base) in show.starColorsById) {
             val color = starColorAt(base, t - show.store.spawnTime(id), show.store.lifetime(id) ?: 1.0)
-            colors[id] = if (id in glitter) twinkle(color, id, t) else color
-            radii[id] = STAR_DRAW_RADIUS
+            colors[id] = when (id) {
+                in glitter -> twinkle(color, id, t)
+                in strobes -> strobe(color, id, t)
+                else -> color
+            }
+            radii[id] = if (id in fronds) FROND_DRAW_RADIUS else STAR_DRAW_RADIUS
         }
         val frame = SceneFrame(
             camera = CAMERA,
@@ -99,6 +106,7 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
         const val GROUND_HALF_SIZE = 400.0
         const val STAR_DRAW_RADIUS = 0.35
         const val SHELL_DRAW_RADIUS = 0.4
+        const val FROND_DRAW_RADIUS = 0.7
         const val TRAIL_SECONDS = 0.7
         // Linear values: the viewer converts to sRGB for display, which lifts dark colours a lot.
         // These show as a deep navy, like the night sky in a fireworks photograph.
@@ -149,16 +157,32 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
         /** Glitter's twinkle: each star's brightness jumps at random between 25% and 100%
          * [TWINKLE_RATE] times a second. Hashed from the id and the time slot rather than drawn
          * from a random generator, so a frame's look depends only on its time. */
-        fun twinkle(color: Color, id: Int, t: Double): Color {
-            val slot = (t * TWINKLE_RATE).toLong()
+        fun twinkle(color: Color, id: Int, t: Double): Color =
+            scaled(color, 0.25 + 0.75 * hash01(id, (t * TWINKLE_RATE).toLong()))
+
+        /** A strobe's blink: lit for the first [STROBE_DUTY] of each 1/[STROBE_RATE] s cycle and
+         * nearly dark the rest, each star at its own phase (hashed from its id) so a burst
+         * shimmers rather than flashing in unison. */
+        fun strobe(color: Color, id: Int, t: Double): Color {
+            val cycle = t * STROBE_RATE + hash01(id, -1L)
+            val lit = cycle - kotlin.math.floor(cycle) < STROBE_DUTY
+            return if (lit) color else scaled(color, STROBE_OFF_LEVEL)
+        }
+
+        private fun scaled(color: Color, level: Double) = Color(color.r * level, color.g * level, color.b * level)
+
+        /** A repeatable pseudo-random number in [0, 1) for a star [id] and a time [slot]. */
+        private fun hash01(id: Int, slot: Long): Double {
             var h = id.toLong() * -0x61c8864680b583ebL + slot * 0x9E3779B1L
             h = (h xor (h ushr 31)) * -0x4b47d5b1c1c1c1c1L
             h = h xor (h ushr 29)
-            val level = 0.25 + 0.75 * ((h ushr 11).toDouble() / (1L shl 53).toDouble())
-            return Color(color.r * level, color.g * level, color.b * level)
+            return (h ushr 11).toDouble() / (1L shl 53).toDouble()
         }
 
         const val TWINKLE_RATE = 20.0
+        const val STROBE_RATE = 7.0
+        const val STROBE_DUTY = 0.3
+        const val STROBE_OFF_LEVEL = 0.03
         private const val FLASH_SECONDS = 0.12
         private const val FADE_START = 0.65
     }

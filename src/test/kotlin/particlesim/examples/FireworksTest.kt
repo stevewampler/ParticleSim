@@ -258,6 +258,101 @@ class FireworksTest {
     }
 
     @Test
+    fun `a crossette's comets each split into four pieces flying apart in a cross`() {
+        val show = quietShow()
+        val (t, _) = burstOne(show, BurstType.CROSSETTE)
+        val comets = show.starColorsById.keys.toSet()
+        assertEquals(FireworksShow.recipeFor(BurstType.CROSSETTE).count, comets.size)
+        // Step until the comets have all split, checking each split the step it happens.
+        var now = t
+        var splits = 0
+        var known = comets
+        while (comets.any { show.store.contains(it) }) {
+            show.step(now, FIREWORKS_DT)
+            now += FIREWORKS_DT
+            val fresh = show.starColorsById.keys - known
+            known = show.starColorsById.keys.toSet()
+            // Pieces from one comet start at exactly the same point.
+            for (pieces in fresh.groupBy { show.store.position(it) }.values) {
+                assertEquals(4, pieces.size)
+                val v = pieces.map { show.store.velocity(it) }
+                val carried = v.reduce { a, b -> a + b } * 0.25
+                val arms = v.map { it - carried }
+                for (arm in arms) {
+                    // Each piece leaves at the piece speed, square to the comet's path...
+                    assertEquals(FireworksShow.CROSSETTE_PIECE_RECIPE.speed, arm.length(), 1e-6)
+                    assertEquals(0.0, arm.dot(carried) / carried.length(), 1e-6)
+                }
+                // ...in a cross: each arm is opposite one other and square to the remaining two.
+                for (arm in arms) {
+                    val cosines = arms.filter { it !== arm }.map { it.dot(arm) / (it.length() * arm.length()) }.sorted()
+                    assertEquals(-1.0, cosines[0], 1e-6)
+                    assertEquals(0.0, cosines[1], 1e-6)
+                    assertEquals(0.0, cosines[2], 1e-6)
+                }
+                splits++
+            }
+        }
+        assertEquals(comets.size, splits)
+    }
+
+    @Test
+    fun `a strobe burst's stars are marked for blinking, and burn long`() {
+        val show = quietShow()
+        val (t, _) = burstOne(show, BurstType.STROBE)
+        val stars = show.starColorsById.keys.toSet()
+        assertEquals(FireworksShow.recipeFor(BurstType.STROBE).count, stars.size)
+        assertEquals(stars, show.strobeIds)
+        assertTrue(stars.all { show.starColorsById[it] == FireworksShow.STROBE_WHITE })
+        val end = run(show, 2.35, start = t)
+        assertEquals(stars, stars.filter { show.store.contains(it) }.toSet(), "all still burning at 2.35 s")
+        run(show, 1.0, start = end)
+        assertTrue(show.strobeIds.isEmpty())
+    }
+
+    @Test
+    fun `palm fronds rise up and out, then arc over, shedding tail sparks while they burn`() {
+        val show = quietShow()
+        val shellId = show.launch(0.0, BurstType.PALM)
+        var t = 0.0
+        var shellVelocity = Vector3.ZERO
+        while (show.store.contains(shellId)) {
+            shellVelocity = show.store.velocity(shellId)
+            show.step(t, FIREWORKS_DT)
+            t += FIREWORKS_DT
+        }
+        val fronds = show.palmFrondIds.toSet()
+        assertEquals(FireworksShow.recipeFor(BurstType.PALM).count, fronds.size)
+        // Every frond heads upward, tipped 35-70 degrees from the vertical (the shell's own,
+        // nearly spent, climb aside).
+        for (frond in fronds) {
+            val relative = show.store.velocity(frond) - shellVelocity
+            val tilt = kotlin.math.acos(relative.y / relative.length())
+            assertTrue(tilt in FireworksShow.PALM_MIN_TILT - 0.02..FireworksShow.PALM_MAX_TILT + 0.02, "tilt $tilt")
+        }
+        // Two seconds on, they've gone over the top and are falling.
+        var tails = 0
+        var known = show.starColorsById.keys.toSet()
+        val end = run(show, 2.1, start = t) {
+            val fresh = show.starColorsById.keys - known
+            known = show.starColorsById.keys.toSet()
+            // Each tail spark starts at a burning frond.
+            for (spark in fresh) {
+                val p = show.store.position(spark)
+                assertTrue(fronds.any { show.store.contains(it) && (show.store.position(it) - p).length() < 1e-9 })
+            }
+            tails += fresh.size
+        }
+        assertTrue(fronds.all { show.store.contains(it) && show.store.velocity(it).y < 0.0 }, "burning and falling at 2.1 s")
+        // About 0.6 sparks a step from each of 7 fronds over 126 steps: ~530.
+        assertTrue(tails in 420..640, "tail sparks: $tails")
+        // Once the fronds burn out (2.8 s at most), the tails stop and fade (1.8 s at most).
+        run(show, 2.6, start = end)
+        assertTrue(show.palmFrondIds.isEmpty())
+        assertTrue(show.starColorsById.isEmpty())
+    }
+
+    @Test
     fun `every shell burst is remembered briefly, for the ground flash`() {
         val show = quietShow()
         val (t, burstAt) = burstOne(show, BurstType.PEONY)

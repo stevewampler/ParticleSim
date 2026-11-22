@@ -74,4 +74,32 @@ class FireworksSceneTest {
         assertTrue(levels.max() - levels.min() > 0.5, "it actually flickers")
         assertEquals(FireworksScene.twinkle(gold, 17, 3.01), FireworksScene.twinkle(gold, 17, 3.01))
     }
+
+    @Test
+    fun `strobes blink, lit about 30% of the time, each at its own phase`() {
+        val white = FireworksShow.STROBE_WHITE
+        fun lit(id: Int, t: Double) = FireworksScene.strobe(white, id, t) == white
+        val samples = (0 until 7000).map { it / 7000.0 * 10.0 }
+        val litFraction = samples.count { lit(5, it) }.toDouble() / samples.size
+        assertEquals(FireworksScene.STROBE_DUTY, litFraction, 0.02)
+        val dark = FireworksScene.strobe(white, 5, samples.first { !lit(5, it) })
+        assertEquals(white.r * FireworksScene.STROBE_OFF_LEVEL, dark.r, 1e-12)
+        // Different stars blink out of step.
+        // Each star's switch-on time within the first cycle, found by a fine scan.
+        val fine = (1..20000).map { it * 1e-5 }
+        val phases = (1..20).map { id -> fine.first { lit(id, it) && !lit(id, it - 1e-5) } }
+        assertTrue(phases.max() - phases.min() > 0.05, "phases $phases")
+    }
+
+    @Test
+    fun `palm fronds are drawn larger than other stars`() {
+        val scene = FireworksScene()
+        val show = scene.show
+        show.launch(0.0, particlesim.examples.BurstType.PALM)
+        var t = 0.0
+        while (show.palmFrondIds.isEmpty()) { scene.step(t); t += scene.dt }
+        val frame = scene.frame(t)
+        assertTrue(show.palmFrondIds.all { frame.sphereRadii[it] == FireworksScene.FROND_DRAW_RADIUS })
+        assertTrue(show.starColorsById.keys.filter { it !in show.palmFrondIds }.all { frame.sphereRadii[it] == FireworksScene.STAR_DRAW_RADIUS })
+    }
 }
