@@ -14,7 +14,14 @@ import java.nio.ByteBuffer
  * [DragMessage] itself: parsing/routing is the caller's job (see the drag demo), so this class
  * stays reusable for any future viewer input, not just drag.
  */
-class DebugServer(port: Int, private val onTextMessage: ((String) -> Unit)? = null) : WebSocketServer(InetSocketAddress(port)) {
+/** Open so a test can watch it start or fail to bind. */
+open class DebugServer(port: Int, private val onTextMessage: ((String) -> Unit)? = null) : WebSocketServer(InetSocketAddress(port)) {
+    init {
+        // Let a restarted server bind straight away: a viewer's connections to the previous
+        // one linger in TIME_WAIT for a while after it stops, and without SO_REUSEADDR they
+        // block the bind ("Address already in use") - the frames port then never opens.
+        isReuseAddr = true
+    }
 
     override fun onOpen(conn: WebSocket, handshake: ClientHandshake) {}
     override fun onClose(conn: WebSocket, code: Int, reason: String?, remote: Boolean) {}

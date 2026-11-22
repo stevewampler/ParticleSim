@@ -6100,13 +6100,18 @@ load. Full `./gradlew test -q` suite green throughout.
       - Viewer: a "sound" box in the display panel (off by default; the
         click is what lets the page make sound). Each sound is synthesized
         with the Web Audio API: launch = sine thump plus a rising
-        band-passed whoosh; boom = a saturated sine thump falling 70 to
-        32 Hz (its harmonics carry it on small speakers), noise through two
-        stacked low-passes closing 260 to 60 Hz over 3.6 s, a short low-mid
-        report, and a fed-back, low-passed 0.27 s echo (quieter booms are
-        shorter and higher). The first version's bright noise read as
-        "rain on a tin roof"; measured offline, the new boom has no energy
-        above 500 Hz and a third of it at 150-500 Hz. Booms fade with
+        band-passed whoosh; boom = matched to a field recording of a display
+        (40 s, 38 explosions, analysed for spectrum and envelope): noise
+        in a band-pass round 360 Hz with a low-pass above it, a low band
+        below 300 Hz and a faint bright edge, under the recording's decay
+        (2 ms rise, -12 dB by 20 ms, -20 dB at 220 ms, -30 dB at 500 ms),
+        a second report 30-60 ms later on 35% of big bursts, and a
+        convolution reverb (2.5 s noise impulse, 0.55 s decay, 1.8 kHz
+        roll-off). Rendered offline and measured the same way: centroid
+        ~500-540 Hz against the recording's 550-650 Hz, and the same band
+        split (about 20/45/25% across 150-300/300-600/600-1200 Hz) and
+        decay times. Two earlier attempts - bright noise ("rain on a tin
+        roof"), then sub-bass (too dull) - were both wrong. Booms fade with
         distance from a 150 m reference (other sounds 60 m); crackle = three tiny high-passed
         noise snaps over 80 ms.
       - Placed with a `PannerNode` (inverse distance) and
@@ -6123,8 +6128,14 @@ load. Full `./gradlew test -q` suite green throughout.
         headless for scheduling (0.4-0.6 s delays at 140-210 m), pause
         and untick suspending, and no errors over 25 s and a scene
         switch. How it sounds needs a person's ears.
+- [x] **`DebugServer` sets `SO_REUSEADDR`**: a restart right after a viewer
+      had been connected failed to bind the frames port ("Address already in
+      use" from connections in TIME_WAIT), leaving the page connected to
+      nothing. Tested by restarting on the same port after a client connected
+      (fails without the flag).
 - [ ] Gaps / possible next steps:
-      - sounds' tone and levels are tuned by guesswork, not yet by ear;
+      - the launch whoosh and crackle are still tuned by guesswork; the
+        recording also has whistles, which the display doesn't make;
       - the launcher isn't an `Emitter`, so it isn't in the outliner, can't
         be edited live, and isn't in §9.5 checkpoints;
       - `Drag` has no editable fields, so `star-drag` and `shell-drag`
