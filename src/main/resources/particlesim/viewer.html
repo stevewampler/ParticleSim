@@ -3517,6 +3517,7 @@ let soundEnabled = false;
 let audioCtx = null;
 let audioOut = null;    // the compressor every sound ends in
 let soundBus = null;    // replaced (and the old one cut off) to silence everything at once
+let soundEcho = null;   // booms' echo off the surroundings - part of the bus, replaced with it
 let soundBusGeneration = 0;
 let activeVoices = 0;
 let noiseBuffer = null; // four seconds of white noise, shared by every sound (longer than any one)
@@ -3526,8 +3527,12 @@ function ensureAudio() {
   audioCtx = new AudioContext();
   // Many booms at once would clip; a compressor keeps the mix in range, as a recording would.
   audioOut = audioCtx.createDynamicsCompressor();
-  audioOut.threshold.value = -20;
-  audioOut.ratio.value = 6;
+  // Gentle: squashing hard would flatten exactly the punch a boom needs.
+  audioOut.threshold.value = -12;
+  audioOut.knee.value = 10;
+  audioOut.ratio.value = 4;
+  audioOut.attack.value = 0.003;
+  audioOut.release.value = 0.3;
   audioOut.connect(audioCtx.destination);
   noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 4, audioCtx.sampleRate);
   const samples = noiseBuffer.getChannelData(0);
@@ -3538,8 +3543,19 @@ function ensureAudio() {
 function newSoundBus() {
   if (soundBus) soundBus.disconnect();
   soundBus = audioCtx.createGain();
-  soundBus.gain.value = 0.9;
+  soundBus.gain.value = 1.0;
   soundBus.connect(audioOut);
+  // A low, decaying echo: a 0.27 s delay fed back through a low-pass, so each repeat is
+  // quieter and duller - thunder rolling back off hills and buildings.
+  soundEcho = audioCtx.createGain();
+  soundEcho.gain.value = 0.35;
+  const delay = audioCtx.createDelay(1.0);
+  delay.delayTime.value = 0.27;
+  const feedback = audioCtx.createGain();
+  feedback.gain.value = 0.45;
+  const dull = filter("lowpass", 350);
+  soundEcho.connect(delay).connect(dull).connect(feedback).connect(delay);
+  dull.connect(soundBus);
   soundBusGeneration++;
   activeVoices = 0;
 }
@@ -3595,7 +3611,8 @@ function playFrameSounds(frame) {
     // steps at the step they happened in.
     const delay = Math.max(0, (distance / SPEED_OF_SOUND + (sound.time - frame.t)) / currentSpeed);
     const start = audioCtx.currentTime + 0.02 + delay;
-    const out = soundPanner(sound.position);
+    // Booms carry: a firework's report is heard at full strength much farther off.
+    const out = soundPanner(sound.position, sound.soundKind === "boom" ? 150 : 60);
     const loudness = Math.max(0, sound.loudness);
     const last = sound.soundKind === "launch" ? playLaunch(out, start, loudness)
       : sound.soundKind === "boom" ? playBoom(out, start, loudness)
@@ -3609,12 +3626,12 @@ function playFrameSounds(frame) {
   }
 }
 
-// Where a sound is: louder near the camera (1/distance beyond 60 m) and panned by direction.
-function soundPanner(position) {
+// Where a sound is: panned by direction, and fading as 1/distance beyond [refDistance] m.
+function soundPanner(position, refDistance) {
   const panner = audioCtx.createPanner();
   panner.panningModel = "equalpower";
   panner.distanceModel = "inverse";
-  panner.refDistance = 60;
+  panner.refDistance = refDistance;
   panner.rolloffFactor = 1;
   if (panner.positionX) {
     panner.positionX.value = position.x; panner.positionY.value = position.y; panner.positionZ.value = position.z;
@@ -3670,27 +3687,55 @@ function playLaunch(out, start, loudness) {
   return whoosh;
 }
 
-// A burst: a sharp crack, a deep boom whose rumble darkens as it dies, and a sub-bass thump.
-// Quieter bursts (split and crossette breaks) are also shorter and higher - smaller charges.
+// A burst, built from the bottom up - a firework's boom is mostly low frequencies, and bright
+// noise in it reads as patter, not thunder:
+// - the thump: a sine falling from ~70 Hz to 32 Hz, saturated so its harmonics (140, 210 Hz...)
+//   carry it on laptop speakers and earbuds, which can't play the fundamental itself;
+// - the rumble: noise through two stacked low-passes (24 dB/octave, so no hiss gets through),
+//   closing from 260 Hz to 60 Hz as it rolls on for a few seconds;
+// - the report: a short low-mid thud at the front, the shock wave's edge;
+// - an echo off the surroundings (soundEcho), which keeps the rumble rolling.
+// Quieter bursts (split and crossette breaks) are shorter and pitched higher - smaller charges.
 function playBoom(out, start, loudness) {
-  const length = 1.0 + 1.6 * loudness;
-  const crack = noiseSource(start, 0.08);
-  crack.connect(filter("highpass", 1200)).connect(envelope(start, 0.002, 0.8 * loudness, start + 0.07)).connect(out);
+  const length = 1.6 + 2.0 * loudness;
+  const small = 1 - Math.min(1, loudness);
 
-  const body = noiseSource(start, length);
-  const low = filter("lowpass", 900);
-  const top = 900 + (1 - loudness) * 1500;
-  low.frequency.setValueAtTime(top, start);
-  low.frequency.exponentialRampToValueAtTime(110, start + length * 0.6);
-  body.connect(low).connect(envelope(start, 0.01, 1.4 * loudness, start + length)).connect(out);
+  const thump = audioCtx.createOscillator();
+  thump.frequency.setValueAtTime(70 + small * 60, start);
+  thump.frequency.exponentialRampToValueAtTime(32 + small * 30, start + 0.7);
+  thump.connect(saturator()).connect(envelope(start, 0.008, 0.85 * loudness, start + 1.5)).connect(out);
+  thump.start(start);
+  thump.stop(start + 1.55);
 
-  const sub = audioCtx.createOscillator();
-  sub.frequency.setValueAtTime(65 + (1 - loudness) * 60, start);
-  sub.frequency.exponentialRampToValueAtTime(30, start + 0.8);
-  sub.connect(envelope(start, 0.01, 0.9 * loudness, start + 0.9)).connect(out);
-  sub.start(start);
-  sub.stop(start + 0.95);
-  return body;
+  const rumble = noiseSource(start, length);
+  const low1 = filter("lowpass", 260), low2 = filter("lowpass", 260);
+  for (const f of [low1, low2]) {
+    f.frequency.setValueAtTime(260 + small * 240, start);
+    f.frequency.exponentialRampToValueAtTime(60, start + length * 0.7);
+  }
+  // Low-passing white noise this hard leaves a small fraction of its level - hence the big gain.
+  rumble.connect(low1).connect(low2).connect(envelope(start, 0.02, 6.0 * loudness, start + length)).connect(out);
+
+  const report = noiseSource(start, 0.12);
+  report.connect(filter("bandpass", 450 + small * 600, 0.8)).connect(envelope(start, 0.003, 0.8 * loudness, start + 0.12)).connect(out);
+
+  out.connect(soundEcho);
+  return rumble;
+}
+
+// Soft clipping (tanh): rounds a sine's peaks off, adding the harmonics small speakers can play.
+let saturationCurve = null;
+function saturator() {
+  if (!saturationCurve) {
+    saturationCurve = new Float32Array(1024);
+    for (let i = 0; i < saturationCurve.length; i++) {
+      const x = (i / (saturationCurve.length - 1)) * 2 - 1;
+      saturationCurve[i] = Math.tanh(3 * x) / Math.tanh(3);
+    }
+  }
+  const shaper = audioCtx.createWaveShaper();
+  shaper.curve = saturationCurve;
+  return shaper;
 }
 
 // A crackling star popping: its three sparks' snaps, a few milliseconds of bright noise each,

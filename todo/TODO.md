@@ -6100,11 +6100,16 @@ load. Full `./gradlew test -q` suite green throughout.
       - Viewer: a "sound" box in the display panel (off by default; the
         click is what lets the page make sound). Each sound is synthesized
         with the Web Audio API: launch = sine thump plus a rising
-        band-passed whoosh; boom = high-passed crack, a low-passed noise
-        rumble that darkens as it fades, and a sub-bass thump (quieter
-        booms are shorter and higher); crackle = three tiny high-passed
+        band-passed whoosh; boom = a saturated sine thump falling 70 to
+        32 Hz (its harmonics carry it on small speakers), noise through two
+        stacked low-passes closing 260 to 60 Hz over 3.6 s, a short low-mid
+        report, and a fed-back, low-passed 0.27 s echo (quieter booms are
+        shorter and higher). The first version's bright noise read as
+        "rain on a tin roof"; measured offline, the new boom has no energy
+        above 500 Hz and a third of it at 150-500 Hz. Booms fade with
+        distance from a 150 m reference (other sounds 60 m); crackle = three tiny high-passed
         noise snaps over 80 ms.
-      - Placed with a `PannerNode` (inverse distance, 60 m reference) and
+      - Placed with a `PannerNode` (inverse distance) and
         the listener on the camera; delayed by distance / 343 m/s, plus the
         event's offset within a multi-step frame, over the playback speed.
       - Pausing (or hiding the tab) suspends the audio clock; unticking or
