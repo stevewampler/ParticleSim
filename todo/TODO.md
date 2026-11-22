@@ -6032,11 +6032,22 @@ load. Full `./gradlew test -q` suite green throughout.
 ## Fireworks (§9.6/§10.2/§14, new requirement) — not yet phased
 - [x] **`FireworksShow`** (`particlesim.examples`): shells launched from
       random mortars along the ground every 0.6-1.6 s (sometimes in salvos
-      of 2-3). Each rises under gravity to a random break height (90-140 m)
-      and bursts on a time fuse into stars, sent out in a jittered Fibonacci
-      sphere so the burst is round.
-      - Burst types: peony (one colour), two-tone, and willow (gold; light
-        stars that slow quickly, burn long and droop).
+      of 2-3). Each rises to a random break height (90-140 m) and bursts on
+      a time fuse into stars, sent out in a jittered Fibonacci sphere so the
+      burst is round.
+      - Shells feel quadratic `Drag` (`shell-drag`, ½ρCdA for a 3-inch
+        ball, terminal speed ~39 m/s) as well as gravity. Launch speed and
+        fuse come from the closed-form solution for a ball rising against
+        quadratic drag, so they leave the mortar at 58-88 m/s.
+      - Burst types: peony (one colour), two-tone, willow (gold; light
+        stars that slow quickly, burn long and droop), ring (a flat circle
+        of stars at a random tilt), crackle (twinkling gold glitter, each
+        star popping into three ~0.1 s white sparks as it burns out), and
+        split (a dozen bright sub-shells that each burst again into a
+        22-star peony 0.7-0.95 s later). Burn-out effects read each star's
+        position before `DestructionSystem` removes it.
+      - Each shell burst is kept for 0.5 s as a `BurstFlash` (position,
+        time, colour) for the scene's ground flash.
       - Stars feel gravity and linear `Drag`. They burn out by §14.2
         lifetime, and shells are destroyed explicitly as they burst; both go
         through `DestructionSystem`, destroying before creating.
@@ -6045,10 +6056,23 @@ load. Full `./gradlew test -q` suite green throughout.
       - Tested: launch schedule, break height, round burst centred on the
         shell, burn-out with colour cleanup, a bounded population over
         120 s, droop at terminal speed, and same seed giving the same run.
+        Also: launch speed and apex time against a fine numerical
+        integration, shell deceleration matching g + kv²/m and overshoot
+        with shell drag off, ring flatness and roundness, crackle sparks
+        appearing where glitter burns out and dying within 0.16 s, split
+        sub-shells bursting into the right number of stars around the
+        first burst, and burst flashes being recorded and pruned.
 - [x] **`fireworks` scene**: glowing dots with 0.7 s trails over a
-      night-navy sky and unpickable dark ground, seen from a fixed crowd
-      viewpoint. Stars flash white as they light and dim over the last third
-      of their burn. Scene tested.
+      night-navy sky and unpickable ground, seen from a fixed crowd
+      viewpoint tilted so a strip of ground shows. Stars flash white as they
+      light and dim over the last third of their burn; glitter twinkles
+      (hashed from id and time, so a frame depends only on its time).
+      - Lighting: a faint editable ambient `moonlight`, plus one point
+        light per recent burst at the burst, in its colour washed halfway
+        to white. It peaks at 30,000 cd (about 3 lux on the ground from
+        100 m) and fades by e every 0.1 s.
+      - Scene tested: frame contents, flash light values and decay,
+        moonlight always present, and the twinkle's range and repeatability.
 - [x] **Viewer: particle trails** (§10.2): `SceneFrame.trailSeconds`, sent
       as an `f64` before the acceleration block and drawn viewer-side as
       one additive `LineSegments`. History is dropped for particles that are
@@ -6057,10 +6081,12 @@ load. Full `./gradlew test -q` suite green throughout.
 - [ ] Gaps / possible next steps:
       - the launcher isn't an `Emitter`, so it isn't in the outliner, can't
         be edited live, and isn't in §9.5 checkpoints;
-      - `Drag` has no editable fields, so `star-drag` can't be tuned live;
-      - more burst types (ring, crossette, strobe/glitter, multi-break),
-        shell drag on the way up, and a light flash on the ground at each
-        burst;
+      - `Drag` has no editable fields, so `star-drag` and `shell-drag`
+        can't be tuned live (unchecking the `stars` or `shells` group
+        switches each off);
+      - other burst types (crossette, strobe, palm, multi-break shells);
+      - flash point lights light only the ground mesh, not the smoke a real
+        burst lights up (there is no smoke);
       - WebGL draws lines 1 pixel wide whatever the setting, so trails
         stay thin; thicker ones would need ribbon geometry.
 

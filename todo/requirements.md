@@ -1769,6 +1769,8 @@ changes over time.
 
 Worked example: `FireworksShow` and the `fireworks` scene (§9.6), which
 spawn stars where each shell bursts and destroy them by lifetime (§14.2).
+Some stars spawn more as they burn out (crackling sparks, a split shell's
+second bursts), reading their state before §14.2's destruction removes them.
 
 ### 14.1 Creation: emitters
 

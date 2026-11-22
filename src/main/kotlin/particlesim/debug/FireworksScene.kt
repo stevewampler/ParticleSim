@@ -7,11 +7,13 @@ import particlesim.examples.FIREWORKS_DT
 import particlesim.examples.FireworksShow
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.Light
 import particlesim.render.Material
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
 import particlesim.surface.Surface
 import particlesim.surface.Triangle
+import kotlin.math.exp
 
 /**
  * §9.6 scene-library demo for [FireworksShow]: a continuous display seen from the crowd, with
@@ -20,10 +22,16 @@ import particlesim.surface.Triangle
  * Every shell and star is drawn as a glowing dot with a short fading trail behind it
  * ([SceneFrame.trailSeconds]) - the streaks a camera's exposure (or the eye) sees, which is what
  * makes a burst read as a chrysanthemum rather than a cloud of dots. Stars flash white as they
- * ignite and dim as they burn out.
+ * ignite and dim as they burn out; crackling glitter twinkles.
+ *
+ * Each shell's burst lights the ground for a moment: a point light at the burst, in its colour,
+ * fading over about a tenth of a second. The rest of the time a faint `moonlight` (an ambient
+ * light, live-editable from the outliner) is all that shows the ground.
  *
  * `gravity` is live-editable. Unchecking the `stars` group's "enabled" box takes drag off the
- * stars (gravity acts on the `fireworks` group, so it stays): they fly far wider.
+ * stars, and unchecking `shells` takes it off the rising shells (gravity acts on the `fireworks`
+ * group, so it stays): stars fly far wider, and shells overshoot their break height and burst
+ * still climbing.
  */
 class FireworksScene(seed: Long = 1L) : DemoScene {
     private val show = FireworksShow(seed)
@@ -39,6 +47,7 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
         name = "ground",
     )
     private val groundMesh = SurfaceRenderer(ground, material = Material(color = GROUND_COLOR, roughness = 1.0), pickable = false)
+    private val moonlight = Light.Ambient(color = MOONLIGHT_COLOR, intensity = MOONLIGHT_INTENSITY, name = "moonlight")
 
     override val dt = FIREWORKS_DT
     override val store: ParticleStore = show.store
@@ -46,7 +55,7 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
     override fun ids(): List<Int> = show.store.liveIds()
 
     override fun handleControl(message: SceneControlMessage, t: Double) {
-        if (applyEditableFieldMessage(message, show.forces, emptyList(), show.store, t)) return
+        if (applyEditableFieldMessage(message, show.forces, emptyList(), show.store, t, listOf(moonlight))) return
         if (message is SceneControlMessage.SetGroupEnabled) show.groups.setEnabled(message.name, message.enabled)
     }
 
@@ -64,8 +73,10 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
             colors[shell.id] = SHELL_COLOR
             radii[shell.id] = SHELL_DRAW_RADIUS
         }
+        val glitter = show.glitterIds
         for ((id, base) in show.starColorsById) {
-            colors[id] = starColorAt(base, t - show.store.spawnTime(id), show.store.lifetime(id) ?: 1.0)
+            val color = starColorAt(base, t - show.store.spawnTime(id), show.store.lifetime(id) ?: 1.0)
+            colors[id] = if (id in glitter) twinkle(color, id, t) else color
             radii[id] = STAR_DRAW_RADIUS
         }
         val frame = SceneFrame(
@@ -73,10 +84,11 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
             sphereRadii = radii,
             particleColors = colors,
             meshes = listOf(groundMesh),
+            lights = listOf(moonlight) + show.recentFlashes.mapNotNull { flashLight(it, t) },
             visibleIds = fireworks.toSet(),
             skyColor = NIGHT_SKY,
             trailSeconds = TRAIL_SECONDS,
-            registry = SceneRegistry.build(forces = show.forces, groups = show.groups, surfaces = listOf(ground)),
+            registry = SceneRegistry.build(forces = show.forces, groups = show.groups, surfaces = listOf(ground), lights = listOf(moonlight)),
             events = events.toList(),
         )
         events.clear()
@@ -91,11 +103,22 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
         // Linear values: the viewer converts to sRGB for display, which lifts dark colours a lot.
         // These show as a deep navy, like the night sky in a fireworks photograph.
         val NIGHT_SKY = Color(0.003, 0.008, 0.02)
-        val GROUND_COLOR = Color(0.002, 0.002, 0.003)
+        /** Pale enough for a burst's flash to show on; the faint moonlight keeps it near black
+         * the rest of the time. */
+        val GROUND_COLOR = Color(0.35, 0.33, 0.3)
+        val MOONLIGHT_COLOR = Color(0.5, 0.6, 1.0)
+        const val MOONLIGHT_INTENSITY = 0.02
+        /** A burst flash's peak, in the viewer's point-light units (candela; three.js lights fall
+         * off with the inverse square of distance) - 100 m up, about 3 lux on the ground below. */
+        const val FLASH_PEAK_INTENSITY = 30000.0
+        /** How fast a burst's flash fades: its intensity falls by e every this many seconds. */
+        const val FLASH_DECAY_SECONDS = 0.1
         /** A rising shell's burning fuse: a dim, warm spark. */
         val SHELL_COLOR = Color(0.9, 0.55, 0.25)
-        /** From the crowd, a little way back from the mortar line, looking up at the bursts. */
-        val CAMERA = CameraPose(position = Vector3(0.0, 2.0, 120.0), lookAt = Vector3(0.0, 108.0, 0.0))
+        /** From the crowd, a little way back from the mortar line, looking up at the bursts -
+         * tilted up about 27°, so with the viewer's 60° field of view a strip of ground shows along
+         * the bottom (for the flashes to light) and the highest bursts still fit at the top. */
+        val CAMERA = CameraPose(position = Vector3(0.0, 3.0, 140.0), lookAt = Vector3(0.0, 72.0, 0.0))
 
         /** A star's colour [age] seconds into its [burn]: a white flash as it lights, its own
          * [base] colour, then dimming over the last third as it burns out. */
@@ -107,6 +130,35 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
             return Color(channel(base.r), channel(base.g), channel(base.b))
         }
 
+        /** The point light lighting the ground for [flash] at time [t], or null once it has
+         * faded away (or before it happens). Its colour is the burst's, washed halfway to white
+         * - a burst's first instant is mostly white-hot. */
+        fun flashLight(flash: particlesim.examples.BurstFlash, t: Double): Light.Point? {
+            val age = t - flash.time
+            if (age < 0.0) return null
+            val intensity = FLASH_PEAK_INTENSITY * exp(-age / FLASH_DECAY_SECONDS)
+            if (intensity < FLASH_PEAK_INTENSITY * 0.01) return null
+            val c = flash.color
+            return Light.Point(
+                position = flash.position,
+                color = Color((c.r + 1.0) / 2.0, (c.g + 1.0) / 2.0, (c.b + 1.0) / 2.0),
+                intensity = intensity,
+            )
+        }
+
+        /** Glitter's twinkle: each star's brightness jumps at random between 25% and 100%
+         * [TWINKLE_RATE] times a second. Hashed from the id and the time slot rather than drawn
+         * from a random generator, so a frame's look depends only on its time. */
+        fun twinkle(color: Color, id: Int, t: Double): Color {
+            val slot = (t * TWINKLE_RATE).toLong()
+            var h = id.toLong() * -0x61c8864680b583ebL + slot * 0x9E3779B1L
+            h = (h xor (h ushr 31)) * -0x4b47d5b1c1c1c1c1L
+            h = h xor (h ushr 29)
+            val level = 0.25 + 0.75 * ((h ushr 11).toDouble() / (1L shl 53).toDouble())
+            return Color(color.r * level, color.g * level, color.b * level)
+        }
+
+        const val TWINKLE_RATE = 20.0
         private const val FLASH_SECONDS = 0.12
         private const val FADE_START = 0.65
     }
