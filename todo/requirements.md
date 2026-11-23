@@ -1113,7 +1113,8 @@ external image onto a mesh's surface.
 - **Scene options** (§9.6): a scene may offer named choices
   (`SceneOption`), which the viewer shows as menus in an "options" section.
   Picking one sends `set_scene_option` to the scene (e.g. `iBeam`'s
-  "failure: off/on" and "springs: hidden/stretch/force").
+  "failure: off/on", "springs: hidden/stretch/force", and "section", a
+  cross-section cut whose cap is coloured by the stress inside the steel).
 - N-body gravity and custom forces (§5.3) are lower priority / `[stretch]`
   — N-body isn't localized to a renderable pair (force exists between
   every pair), and custom forces don't have a defined shape yet.

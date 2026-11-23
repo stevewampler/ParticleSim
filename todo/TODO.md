@@ -6404,9 +6404,30 @@ load. Full `./gradlew test -q` suite green throughout.
       - Scene tested: fields, rest positions, options, springs mode, the
         exaggeration dropping to 1 (pure function of torn and sag), the
         stress peaking at mid-span, and the weight riding the sag.
+- [x] **Cross-section cut** (`section` option): `mid-span`, `quarter span`
+      (3/4 along) and `near support` (half a depth from the roller) cut
+      across the beam and draw the pinned side; `lengthwise` cuts down the
+      middle of the web and draws the back half. Done in the scene, not as
+      a viewer clipping plane: `ElasticLattice.boundarySurface(keep = ...)`
+      builds the skin from the kept cubes only, so the cut face comes out as
+      skin, and its nodes (interior ones) take their stress from the whole
+      lattice's patch recovery. Every colour field, auto-scale and the
+      exaggeration work on the cap unchanged; no wire or viewer changes.
+      The springs, and the weight block when a cut goes through it (separate
+      pre-built half blocks), are cut the same way. The cut snaps to a node
+      layer (5 cm), so the section is coarse: 10 cubes deep, 6 wide, 2
+      across the web.
+      - Tested: the cap carries the interior nodes' stress, bending stress
+        falls steadily down the web from compression to tension through
+        zero at mid-depth (evenly across the web; steeper at the flanges
+        right under the weight), the web's shear peaks at mid-depth a
+        quarter along, springs are cut, `off` restores the whole skin.
+      - Not done: a draggable cut position (scene options are menus only);
+        a cut at an arbitrary angle.
+      - Headless Chromium can't keep up with the frame rate (it falls
+        seconds behind, so a screenshot shows an earlier choice); a GPU
+        browser is fine.
 - [ ] Optional extras, for later:
-      - a cross-section cut, to see stress inside the beam (e.g. a clipping
-        plane, plus a cap coloured by the interior nodes' stress);
       - generic `ColorBy.STRETCH`/`FORCE` line modes for `Spring` and
         `MeshSprings` (see `ColorBy` in `Renderer.kt`); `iBeam` colours its
         springs itself.

@@ -410,15 +410,18 @@ class ElasticLattice(
     }
 
     /** The solid's outer skin: every face of an intact cube with no intact cube on its other
-     * side (none at all, or one in [failedCells]), as two triangles wound to face outward. */
-    fun boundarySurface(name: String? = null): Surface {
+     * side (none at all, or one in [failedCells]), as two triangles wound to face outward.
+     *
+     * Only cubes passing [keep] count, as if the rest were cut away: the faces where they meet
+     * the cut-away cubes become skin too - a cross-section's cap, its nodes interior ones. */
+    fun boundarySurface(name: String? = null, keep: (LatticeIndex) -> Boolean = { true }): Surface {
         val failed = failedCells()
         val triangles = ArrayList<Triangle>()
         for (c in cells) {
-            if (c in failed) continue
+            if (c in failed || !keep(c)) continue
             for (axis in 0 until 3) for (sign in intArrayOf(-1, 1)) {
                 val neighbour = offset(c, axis, sign)
-                if (neighbour in cellSet && neighbour !in failed) continue
+                if (neighbour in cellSet && neighbour !in failed && keep(neighbour)) continue
                 val u = (axis + 1) % 3
                 val v = (axis + 2) % 3
                 val base = if (sign > 0) offset(c, axis, 1) else c

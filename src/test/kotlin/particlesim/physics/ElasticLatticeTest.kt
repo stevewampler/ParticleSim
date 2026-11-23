@@ -121,6 +121,24 @@ class ElasticLatticeTest {
     }
 
     @Test
+    fun `a skin keeping only some cubes caps the cut with the interior face, wound outward`() {
+        val bar = lattice(box(3, 1, 1))
+        val cut = bar.boundarySurface { it.i < 2 }
+        // Two cubes' worth of skin: 4 sides x 2 cubes + both ends.
+        assertEquals(20, cut.triangles.size)
+        val capNodes = bar.nodeIds.filter { bar.indexOf(it)!!.i == 2 }.toSet()
+        val cap = cut.triangles.filter { setOf(it.a, it.b, it.c).all { id -> id in capNodes } }
+        assertEquals(2, cap.size)
+        for (tri in cap) {
+            val pa = bar.restPositions.getValue(tri.a)
+            val normal = (bar.restPositions.getValue(tri.b) - pa).cross(bar.restPositions.getValue(tri.c) - pa)
+            assertTrue(normal.x > 0.0, "faces out of the cut, along +x")
+        }
+        // Nothing beyond the cut.
+        assertTrue(cut.triangles.none { t -> listOf(t.a, t.b, t.c).any { bar.indexOf(it)!!.i == 3 } })
+    }
+
+    @Test
     fun `node volume is an eighth of each cube it touches`() {
         val block = lattice(box(2, 2, 2))
         val v = a * a * a

@@ -7,6 +7,7 @@ import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
 import particlesim.core.VectorExpr
 import particlesim.examples.IBeam
+import particlesim.physics.LatticeIndex
 import particlesim.render.CameraPose
 import particlesim.render.Color
 import particlesim.render.ColorLegend
@@ -45,6 +46,13 @@ import kotlin.math.sqrt
  * - `springs`: `hidden` shows the surface; `stretch` or `force` shows the springs along the cube
  *   edges instead, coloured by how far each is stretched beyond its rest length or by its tension,
  *   with a legend of their own.
+ * - `section`: cuts the beam open to show the stress inside it. `mid-span`, `quarter span` and
+ *   `near support` cut across it (at the middle, three quarters of the way along, and half its
+ *   depth from the roller end - by symmetry the same as a quarter and near the other end), and
+ *   draw only the part on the pinned side; `lengthwise` cuts along the middle of the web and
+ *   draws only the back half. The cut face is coloured like the rest of the surface, from the
+ *   stress at the nodes there, inside the steel. The springs, and the weight when the cut goes
+ *   through it, are cut the same way.
  *
  * Real steel sags only millimetres, so the viewer draws every node's movement exaggerated -
  * 100 times by default (DISPLAY's "deformation" slider). Once the beam has torn or sagged more
@@ -71,18 +79,41 @@ class IBeamScene : DemoScene {
 
     private var failure = false
     private var springs = SPRING_MODES.first()
+    private var section = SECTIONS.first()
     private var exaggerationOff = false
 
-    // The skin, rebuilt only when more of the beam has come apart.
-    private var skinFailedCount = -1
+    private val shape = beam.shape
+
+    /** The node layer each across-the-beam [SECTIONS] choice cuts at. */
+    private val crossCuts = mapOf(
+        "mid-span" to shape.lengthCells / 2,
+        "quarter span" to shape.lengthCells * 3 / 4,
+        "near support" to shape.lengthCells - shape.depthCells / 2,
+    )
+    private val webMiddle = shape.flangeWidthCells / 2
+
+    /** Whether node [n] is on the drawn side of the [section] cut (or on it). */
+    private fun keepsNode(n: LatticeIndex): Boolean {
+        crossCuts[section]?.let { return n.i <= it }
+        return section != "lengthwise" || n.k <= webMiddle
+    }
+
+    /** Whether cube [c] is on the drawn side of the [section] cut. */
+    private fun keepsCell(c: LatticeIndex): Boolean {
+        crossCuts[section]?.let { return c.i < it }
+        return section != "lengthwise" || c.k < webMiddle
+    }
+
+    // The skin, rebuilt only when more of the beam has come apart or the cut moves.
+    private var skinKey: Pair<Int, String>? = null
     private var skin = lattice.boundarySurface(SKIN_NAME)
     private var skinIds: Set<Int> = emptySet()
 
     private fun refreshSkin() {
-        val failed = lattice.failedCells().size
-        if (failed == skinFailedCount) return
-        skinFailedCount = failed
-        skin = lattice.boundarySurface(SKIN_NAME)
+        val key = lattice.failedCells().size to section
+        if (key == skinKey) return
+        skinKey = key
+        skin = lattice.boundarySurface(SKIN_NAME, ::keepsCell)
         skinIds = skin.triangles.flatMap { listOf(it.a, it.b, it.c) }.toSet()
     }
 
@@ -91,6 +122,9 @@ class IBeamScene : DemoScene {
     // The weight: a dark block on the top flange over the nodes that carry it, moved with them.
     private val weightNodes = beam.weightNodes.flatten()
     private val weightBlock: Box
+    // The weight cut by the mid-span and lengthwise sections: its pinned-side and back halves.
+    private val weightLeftHalf: Box
+    private val weightBackHalf: Box
     private val piers: List<Box>
     private val ground: Box
 
@@ -99,13 +133,31 @@ class IBeamScene : DemoScene {
         val top = PIER_HEIGHT + beam.shape.depth
         val xs = weightNodes.map { lattice.restPositions.getValue(it).x }
         weightBlock = Box(beam.store, Vector3(xs.min(), top, -0.25), Vector3(xs.max(), top + 0.35, 0.25), "weight")
+        val midX = origin.x + crossCuts.getValue("mid-span") * shape.spacing
+        weightLeftHalf = Box(beam.store, Vector3(xs.min(), top, -0.25), Vector3(midX.coerceIn(xs.min(), xs.max()), top + 0.35, 0.25), "weight")
+        val midZ = origin.z + webMiddle * shape.spacing
+        weightBackHalf = Box(beam.store, Vector3(xs.min(), top, -0.25), Vector3(xs.max(), top + 0.35, midZ), "weight")
         piers = pierCentresX.mapIndexed { i, x -> Box(beam.store, Vector3(x - PIER_HALF_X, 0.0, -PIER_HALF_Z), Vector3(x + PIER_HALF_X, PIER_HEIGHT, PIER_HALF_Z), "pier ${i + 1}") }
         ground = Box(beam.store, Vector3(-6.0, -0.1, -4.0), Vector3(6.0, 0.0, 4.0), "ground")
     }
 
-    private val restPositions = lattice.restPositions + weightBlock.rest
+    private val restPositions = lattice.restPositions + weightBlock.rest + weightLeftHalf.rest + weightBackHalf.rest
 
-    private val weightMesh = SurfaceRenderer(weightBlock.surface, material = Material(color = Color(0.12, 0.12, 0.14), roughness = 0.6), pickable = false, flatShading = true)
+    private val weightMaterial = Material(color = Color(0.12, 0.12, 0.14), roughness = 0.6)
+    private val weightMeshes = mapOf(
+        weightBlock to SurfaceRenderer(weightBlock.surface, material = weightMaterial, pickable = false, flatShading = true),
+        weightLeftHalf to SurfaceRenderer(weightLeftHalf.surface, material = weightMaterial, pickable = false, flatShading = true),
+        weightBackHalf to SurfaceRenderer(weightBackHalf.surface, material = weightMaterial, pickable = false, flatShading = true),
+    )
+
+    /** The weight as drawn: cut in half when the section goes through it. */
+    private fun weightMesh(): SurfaceRenderer = weightMeshes.getValue(
+        when (section) {
+            "mid-span" -> weightLeftHalf
+            "lengthwise" -> weightBackHalf
+            else -> weightBlock
+        },
+    )
     private val pierMeshes = piers.map { SurfaceRenderer(it.surface, material = Material(color = Color(0.55, 0.55, 0.52), roughness = 0.95), pickable = false, flatShading = true) }
     private val groundMesh = SurfaceRenderer(ground.surface, material = Material(color = Color(0.25, 0.3, 0.22), roughness = 1.0), pickable = false, flatShading = true)
 
@@ -121,7 +173,8 @@ class IBeamScene : DemoScene {
 
     override fun step(t: Double) {
         beam.step(t)
-        weightBlock.moveTo(weightOffset())
+        val offset = weightOffset()
+        for (box in weightMeshes.keys) box.moveTo(offset)
     }
 
     /** How far the top-flange nodes under the weight have moved, on average. */
@@ -149,6 +202,7 @@ class IBeamScene : DemoScene {
             is SceneControlMessage.SetSceneOption -> when (message.name) {
                 FAILURE_OPTION -> if (message.choice in ON_OFF) { failure = message.choice == "on"; lattice.failure = failure }
                 SPRINGS_OPTION -> if (message.choice in SPRING_MODES) springs = message.choice
+                SECTION_OPTION -> if (message.choice in SECTIONS) section = message.choice
             }
             else -> {}
         }
@@ -178,6 +232,7 @@ class IBeamScene : DemoScene {
         for (s in edgeSprings) {
             if (lattice.isTorn(s)) continue
             val ends = lattice.springEnds(s)
+            if (!keepsNode(lattice.indexOf(ends.first)!!) || !keepsNode(lattice.indexOf(ends.second)!!)) continue
             val value = if (byStretch) lattice.elasticStrain(beam.store, s) else lattice.tension(beam.store, s)
             connections += ends
             // Line colours travel as linear values; the ramp is display values, like its legend.
@@ -207,7 +262,7 @@ class IBeamScene : DemoScene {
             connections = lines?.first ?: emptyList(),
             lineColors = lines?.second ?: emptyMap(),
             lineLegend = lines?.third,
-            meshes = (if (showSprings) emptyList() else listOf(beamMesh)) + weightMesh + pierMeshes + groundMesh,
+            meshes = (if (showSprings) emptyList() else listOf(beamMesh)) + weightMesh() + pierMeshes + groundMesh,
             visibleIds = emptySet(),
             lights = lights,
             restPositions = restPositions,
@@ -215,6 +270,7 @@ class IBeamScene : DemoScene {
             options = listOf(
                 SceneOption(FAILURE_OPTION, ON_OFF, if (failure) "on" else "off"),
                 SceneOption(SPRINGS_OPTION, SPRING_MODES, springs),
+                SceneOption(SECTION_OPTION, SECTIONS, section),
             ),
             // While the springs show, the skin is left out altogether: listed, it would get a
             // default mesh drawn anyway, and that mesh's edges would hide the springs on it.
@@ -270,6 +326,8 @@ class IBeamScene : DemoScene {
         const val SPRINGS_OPTION = "springs"
         val ON_OFF = listOf("off", "on")
         val SPRING_MODES = listOf("hidden", "stretch", "force")
+        const val SECTION_OPTION = "section"
+        val SECTIONS = listOf("off", "mid-span", "quarter span", "near support", "lengthwise")
         val FIELDS = listOf("von Mises stress", "bending stress σxx", "web shear τxy", "permanent stretch")
 
         /** Whether deformation is still worth exaggerating: not once the beam has torn or sagged

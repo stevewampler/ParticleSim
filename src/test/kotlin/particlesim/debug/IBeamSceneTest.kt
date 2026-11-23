@@ -1,6 +1,8 @@
 package particlesim.debug
 
 import particlesim.examples.STEEL_YIELD_STRESS
+import particlesim.physics.LatticeIndex
+import particlesim.render.SurfaceRenderer
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -37,7 +39,7 @@ class IBeamSceneTest {
         assertTrue(beam.flatShading)
         assertEquals(listOf("I-beam", "weight", "pier 1", "pier 2", "ground"), frame.meshes.map { it.surface.name })
         assertTrue(frame.meshes.none { it.pickable }, "the beam is drawn exaggerated, so picking it would miss")
-        assertEquals(listOf("failure" to "off", "springs" to "hidden"), frame.options.map { it.name to it.selected })
+        assertEquals(listOf("failure" to "off", "springs" to "hidden", "section" to "off"), frame.options.map { it.name to it.selected })
         assertNull(frame.lineLegend)
         assertTrue(frame.connections.isEmpty())
     }
@@ -80,6 +82,93 @@ class IBeamSceneTest {
         // A choice it doesn't offer changes nothing.
         scene.handleControl(SceneControlMessage.SetSceneOption("springs", "sideways"), t)
         assertEquals("force", scene.frame(t).options.single { it.name == "springs" }.selected)
+    }
+
+    /** The skin's nodes, as lattice indices, and the frame's beam mesh, with [section] chosen. */
+    private fun cut(scene: IBeamScene, section: String, t: Double): Pair<Map<Int, LatticeIndex>, SurfaceRenderer> {
+        scene.handleControl(SceneControlMessage.SetSceneOption("section", section), t)
+        val frame = scene.frame(t)
+        assertEquals(section, frame.options.single { it.name == "section" }.selected)
+        val beam = frame.meshes.first()
+        val lattice = scene.model.lattice
+        return beam.surface.triangles.flatMap { listOf(it.a, it.b, it.c) }.toSet().associateWith { lattice.indexOf(it)!! } to beam
+    }
+
+    @Test
+    fun `a mid-span section shows the pinned half, capped with the interior's bending stress, and halves the weight`() {
+        val scene = IBeamScene()
+        val t = run(scene, 4000)
+        val shape = scene.model.shape
+        val mid = shape.lengthCells / 2
+        val (nodes, beam) = cut(scene, "mid-span", t)
+        assertTrue(nodes.values.all { it.i <= mid }, "nothing past the cut")
+        // The cap: the whole cross-section's nodes at the cut, interior ones included.
+        val cap = nodes.filterValues { it.i == mid }
+        val webCentre = cap.filterValues { it.k == shape.flangeWidthCells / 2 }
+        assertEquals(shape.depthCells + 1, webCentre.size, "every node down the middle of the web")
+        val vonMises = beam.scalarFields[0].values
+        for (id in cap.keys) assertEquals(scene.vonMisesAt(id) / 1e6, vonMises.getValue(id), 1e-9)
+        // Down the web: bending stress falls straight from compression at the top to tension at
+        // the bottom, through zero at the neutral axis.
+        val bending = beam.scalarFields[1].values
+        val byHeight = webCentre.entries.sortedBy { it.value.j }.map { bending.getValue(it.key) }
+        val bottom = byHeight.first()
+        assertTrue(bottom > 0.0 && byHeight.last() < 0.0, "tension below, compression above: $byHeight")
+        assertTrue(abs(byHeight[shape.depthCells / 2]) < 0.1 * bottom, "near zero at mid-depth: $byHeight")
+        val steps = byHeight.zipWithNext { a, b -> a - b }
+        assertTrue(steps.all { it > 0.0 }, "falls all the way up: $byHeight")
+        // Evenly through the web; steeper at the flanges, right under the weight bearing on them.
+        val inner = steps.subList(2, steps.size - 2)
+        for (step in inner) assertEquals(inner.average(), step, 0.2 * inner.average(), "straight through the web: $byHeight")
+        // The weight straddles the cut, so only its pinned-side half is drawn.
+        val weight = scene.frame(t).meshes[1]
+        val cutX = scene.model.lattice.restPositions.getValue(cap.keys.first()).x
+        val rest = scene.frame(t).restPositions
+        assertTrue(weight.surface.triangles.flatMap { listOf(it.a, it.b, it.c) }.all { rest.getValue(it).x <= cutX + 1e-9 })
+    }
+
+    @Test
+    fun `a lengthwise section shows the back half, the web's shear peaking at its middle`() {
+        val scene = IBeamScene()
+        val t = run(scene, 4000)
+        val shape = scene.model.shape
+        val middle = shape.flangeWidthCells / 2
+        val (nodes, beam) = cut(scene, "lengthwise", t)
+        assertTrue(nodes.values.all { it.k <= middle })
+        // A quarter of the way along, between support and weight, the web carries the shear.
+        val quarter = shape.lengthCells / 4
+        val shear = beam.scalarFields[2].values
+        val down = nodes.filterValues { it.k == middle && it.i == quarter }.entries.sortedBy { it.value.j }.map { abs(shear.getValue(it.key)) }
+        assertEquals(shape.depthCells + 1, down.size)
+        val atMiddle = down[shape.depthCells / 2]
+        assertTrue(atMiddle > 0.0)
+        assertTrue(atMiddle > down.first() && atMiddle > down.last(), "most at mid-depth, least at the flange faces: $down")
+    }
+
+    @Test
+    fun `every section is offered, cuts the springs too, and off restores the whole beam`() {
+        val scene = IBeamScene()
+        val t = run(scene, 100)
+        val whole = scene.frame(t).meshes.first().surface.triangles.size
+        assertEquals(IBeamScene.SECTIONS, scene.frame(t).options.single { it.name == "section" }.choices)
+        val lattice = scene.model.lattice
+        val shape = scene.model.shape
+        for (section in IBeamScene.SECTIONS.drop(1)) {
+            val (nodes, _) = cut(scene, section, t)
+            assertTrue(nodes.size < lattice.nodeIds.size, section)
+        }
+        scene.handleControl(SceneControlMessage.SetSceneOption("section", "near support"), t)
+        val nearSupport = shape.lengthCells - shape.depthCells / 2
+        scene.handleControl(SceneControlMessage.SetSceneOption("springs", "stretch"), t)
+        val springs = scene.frame(t).connections
+        assertTrue(springs.isNotEmpty())
+        assertTrue(springs.all { (a, b) -> lattice.indexOf(a)!!.i <= nearSupport && lattice.indexOf(b)!!.i <= nearSupport })
+        assertTrue(springs.any { (a, _) -> lattice.indexOf(a)!!.i == nearSupport })
+        scene.handleControl(SceneControlMessage.SetSceneOption("springs", "hidden"), t)
+        scene.handleControl(SceneControlMessage.SetSceneOption("section", "sideways"), t)
+        assertEquals("near support", scene.frame(t).options.single { it.name == "section" }.selected)
+        scene.handleControl(SceneControlMessage.SetSceneOption("section", "off"), t)
+        assertEquals(whole, scene.frame(t).meshes.first().surface.triangles.size)
     }
 
     @Test
