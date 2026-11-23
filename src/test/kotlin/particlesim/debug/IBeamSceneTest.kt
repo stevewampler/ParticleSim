@@ -90,4 +90,11 @@ class IBeamSceneTest {
         scene.handleControl(SceneControlMessage.SetSceneOption("failure", "off"), 0.0)
         assertEquals("off", scene.frame(0.0).options.single { it.name == "failure" }.selected)
     }
+
+    @Test
+    fun `deformation stops being exaggerated once the beam tears or sags past the limit`() {
+        assertTrue(IBeamScene.exaggerates(torn = false, sag = -0.01))
+        assertTrue(!IBeamScene.exaggerates(torn = true, sag = -0.001))
+        assertTrue(!IBeamScene.exaggerates(torn = false, sag = -IBeamScene.EXAGGERATION_LIMIT - 1e-6))
+    }
 }

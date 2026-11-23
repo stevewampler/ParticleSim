@@ -6354,9 +6354,14 @@ load. Full `./gradlew test -q` suite green throughout.
         Gravity on the scaled-up masses would crush the pieces, so torn-off
         pieces don't fall on their own: the earlier 1 m piers left the
         folded halves standing as a V in mid-air.
-      - Probe results, 150 t default scene: at 300 t it yields slightly and
-        holds. At 700 t it gives way at about 12 s, tears at about 15 s,
-        and its middle is on the ground by about 26 s.
+      - Probe results on the final scene, with no blow-ups, the supports
+        staying at pier height, and the roller sliding about 2 cm:
+        - at 300 t it yields slightly and holds (measured with the earlier
+          1 m piers; the beam itself is unchanged);
+        - at 450 t it gives way at 15.2 s, first tears at 28.7 s, and its
+          middle reaches the ground at 36.1 s;
+        - at 700 t it gives way at 9.5 s, first tears at 14.7 s, and its
+          middle reaches the ground at 19.1 s.
       - Tested:
         - permanent set and the yield force held;
         - tearing, failed cubes and the skin opening;
@@ -6378,6 +6383,8 @@ load. Full `./gradlew test -q` suite green throughout.
         default mesh whose edges hid the springs.
       - Done scene-side, not as generic `ColorBy.STRETCH`/`FORCE` line
         modes.
+      - Runs at 0.85× real time with a bare WebSocket client (the surface
+        view runs at 0.89×).
       - Tested.
 - [x] **`iBeam` scene**: a 4 m I-beam (500 mm deep, 300 mm flanges, 100 mm
       flanges and web; 4,649 particles, about 33k springs) on two 0.5 m
@@ -6395,6 +6402,7 @@ load. Full `./gradlew test -q` suite green throughout.
       - About 0.8 ms per step and 6 ms per frame; 0.9× real time measured
         with a bare WebSocket client.
       - Scene tested: fields, rest positions, options, springs mode, the
+        exaggeration dropping to 1 (pure function of torn and sag), the
         stress peaking at mid-span, and the weight riding the sag.
 - [ ] Optional extras, for later:
       - a cross-section cut, to see stress inside the beam (e.g. a clipping

@@ -139,6 +139,9 @@ class IBeamScene : DemoScene {
 
     internal val hasTorn: Boolean get() = lattice.hasTorn
 
+    /** The beam model itself, for tests and probes. */
+    internal val model: IBeam get() = beam
+
     override fun handleControl(message: SceneControlMessage, t: Double) {
         if (applyEditableFieldMessage(message, beam.forces, beam.constraints, beam.store, t, lights)) return
         when (message) {
@@ -190,7 +193,7 @@ class IBeamScene : DemoScene {
 
     override fun frame(t: Double): SceneFrame {
         refreshSkin()
-        if (!exaggerationOff && (lattice.hasTorn || weightSag() < -EXAGGERATION_LIMIT)) exaggerationOff = true
+        if (!exaggerationOff && !exaggerates(lattice.hasTorn, weightSag())) exaggerationOff = true
         val showSprings = springs != "hidden"
         val lines = if (showSprings) springLines() else null
         val beamMesh = SurfaceRenderer(
@@ -267,7 +270,12 @@ class IBeamScene : DemoScene {
         const val SPRINGS_OPTION = "springs"
         val ON_OFF = listOf("off", "on")
         val SPRING_MODES = listOf("hidden", "stretch", "force")
-        val FIELDS = listOf("von Mises stress", "bending stress (along beam)", "shear stress (web)", "permanent stretch")
+        val FIELDS = listOf("von Mises stress", "bending stress σxx", "web shear τxy", "permanent stretch")
+
+        /** Whether deformation is still worth exaggerating: not once the beam has torn or sagged
+         * past [EXAGGERATION_LIMIT] (negative [sag] is down) - real movement shows by then, and
+         * 100 times it would fling the beam across the scene. */
+        fun exaggerates(torn: Boolean, sag: Double): Boolean = !torn && sag >= -EXAGGERATION_LIMIT
         val CAMERA = CameraPose(position = Vector3(3.4, 1.8, 4.4), lookAt = Vector3(0.0, 0.7, 0.0))
     }
 }
