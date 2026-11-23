@@ -184,8 +184,8 @@
     </section>
     <section>
       <h4>display</h4>
-      <label><input type="checkbox" id="gridToggle" checked> grid</label><br>
-      <label><input type="checkbox" id="axesToggle" checked> axes</label><br>
+      <label><input type="checkbox" id="gridToggle"> grid</label><br>
+      <label><input type="checkbox" id="axesToggle"> axes</label><br>
       <label><input type="checkbox" id="collidersToggle" checked> colliders</label><br>
       <span id="meshEdgesToggle" style="display:none;"><label title="Outline every triangle of the scene's meshes - only offered when the scene has any"><input type="checkbox" id="meshEdgesCheckbox"> show mesh edges</label><br></span>
       <label title="Force arrows and stress / break-proximity colors, everywhere in the scene"><input type="checkbox" id="forcesStressesToggle" checked> forces &amp; stresses</label><br>
@@ -310,6 +310,9 @@ const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
 scene.add(gridHelper);
 const axesHelper = new THREE.AxesHelper(1);
 scene.add(axesHelper);
+// Both start hidden in every scene; the display panel's "grid" and "axes" boxes show them.
+gridHelper.visible = false;
+axesHelper.visible = false;
 
 document.getElementById("gridToggle").addEventListener("change", (e) => { gridHelper.visible = e.target.checked; });
 document.getElementById("axesToggle").addEventListener("change", (e) => { axesHelper.visible = e.target.checked; });

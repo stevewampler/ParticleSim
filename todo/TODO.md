@@ -1585,7 +1585,8 @@ real prerequisite, not just unstarted — see the note below.
 - [x] Global toggles (grid, axes) — `gridHelper`/`axesHelper` promoted from
       anonymous `scene.add(new THREE.GridHelper(...))` calls to named
       consts so a checkbox's `change` listener can flip `.visible`
-      directly; no other state to keep in sync.
+      directly; no other state to keep in sync. Both start hidden (boxes
+      unticked) in every scene; the choice carries across scene changes.
 - [x] Stats overlay: particle count, step rate, physics-vs-wall-clock lag
       (a user-visible readout of §9.1's drop-frames-not-physics pacing
       policy). Two things worth recording since they're easy to get wrong:
