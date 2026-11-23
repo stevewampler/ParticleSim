@@ -146,4 +146,27 @@ class ConstraintTest {
     fun `DragConstraint is always unnamed - a drag session is never scene-authored identity`() {
         assertEquals(null, DragConstraint(0, Vector3.ZERO).name)
     }
+
+    @Test
+    fun `fixed axis holds a particle's position along the axis but lets it slide across it`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val id = store.create(position = Vector3(0.0, 2.0, 0.0), velocity = Vector3(1.0, 3.0, 0.0))
+        groups.add("roller", id)
+        // Pulled down and sideways; held up, so only the sideways pull moves it.
+        val pull = ConstantForce("roller", Vector3(2.0, -9.8, 0.0))
+        val roller = FixedAxis("roller", Vector3(0.0, 1.0, 0.0), store, groups)
+        val integrator = Integrator()
+        var t = 0.0
+        repeat(100) {
+            integrator.step(store, groups, listOf(pull), listOf(roller), t, 0.01)
+            t += 0.01
+        }
+        val p = store.position(id)
+        assertEquals(2.0, p.y, 1e-12)
+        assertEquals(0.0, store.velocity(id).y, 1e-12)
+        // x = 1*t + (2/2)*t^2 under semi-implicit Euler, roughly - just check it slid along x.
+        assertEquals(1.0 + 1.0, p.x, 0.05)
+        assertEquals(0.0, p.z, 1e-12)
+    }
 }

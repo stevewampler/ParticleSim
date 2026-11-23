@@ -104,6 +104,41 @@ class FixedVelocity(
 }
 
 /**
+ * A roller or slide (§6): each member of [group] can't move along [axis] - its position along
+ * [axis] stays where it was when this constraint was built, and its velocity along [axis] is
+ * zeroed - but it moves freely across it. E.g. the roller end of a simply supported beam, held up
+ * (fixed in y) and kept from drifting sideways (fixed in z) but free to slide along the beam as
+ * it bends; [FixedPosition] there would hold the beam's ends a fixed distance apart and pull on
+ * it. One [FixedAxis] per blocked direction.
+ */
+class FixedAxis(
+    private val group: String,
+    axis: Vector3,
+    store: ParticleStore,
+    groups: Groups,
+    override val name: String? = null,
+) : Constraint {
+    private val axis = axis.normalized()
+    private val held: Map<Int, Double> = groups.membersOf(group).associateWith { store.position(it).dot(this.axis) }
+
+    override fun applyVelocity(store: ParticleStore, groups: Groups, t: Double) {
+        if (!groups.isEnabled(group)) return
+        for (id in held.keys) {
+            val v = store.velocity(id)
+            store.setVelocity(id, v - axis * v.dot(axis))
+        }
+    }
+
+    override fun applyPosition(store: ParticleStore, groups: Groups, t: Double) {
+        if (!groups.isEnabled(group)) return
+        for ((id, along) in held) {
+            val p = store.position(id)
+            store.setPosition(id, p + axis * (along - p.dot(axis)))
+        }
+    }
+}
+
+/**
  * §9.4's interactive drag: pins exactly one particle to a live, externally-updated target
  * position each step — the viewer-driven counterpart to [FixedPosition]'s static/expression
  * target, reusing the same constraint mechanism rather than a parallel one (§9.4's own framing:
