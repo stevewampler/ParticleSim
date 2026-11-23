@@ -104,7 +104,9 @@ class IBeamScene : DemoScene {
         camera = CAMERA,
         meshes = listOf(
             SurfaceRenderer(
-                skin, material = Material(color = Color(0.5, 0.5, 0.55), roughness = 0.5), flatShading = true,
+                // Unpickable: it's drawn with its deformation exaggerated, so a click on it would
+                // land far from the node really there.
+                skin, material = Material(color = Color(0.5, 0.5, 0.55), roughness = 0.5), flatShading = true, pickable = false,
                 vertexColors = stressColors(), legend = LEGEND, restPositions = restPositions, deformationScale = DEFORMATION_SCALE,
             ),
             weightMesh,

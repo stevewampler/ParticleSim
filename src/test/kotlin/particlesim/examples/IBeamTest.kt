@@ -82,4 +82,20 @@ class IBeamTest {
         assertEquals(steel, beam.selfWeightForce!!.total, 1e-6 * steel)
         assertTrue(beam.nodeMass > 1000 * STEEL_DENSITY * shape.spacing * shape.spacing * shape.spacing, "node mass is scaled up")
     }
+
+    @Test
+    fun `the weight's tonnes is live-editable, ramps on smoothly, and refuses nonsense`() {
+        val weight = RestingWeight(listOf(1, 2), tonnes = 10.0, rampSeconds = 2.0)
+        val full = 10.0 * 1000 * STANDARD_GRAVITY
+        assertEquals(0.0, weight.weightAt(0.0))
+        assertEquals(full / 2, weight.weightAt(1.0), 1e-9)
+        assertEquals(full, weight.weightAt(5.0), 1e-9)
+        assertTrue(weight.setField("tonnes", particlesim.physics.FieldValue.Scalar(25.0)))
+        assertEquals(2.5 * full, weight.weightAt(5.0), 1e-9)
+        assertEquals(mapOf("tonnes" to particlesim.physics.FieldValue.Scalar(25.0)), weight.editableFields())
+        assertTrue(!weight.setField("tonnes", particlesim.physics.FieldValue.Scalar(-1.0)))
+        assertTrue(!weight.setField("tonnes", particlesim.physics.FieldValue.Scalar(Double.NaN)))
+        assertTrue(!weight.setField("mass", particlesim.physics.FieldValue.Scalar(1.0)))
+        assertEquals(25.0, weight.tonnes)
+    }
 }

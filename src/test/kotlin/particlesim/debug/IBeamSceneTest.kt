@@ -28,7 +28,7 @@ class IBeamSceneTest {
         assertEquals(IBeamScene.DEFORMATION_SCALE, beam.deformationScale)
         assertTrue(beam.flatShading)
         assertEquals(listOf("I-beam", "weight", "pier 1", "pier 2", "ground"), frame.meshes.map { it.surface.name })
-        assertTrue(frame.meshes.drop(1).none { it.pickable })
+        assertTrue(frame.meshes.none { it.pickable }, "the beam is drawn exaggerated, so picking it would miss")
     }
 
     @Test

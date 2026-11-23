@@ -6292,7 +6292,8 @@ load. Full `./gradlew test -q` suite green throughout.
           M·y/I through the depth (within 3% of the peak) and at the top
           and bottom surfaces (measured 3.6% low; tolerance 5%);
         - mid-span sag matching bending plus web shear (10%);
-        - self weight taken from real steel.
+        - self weight taken from real steel;
+        - the weight's `tonnes` edit and ramp.
 - [x] **Viewer: per-vertex mesh colors, color legend, deformation
       exaggeration, flat shading** (§10.2):
       - `SurfaceRenderer` gains `vertexColors`, `legend` (`ColorLegend`),
@@ -6310,7 +6311,12 @@ load. Full `./gradlew test -q` suite green throughout.
       piers, with a 150 t weight at mid-span. The skin is coloured by von
       Mises stress, from 0 to steel's 250 MPa yield, and drawn at ×100
       deformation.
-      - It settles in about 15 s at the expected peak (about 137 MPa).
+      - Measured: the mid-span bottom fibre settles at 136.3 MPa (beam
+        theory predicts 137), within 1% of that by t = 15 s. The highest
+        stress anywhere is 152 MPa, on the top flange under the weight. The
+        sag under the weight is 4.2 mm.
+      - The beam skin is unpickable: it's drawn exaggerated, so a click
+        would land far from the node really there.
       - Raising the weight to 400 t turns the flanges red.
       - About 0.8 ms per step and 6 ms per frame; 0.9× real time measured
         with a bare WebSocket client. Headless Chromium's software
@@ -6324,7 +6330,7 @@ load. Full `./gradlew test -q` suite green throughout.
       - a cross-section cut, to see stress inside the beam (e.g. a clipping
         plane, plus a cap coloured by the interior nodes' stress).
 - [ ] Gaps / possible next steps:
-      - the legend's range is fixed by the scene (0 to yield); an
+      - the legend's range is fixed by the scene (0 to yield). An
         auto-scale option, and a choice of field (signed bending stress
         σxx, shear), would need the per-vertex values sent rather than
         colours;
