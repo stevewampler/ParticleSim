@@ -3,6 +3,7 @@ package particlesim.render
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 
 class ColorRampTest {
 
@@ -46,5 +47,18 @@ class ColorRampTest {
         for (color in samples) {
             assertNotEquals(Color.DEFAULT_LINE, color)
         }
+    }
+
+    @Test
+    fun `the stress ramp runs blue to red through its stops, clamped at both ends`() {
+        val stops = ColorRamp.STRESS_STOPS
+        assertEquals(stops.first(), ColorRamp.stress(0.0))
+        assertEquals(stops.first(), ColorRamp.stress(-1.0))
+        assertEquals(stops.last(), ColorRamp.stress(1.0))
+        assertEquals(stops.last(), ColorRamp.stress(3.0))
+        assertEquals(stops[2], ColorRamp.stress(0.5))
+        val between = ColorRamp.stress(0.125) // halfway from the first stop to the second
+        assertEquals((stops[0].g + stops[1].g) / 2, between.g, 1e-12)
+        assertTrue(stops.first().b > stops.first().r && stops.last().r > stops.last().b, "blue low, red high")
     }
 }

@@ -13,6 +13,7 @@ import particlesim.physics.UniformGravity
 import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.ColorLegend
 import particlesim.render.ConnectionStyle
 import particlesim.render.ConnectionShape
 import particlesim.render.Light
@@ -224,6 +225,34 @@ class BinaryFrameTest {
         val decoded = BinaryFrame.decode(buffer).particleColors.single()
 
         assertEquals(Color(1.0, 0.0, 0.0), decoded.color)
+    }
+
+    @Test
+    fun `round-trips a mesh's vertex colours, legend, rest positions and flat shading`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3(0.0, 0.0, 0.0))
+        val b = store.create(position = Vector3(1.0, 0.0, 0.0))
+        val c = store.create(position = Vector3(0.0, -0.01, 1.0))
+        val legend = ColorLegend("von Mises stress", "MPa", 0.0, 250.0, listOf(Color(0.0, 0.0, 1.0), Color(1.0, 0.0, 0.0)))
+        val mesh = SurfaceRenderer(
+            surface = Surface(listOf(Triangle(a, b, c)), name = "beam"),
+            flatShading = true,
+            vertexColors = mapOf(a to Color(1.0, 0.0, 0.0), c to Color(0.0, 1.0, 0.0)),
+            legend = legend,
+            restPositions = mapOf(a to Vector3.ZERO, b to Vector3(1.0, 0.0, 0.0), c to Vector3(0.0, 0.0, 1.0)),
+            deformationScale = 100.0,
+        )
+        val decoded = BinaryFrame.decode(
+            BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(a, b, c), connections = emptyList(), meshes = listOf(mesh, SurfaceRenderer(Surface(listOf(Triangle(a, b, c)))))),
+        )
+        val (colored, plain) = decoded.meshes
+        assertTrue(colored.flatShading)
+        assertEquals(mapOf(a to Color(1.0, 0.0, 0.0), c to Color(0.0, 1.0, 0.0)), colored.vertexColors)
+        assertEquals(legend, colored.legend)
+        assertEquals(mesh.restPositions, colored.restPositions)
+        assertEquals(100.0, colored.deformationScale)
+        // A mesh that declares none of it decodes to the defaults.
+        assertEquals(DecodedMesh(wireframe = false, triangles = listOf(Triangle(a, b, c))), plain)
     }
 
     @Test

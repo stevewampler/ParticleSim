@@ -57,6 +57,7 @@ fun main(args: Array<String>) {
         "tacomaNarrowsComparison" to { tacomaComparisonScene() },
         "murmuration" to { MurmurationScene() },
         "fireworks" to { FireworksScene() },
+        "iBeam" to { IBeamScene() },
     )
     val requestedScene = args.getOrNull(0)
     if (requestedScene != null && requestedScene !in factories) {

@@ -1095,6 +1095,17 @@ external image onto a mesh's surface.
   scenery (the `murmuration` scene's ground). The viewer's mouse picking
   (§9.4 drag, double-click delete, §10.3 right-click) ignores that mesh, so
   clicks pass through it. It still draws and stays in the outliner.
+- **Per-surface `colorBy` (vertex colors) and deformation exaggeration**: a
+  `SurfaceRenderer` may paint each vertex its own color (e.g. stress mapped
+  through a blue → cyan → green → yellow → red ramp), with a `ColorLegend`
+  (label, unit, range, stops) the viewer draws as a color bar; colors are
+  resolved server-side like every other `colorBy`, and follow the global
+  "forces & stresses" switch (§10.3). It may also send each vertex's rest
+  position, so the viewer can draw deflections too small to see (a steel
+  beam sagging millimetres) exaggerated by a "deformation" slider, starting
+  at a scene-chosen scale; display only, never physics. Added for the
+  `iBeam` scene, whose surface shows von Mises stress from an elastic
+  lattice solid (§5.1, §7).
 - N-body gravity and custom forces (§5.3) are lower priority / `[stretch]`
   — N-body isn't localized to a renderable pair (force exists between
   every pair), and custom forces don't have a defined shape yet.

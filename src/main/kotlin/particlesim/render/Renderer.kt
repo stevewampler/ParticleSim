@@ -65,6 +65,22 @@ data class SurfaceRenderer(
      * (e.g. [particlesim.debug.MurmurationScene]'s ground, scenery nobody should grab). It
      * still draws, and stays reachable from the outliner. */
     val pickable: Boolean = true,
+    /** Shade each triangle flat rather than smoothing normals across shared vertices - for a
+     * boxy solid like [particlesim.debug.IBeamScene]'s, whose square edges would otherwise
+     * shade as if rounded. */
+    val flatShading: Boolean = false,
+    /** A colour per vertex (particle id → display sRGB colour), painted over [material]'s
+     * colour - e.g. stress mapped through [ColorRamp.stress] (§10.2's per-surface `colorBy`).
+     * Vertices with no entry use the material colour. */
+    val vertexColors: Map<Int, Color>? = null,
+    /** What [vertexColors] mean, drawn as a colour bar beside the view. */
+    val legend: ColorLegend? = null,
+    /** Each vertex's unloaded position, so the viewer can exaggerate how far the surface has
+     * moved from it - deflections too small to see (a steel beam sagging a few millimetres)
+     * drawn [deformationScale] times larger. Null: drawn where it is. */
+    val restPositions: Map<Int, particlesim.core.Vector3>? = null,
+    /** The exaggeration the viewer starts at when the scene loads; its slider changes it. */
+    val deformationScale: Double = 1.0,
 ) {
     /** §10.2's `[stretch]` "Lighting & materials": [material] verbatim when this renderer
      * declared one, otherwise the exact hardcoded appearance this class rendered with before
@@ -77,6 +93,10 @@ data class SurfaceRenderer(
     val effectiveMaterial: Material
         get() = material ?: Material(color = if (textureName != null) Material.UNTINTED else Material.DEFAULT_COLOR)
 }
+
+/** The colour bar explaining a mesh's [SurfaceRenderer.vertexColors]: [stops] spread evenly
+ * from [min] to [max] (in [unit]s), titled [label]. Values past [max] show the last stop. */
+data class ColorLegend(val label: String, val unit: String, val min: Double, val max: Double, val stops: List<Color>)
 
 /** Every named [Surface] in [surfaces] that isn't already covered by [explicitNames] (a scene's
  * own hand-declared [SurfaceRenderer]s, keyed by the surface name they target — e.g. FlagScene's

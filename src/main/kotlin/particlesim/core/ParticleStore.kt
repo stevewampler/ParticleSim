@@ -140,6 +140,16 @@ class ParticleStore(private val onWarning: (String) -> Unit = { System.err.print
         val s = slotOf(id); posX[s] = value.x; posY[s] = value.y; posZ[s] = value.z
     }
 
+    /** Position and velocity components by storage slot, for a force's inner loop over
+     * thousands of connections (e.g. [particlesim.physics.ElasticLattice]) - skipping the id
+     * lookup and the [Vector3] for each. A slot is only valid while its particle is alive. */
+    internal fun xAt(slot: Int): Double = posX[slot]
+    internal fun yAt(slot: Int): Double = posY[slot]
+    internal fun zAt(slot: Int): Double = posZ[slot]
+    internal fun vxAt(slot: Int): Double = velX[slot]
+    internal fun vyAt(slot: Int): Double = velY[slot]
+    internal fun vzAt(slot: Int): Double = velZ[slot]
+
     fun velocity(id: Int): Vector3 = slotOf(id).let { Vector3(velX[it], velY[it], velZ[it]) }
     fun setVelocity(id: Int, value: Vector3) {
         val s = slotOf(id); velX[s] = value.x; velY[s] = value.y; velZ[s] = value.z

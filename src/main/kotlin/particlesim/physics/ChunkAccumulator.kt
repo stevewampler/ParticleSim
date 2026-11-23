@@ -20,6 +20,13 @@ class ChunkAccumulator(capacity: Int) {
         fz[slot] += force.z
     }
 
+    /** [add] without the [Vector3]. */
+    fun add(slot: Int, x: Double, y: Double, z: Double) {
+        fx[slot] += x
+        fy[slot] += y
+        fz[slot] += z
+    }
+
     fun at(slot: Int): Vector3 = Vector3(fx[slot], fy[slot], fz[slot])
 
     /** Adds this chunk's contents into [target] — used for the fixed-order chunk merge. */

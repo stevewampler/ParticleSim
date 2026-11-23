@@ -10,6 +10,7 @@ import particlesim.lifecycle.EmitterCapPolicy
 import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
+import particlesim.render.ColorLegend
 import particlesim.render.ConnectionStyle
 import particlesim.render.ConnectionShape
 import particlesim.render.Light
@@ -78,6 +79,19 @@ import kotlin.math.roundToInt
  *               "Lighting & materials" - always sent, resolved server-side from
  *               SurfaceRenderer.effectiveMaterial, so every mesh (customized or not) carries a
  *               concrete color/roughness/opacity rather than a "was one declared" flag)
+ *             then, per mesh: u8 flatShading,
+ *               i32 vertexColorCount, vertexColorCount * { i32 particleId, u8 r, g, b },
+ *               i32 legendLabelLen, legendLabelLen UTF-8 bytes, i32 legendUnitLen, legendUnitLen
+ *               UTF-8 bytes, f64 legendMin, f64 legendMax, i32 legendStopCount,
+ *               legendStopCount * { u8 r, g, b },
+ *               i32 restCount, restCount * { i32 particleId, f32 x, y, z },
+ *               f64 deformationScale
+ *               (§10.2's per-surface colorBy: vertex colors are display sRGB, drawn as given and
+ *               painted over the material color; a vertex with no entry keeps the material
+ *               color. legendLabelLen 0 = no legend (its other fields are still sent, zero).
+ *               Rest positions let the viewer exaggerate each vertex's movement from where it
+ *               started by its deformation slider, which starts at deformationScale; restCount 0
+ *               = drawn where it is. f32 is plenty for positions only ever drawn.)
  * i32  arrowGroupCount
  * arrowGroupCount * { i32 nameLen, nameLen UTF-8 bytes, i32 sampleCount,
  *                      sampleCount * { f64 ox, oy, oz, f64 vx, vy, vz } }
@@ -375,7 +389,7 @@ object BinaryFrame {
             MESH_HEADER_SIZE + meshes.sumOf {
                 MESH_ENTRY_HEADER_SIZE + stringSize(it.surface.name ?: "") + it.surface.triangles.size * TRIANGLE_SIZE +
                     stringSize(textureUrlOf(it)) + MESH_UV_HEADER_SIZE + uvsToEmit(it).size * MESH_UV_ENTRY_SIZE +
-                    MESH_MATERIAL_SIZE
+                    MESH_MATERIAL_SIZE + meshExtrasSize(it)
             } +
             ARROW_GROUP_HEADER_SIZE + arrowGroups.sumOf {
                 stringSize(it.name) + ARROW_GROUP_SAMPLE_COUNT_SIZE + it.samples.size * ARROW_SIZE
@@ -458,6 +472,7 @@ object BinaryFrame {
             val material = mesh.effectiveMaterial
             buffer.putDouble(material.color.r); buffer.putDouble(material.color.g); buffer.putDouble(material.color.b)
             buffer.putDouble(material.roughness); buffer.putDouble(material.opacity)
+            putMeshExtras(buffer, mesh)
         }
         buffer.putInt(arrowGroups.size)
         for (group in arrowGroups) {
@@ -673,7 +688,21 @@ object BinaryFrame {
             val uvCount = buf.int
             val uvs = (0 until uvCount).associate { buf.int to UV(buf.double, buf.double) }
             val material = Material(color = Color(buf.double, buf.double, buf.double), roughness = buf.double, opacity = buf.double)
-            DecodedMesh(wireframe, triangles, name, textureUrl, uvs, material, pickable)
+            val flatShading = buf.get().toInt() != 0
+            val vertexColors = (0 until buf.int).associate {
+                buf.int to Color(byteToColorChannel(buf.get()), byteToColorChannel(buf.get()), byteToColorChannel(buf.get()))
+            }
+            val legendLabel = getString(buf)
+            val legendUnit = getString(buf)
+            val legendMin = buf.double
+            val legendMax = buf.double
+            val stops = (0 until buf.int).map { Color(byteToColorChannel(buf.get()), byteToColorChannel(buf.get()), byteToColorChannel(buf.get())) }
+            val legend = if (legendLabel.isEmpty()) null else ColorLegend(legendLabel, legendUnit, legendMin, legendMax, stops)
+            val rest = (0 until buf.int).associate {
+                buf.int to Vector3(buf.float.toDouble(), buf.float.toDouble(), buf.float.toDouble())
+            }
+            val deformationScale = buf.double
+            DecodedMesh(wireframe, triangles, name, textureUrl, uvs, material, pickable, flatShading, vertexColors, legend, rest, deformationScale)
         }
         val arrowGroupCount = buf.int
         val arrowGroups = (0 until arrowGroupCount).map {
@@ -804,6 +833,40 @@ object BinaryFrame {
      * registry here (an unknown name just 404s client-side rather than failing frame encoding,
      * the same "don't crash the sim over a rendering concern" stance colliders/meshes already
      * take elsewhere in this file). */
+    private fun meshExtrasSize(mesh: SurfaceRenderer): Int {
+        val legend = mesh.legend
+        return 1 + 4 + (mesh.vertexColors?.size ?: 0) * (4 + 3) +
+            stringSize(legend?.label ?: "") + stringSize(legend?.unit ?: "") + 8 + 8 + 4 + (legend?.stops?.size ?: 0) * 3 +
+            4 + (mesh.restPositions?.size ?: 0) * (4 + 12) + 8
+    }
+
+    private fun putMeshExtras(buffer: ByteBuffer, mesh: SurfaceRenderer) {
+        buffer.put(if (mesh.flatShading) 1 else 0)
+        val colors = mesh.vertexColors ?: emptyMap()
+        buffer.putInt(colors.size)
+        for ((id, c) in colors) {
+            buffer.putInt(id)
+            buffer.put(colorChannelToByte(c.r)); buffer.put(colorChannelToByte(c.g)); buffer.put(colorChannelToByte(c.b))
+        }
+        val legend = mesh.legend
+        putString(buffer, legend?.label ?: "")
+        putString(buffer, legend?.unit ?: "")
+        buffer.putDouble(legend?.min ?: 0.0)
+        buffer.putDouble(legend?.max ?: 0.0)
+        val stops = legend?.stops ?: emptyList()
+        buffer.putInt(stops.size)
+        for (c in stops) {
+            buffer.put(colorChannelToByte(c.r)); buffer.put(colorChannelToByte(c.g)); buffer.put(colorChannelToByte(c.b))
+        }
+        val rest = mesh.restPositions ?: emptyMap()
+        buffer.putInt(rest.size)
+        for ((id, p) in rest) {
+            buffer.putInt(id)
+            buffer.putFloat(p.x.toFloat()); buffer.putFloat(p.y.toFloat()); buffer.putFloat(p.z.toFloat())
+        }
+        buffer.putDouble(mesh.deformationScale)
+    }
+
     private fun textureUrlOf(mesh: SurfaceRenderer): String = mesh.textureName?.let { "/textures/$it.png" } ?: ""
 
     /** Empty unless [mesh] actually declares a texture - UV data is exactly as static as the
@@ -1043,6 +1106,11 @@ data class DecodedMesh(
     val uvs: Map<Int, UV> = emptyMap(),
     val material: Material = Material(),
     val pickable: Boolean = true,
+    val flatShading: Boolean = false,
+    val vertexColors: Map<Int, Color> = emptyMap(),
+    val legend: ColorLegend? = null,
+    val restPositions: Map<Int, Vector3> = emptyMap(),
+    val deformationScale: Double = 1.0,
 )
 
 /** One named group and its current member ids (§10.3's group visibility toggle needs to know

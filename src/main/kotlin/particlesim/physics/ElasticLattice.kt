@@ -156,31 +156,34 @@ class ElasticLattice(
     /** Each spring's endpoints and its stiffness (summed over the cubes it borders). */
     fun springs(): List<Triple<Int, Int, Double>> = bondA.indices.map { Triple(bondA[it], bondB[it], bondStiffness[it]) }
 
+    // Each spring's endpoints' storage slots, looked up once: the nodes live as long as the
+    // lattice does, and an id lookup per endpoint per step was most of the cost.
+    private val slotA = IntArray(bondA.size) { store.slotOf(bondA[it]) }
+    private val slotB = IntArray(bondB.size) { store.slotOf(bondB[it]) }
+
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
     ) {
         if (!groups.isEnabled(group)) return
+        val damped = stiffnessDamping != 0.0
         var i = chunkIndex
         while (i < bondA.size) {
-            val a = bondA[i]
-            val b = bondB[i]
-            val pa = store.position(a)
-            val pb = store.position(b)
-            val dx = pb.x - pa.x; val dy = pb.y - pa.y; val dz = pb.z - pa.z
+            val a = slotA[i]
+            val b = slotB[i]
+            val dx = store.xAt(b) - store.xAt(a)
+            val dy = store.yAt(b) - store.yAt(a)
+            val dz = store.zAt(b) - store.zAt(a)
             val length = sqrt(dx * dx + dy * dy + dz * dz)
             val inv = 1.0 / length
             val nx = dx * inv; val ny = dy * inv; val nz = dz * inv
             var tension = bondStiffness[i] * (length - bondRest[i])
-            if (stiffnessDamping != 0.0) {
-                val va = store.velocity(a)
-                val vb = store.velocity(b)
-                val opening = (vb.x - va.x) * nx + (vb.y - va.y) * ny + (vb.z - va.z) * nz
+            if (damped) {
+                val opening = (store.vxAt(b) - store.vxAt(a)) * nx + (store.vyAt(b) - store.vyAt(a)) * ny + (store.vzAt(b) - store.vzAt(a)) * nz
                 tension += stiffnessDamping * bondStiffness[i] * opening
             }
-            val f = Vector3(nx * tension, ny * tension, nz * tension)
-            chunk.add(store.slotOf(a), f)
-            chunk.add(store.slotOf(b), -f)
+            chunk.add(a, nx * tension, ny * tension, nz * tension)
+            chunk.add(b, -nx * tension, -ny * tension, -nz * tension)
             i += chunkCount
         }
     }

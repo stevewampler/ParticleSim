@@ -111,6 +111,14 @@
   #objectPanel .noRenderer { color: #888; font-style: italic; }
   #objectPanel .objectInfo { color: #9f9; margin-top: 2px; }
   #objectPanel .objectInspect { color: #9cf; margin-top: 2px; white-space: pre-line; }
+  /* The colour bar for a mesh's per-vertex colours (e.g. stress), above the status bar. */
+  #colorLegend {
+    display: none; position: fixed; right: 12px; bottom: 40px; z-index: 1; width: 240px;
+    font: 12px/1.4 monospace; color: #ddd; background: rgba(0,0,0,0.6);
+    padding: 6px 10px; border-radius: 4px;
+  }
+  #colorLegendBar { height: 12px; border-radius: 2px; margin: 4px 0 2px; }
+  #colorLegendTicks { display: flex; justify-content: space-between; }
   #statusBar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 1;
     font: 12px/1.4 monospace; color: #ddd; background: rgba(0,0,0,0.6);
@@ -177,6 +185,7 @@
       <div id="objectPanelBody"></div>
     </div>
   </div>
+  <div id="colorLegend"><div id="colorLegendTitle"></div><div id="colorLegendBar"></div><div id="colorLegendTicks"></div></div>
   <div id="controlPanel">
     <section id="scenePicker" style="display:none;">
       <h4>scene</h4>
@@ -188,6 +197,7 @@
       <label><input type="checkbox" id="axesToggle"> axes</label><br>
       <label><input type="checkbox" id="collidersToggle" checked> colliders</label><br>
       <span id="meshEdgesToggle" style="display:none;"><label title="Outline every triangle of the scene's meshes - only offered when the scene has any"><input type="checkbox" id="meshEdgesCheckbox"> show mesh edges</label><br></span>
+      <span id="deformationRow" style="display:none;" title="Draw how far the surface has moved from where it started this many times larger - deflections too small to see otherwise"><label>deformation ×<span id="deformationText"></span></label><div class="arrowScaleRow"><input type="range" id="deformationSlider" min="0" max="3" step="0.05" value="0"></div></span>
       <label title="Force arrows and stress / break-proximity colors, everywhere in the scene"><input type="checkbox" id="forcesStressesToggle" checked> forces &amp; stresses</label><br>
       <label title="An arrow on every particle showing its velocity - each group's panel can leave its own out"><input type="checkbox" id="velocityArrowsToggle"> velocity arrows</label>
       <div class="arrowScaleRow" title="Velocity arrow length"><input type="range" id="velocityScaleSlider" min="-2" max="2" step="0.05" value="0"><span id="velocityScaleText"></span></div>
@@ -277,6 +287,48 @@ statusBarTextEl.append(
   statusBarStatusEl, " | Step: ", statusBarStepEl, " | Particles: ", statusBarParticlesEl, " | ",
   statusBarCameraEl,
 );
+// Deformation exaggeration for meshes that send rest positions: a log slider, 1x to 1000x, reset
+// to the scene's own suggestion whenever a scene loads (see seedHiddenGroupsFromFrame).
+const deformationRowEl = document.getElementById("deformationRow");
+const deformationSliderEl = document.getElementById("deformationSlider");
+const deformationTextEl = document.getElementById("deformationText");
+let deformationScale = 1;
+function setDeformationScale(scale) {
+  deformationScale = Math.max(1, scale);
+  deformationSliderEl.value = String(Math.log10(deformationScale));
+  deformationTextEl.textContent = deformationScale >= 10 ? deformationScale.toFixed(0) : deformationScale.toFixed(1);
+}
+deformationSliderEl.addEventListener("input", () => {
+  deformationScale = Math.pow(10, Number(deformationSliderEl.value));
+  deformationTextEl.textContent = deformationScale >= 10 ? deformationScale.toFixed(0) : deformationScale.toFixed(1);
+});
+setDeformationScale(1);
+
+// The colour bar for a mesh's per-vertex colours - rebuilt only when the legend changes.
+const colorLegendEl = document.getElementById("colorLegend");
+const colorLegendTitleEl = document.getElementById("colorLegendTitle");
+const colorLegendBarEl = document.getElementById("colorLegendBar");
+const colorLegendTicksEl = document.getElementById("colorLegendTicks");
+let shownLegendKey = null;
+function updateMeshColorLegend(legend) {
+  const key = legend ? JSON.stringify(legend) : null;
+  if (key === shownLegendKey) return;
+  shownLegendKey = key;
+  colorLegendEl.style.display = legend ? "block" : "none";
+  if (!legend) return;
+  const css = (c) => `rgb(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)})`;
+  colorLegendTitleEl.textContent = legend.unit ? `${legend.label} (${legend.unit})` : legend.label;
+  colorLegendBarEl.style.background = `linear-gradient(to right, ${legend.stops.map(css).join(", ")})`;
+  const fmt = (v) => (Math.abs(v) >= 100 || v === 0 ? v.toFixed(0) : v.toPrecision(3));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => legend.min + (legend.max - legend.min) * f);
+  colorLegendTicksEl.innerHTML = "";
+  ticks.forEach((v, i) => {
+    const span = document.createElement("span");
+    span.textContent = fmt(v) + (i === ticks.length - 1 ? "+" : "");
+    colorLegendTicksEl.appendChild(span);
+  });
+}
+
 const meshEdgesToggleEl = document.getElementById("meshEdgesToggle");
 const meshEdgesCheckboxEl = document.getElementById("meshEdgesCheckbox");
 let showMeshEdges = false;
@@ -946,6 +998,14 @@ const solidMeshMaterial = (material) => new THREE.MeshStandardMaterial({
   opacity: material.opacity, transparent: material.opacity < 1,
   polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
 });
+// A mesh painted per vertex (§10.2's per-surface colorBy, e.g. stress): white base so the vertex
+// colours show as sent rather than tinted by the material colour.
+const vertexColoredMeshMaterial = (material, flatShading) => new THREE.MeshStandardMaterial({
+  color: 0xffffff, vertexColors: true, flatShading,
+  side: THREE.DoubleSide, roughness: material.roughness,
+  opacity: material.opacity, transparent: material.opacity < 1,
+  polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+});
 const wireframeMeshMaterial = (material) => new THREE.MeshBasicMaterial({
   color: new THREE.Color(material.color.r, material.color.g, material.color.b), wireframe: true,
   opacity: material.opacity, transparent: material.opacity < 1,
@@ -1076,6 +1136,10 @@ let latestStep = 0;
 function buildMeshGeometry(meshDecl, byId) {
   const localIndexOf = new Map();
   const positions = [];
+  const colors = []; // parallel to positions - only used when meshDecl.vertexColors is non-empty
+  const scratchColor = new THREE.Color();
+  const exaggerate = meshDecl.rest.size > 0 && deformationScale !== 1;
+  const painted = showForcesAndStresses && meshDecl.vertexColors.size > 0;
   const uvs = []; // parallel to positions/3 - only meaningful when meshDecl.uvs is non-empty
   const indices = [];
   const triangleVertexIds = [];
@@ -1085,7 +1149,17 @@ function buildMeshGeometry(meshDecl, byId) {
     for (const [id, p] of [[tri.a, a], [tri.b, b], [tri.c, c]]) {
       if (!localIndexOf.has(id)) {
         localIndexOf.set(id, positions.length / 3);
-        positions.push(p.x, p.y, p.z);
+        // Deformation exaggeration: each vertex drawn deformationScale times as far from where
+        // it started as it really is.
+        const r = exaggerate ? meshDecl.rest.get(id) : null;
+        if (r) positions.push(r.x + (p.x - r.x) * deformationScale, r.y + (p.y - r.y) * deformationScale, r.z + (p.z - r.z) * deformationScale);
+        else positions.push(p.x, p.y, p.z);
+        if (painted) {
+          const c = meshDecl.vertexColors.get(id) || meshDecl.material.color;
+          // Vertex colours arrive as display sRGB; three.js shades in linear.
+          scratchColor.setRGB(c.r, c.g, c.b, THREE.SRGBColorSpace);
+          colors.push(scratchColor.r, scratchColor.g, scratchColor.b);
+        }
         // §10.2's texture-mapped surfaces: a vertex with no UV entry (untextured mesh, or one
         // missing from a partial Surface.uvs) falls back to (0,0) rather than skipping the
         // attribute - a uniform wrong corner is an obviously-broken texture, not a WebGL error
@@ -1100,6 +1174,7 @@ function buildMeshGeometry(meshDecl, byId) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
   if (meshDecl.uvs.size > 0) geometry.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uvs), 2));
+  if (colors.length > 0) geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(colors), 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return { geometry, triangleVertexIds };
@@ -1286,6 +1361,9 @@ function applyFrame(frame) {
     meshGroup.remove(meshEdgeOverlays.pop());
   }
   meshEdgesToggleEl.style.display = frame.meshes.length > 0 ? "inline" : "none";
+  deformationRowEl.style.display = frame.meshes.some((m) => m.rest.size > 0) ? "inline" : "none";
+  // Stress colours follow the global "forces & stresses" switch, like every other stress colour.
+  updateMeshColorLegend(showForcesAndStresses ? frame.meshes.find((m) => m.legend)?.legend ?? null : null);
   frame.meshes.forEach((meshDecl, i) => {
     const obj = meshObjects[i];
     obj.geometry.dispose();
@@ -1299,7 +1377,9 @@ function applyFrame(frame) {
     // a textured wireframe here) - a texture only applies to the solid-shaded case.
     obj.material = wireframe ? wireframeMeshMaterial(meshDecl.material)
       : meshDecl.textureUrl ? texturedMeshMaterial(meshDecl.textureUrl, meshDecl.material, meshDecl.uvRepeats)
+      : showForcesAndStresses && meshDecl.vertexColors.size > 0 ? vertexColoredMeshMaterial(meshDecl.material, meshDecl.flatShading)
       : solidMeshMaterial(meshDecl.material);
+    if (meshDecl.flatShading && obj.material.flatShading === false) obj.material.flatShading = true;
 
     const overlay = meshEdgeOverlays[i];
     overlay.geometry.dispose();
@@ -1654,7 +1734,36 @@ function decodeFrame(buffer) {
     const matB = view.getFloat64(offset, true); offset += 8;
     const roughness = view.getFloat64(offset, true); offset += 8;
     const opacity = view.getFloat64(offset, true); offset += 8;
-    meshes[i] = { wireframe, pickable, name, triangles, textureUrl, uvs, uvRepeats, material: { color: { r: matR, g: matG, b: matB }, roughness, opacity } };
+    // §10.2's per-surface colorBy: per-vertex display-sRGB colours plus the legend explaining
+    // them, and rest positions for exaggerating deformation.
+    const flatShading = view.getUint8(offset) !== 0; offset += 1;
+    const vertexColorCount = view.getInt32(offset, true); offset += 4;
+    const vertexColors = new Map(); // particleId -> {r, g, b} (display sRGB)
+    for (let j = 0; j < vertexColorCount; j++) {
+      const id = view.getInt32(offset, true); offset += 4;
+      const r = view.getUint8(offset) / 255, g = view.getUint8(offset + 1) / 255, b = view.getUint8(offset + 2) / 255; offset += 3;
+      vertexColors.set(id, { r, g, b });
+    }
+    const legendLabel = readString();
+    const legendUnit = readString();
+    const legendMin = view.getFloat64(offset, true); offset += 8;
+    const legendMax = view.getFloat64(offset, true); offset += 8;
+    const stopCount = view.getInt32(offset, true); offset += 4;
+    const stops = [];
+    for (let j = 0; j < stopCount; j++) {
+      stops.push({ r: view.getUint8(offset) / 255, g: view.getUint8(offset + 1) / 255, b: view.getUint8(offset + 2) / 255 }); offset += 3;
+    }
+    const legend = legendLabel ? { label: legendLabel, unit: legendUnit, min: legendMin, max: legendMax, stops } : null;
+    const restCount = view.getInt32(offset, true); offset += 4;
+    const rest = new Map(); // particleId -> {x, y, z}
+    for (let j = 0; j < restCount; j++) {
+      const id = view.getInt32(offset, true); offset += 4;
+      const x = view.getFloat32(offset, true), y = view.getFloat32(offset + 4, true), z = view.getFloat32(offset + 8, true); offset += 12;
+      rest.set(id, { x, y, z });
+    }
+    const deformationScale = view.getFloat64(offset, true); offset += 8;
+    meshes[i] = { wireframe, pickable, name, triangles, textureUrl, uvs, uvRepeats, material: { color: { r: matR, g: matG, b: matB }, roughness, opacity },
+      flatShading, vertexColors, legend, rest, deformationScale };
   }
 
   // Arrow samples grouped by their source force's name (§10.3's per-force visibility toggle -
@@ -2193,6 +2302,8 @@ function seedHiddenGroupsFromFrame(frame) {
   if (hiddenGroupsSeedScene !== null && frame.activeScene !== hiddenGroupsSeedScene) return;
   for (const name of frame.hiddenByDefaultGroups) hiddenGroups.add(name);
   for (const name of frame.shownByDefaultArrows) shownForces.add(name);
+  // Each scene load starts its deformation exaggeration at the scene's own suggestion.
+  setDeformationScale(frame.meshes.reduce((m, mesh) => (mesh.rest.size > 0 ? Math.max(m, mesh.deformationScale) : m), 1));
   hiddenGroupsSeeded = true;
   if (selectedKind === "groups") renderObjectPanel();
 }

@@ -6251,6 +6251,91 @@ load. Full `./gradlew test -q` suite green throughout.
         model;
       - a gradient dusk sky.
 
+## Steel I-beam stress visualization (§5.1/§6/§7/§10.2, new requirement) — not yet phased
+- [x] **`ElasticLattice`** (`particlesim.physics`): a solid built from filled
+      cubes, with particles at the corners. One `Force` covers all its springs.
+      - Springs run along cube edges and face diagonals. Each spring's
+        stiffness is summed from the cubes it borders (edges k/4 and
+        diagonals k/2 per cube), so springs on the surface come out softer,
+        as the material around them is.
+      - This gives E = 2.5 k / spacing and Poisson's ratio 1/4 (the only
+        value a lattice of central springs can have; steel's is 0.3).
+      - Stress per cube comes from its springs' tensions. Patch recovery (a
+        straight-line fit through the surrounding cubes) carries it to the
+        nodes, so surface nodes read the real peak rather than the value
+        half a cube inside.
+      - Also provides the boundary skin as a `Surface`, per-node volumes
+        (for real-material weight), and `stableNodeMass` for mass scaling.
+      - Each spring's slots are cached, and positions read through new
+        internal `ParticleStore` slot accessors. That halved the step cost.
+      - Tested:
+        - stiffness assembly;
+        - uniform uniaxial strain, where every free node balances, the end
+          pull is E·ε, and the stress at cubes and nodes is E·ε;
+        - stress varying linearly, read correctly at the surface;
+        - skin winding and count;
+        - node volumes.
+- [x] **`FixedAxis` constraint**: a roller or slide that holds particles
+      along one direction and leaves them free across it. Tested.
+- [x] **`IBeam`** (`particlesim.examples`): a simply supported lattice-steel
+      I-beam (`IBeamShape`, in cubes). One end's bottom edge is pinned; the
+      other sits on a roller.
+      - Masses are scaled for the time step (1 ms). Settled stress doesn't
+        depend on mass, but the sway is slowed and isn't a real vibration.
+      - Linear `Drag` damps the first bending mode critically, and damping
+        on the springs handles the fast modes.
+      - `SelfWeight` comes from real steel density. `RestingWeight`
+        (editable `tonnes`) is spread over the top-flange nodes under it.
+        Both ramp on over two of the beam's slowed sways.
+      - Tested:
+        - four-point bending, where the middle third's stress matches
+          M·y/I through the depth (within 3% of the peak) and at the top
+          and bottom surfaces (measured 3.6% low; tolerance 5%);
+        - mid-span sag matching bending plus web shear (10%);
+        - self weight taken from real steel.
+- [x] **Viewer: per-vertex mesh colors, color legend, deformation
+      exaggeration, flat shading** (§10.2):
+      - `SurfaceRenderer` gains `vertexColors`, `legend` (`ColorLegend`),
+        `restPositions`, `deformationScale` and `flatShading`. These are
+        appended to each mesh record.
+      - The viewer paints the vertex colors (sRGB to linear) over a white
+        material, and draws the legend as a bar at the bottom right. Both
+        follow "forces & stresses".
+      - A log "deformation ×" slider (1-1000) in DISPLAY appears when a mesh
+        has rest positions, and resets to the scene's scale on load.
+      - `ColorRamp.stress` is the blue→red ramp.
+      - Round-trip and ramp tested.
+- [x] **`iBeam` scene**: a 4 m I-beam (500 mm deep, 300 mm flanges, 100 mm
+      flanges and web; 4,649 particles, about 33k springs) on two concrete
+      piers, with a 150 t weight at mid-span. The skin is coloured by von
+      Mises stress, from 0 to steel's 250 MPa yield, and drawn at ×100
+      deformation.
+      - It settles in about 15 s at the expected peak (about 137 MPa).
+      - Raising the weight to 400 t turns the flanges red.
+      - About 0.8 ms per step and 6 ms per frame; 0.9× real time measured
+        with a bare WebSocket client. Headless Chromium's software
+        rendering draws only about 180 steps/s.
+      - Scene tested: colours, legend, rest positions, the stress peaking at
+        mid-span, and the weight riding the sag.
+- [ ] Optional extras, for later:
+      - colour the springs themselves by stretch or force: the deferred
+        `ColorBy.STRETCH`/`FORCE` line modes (see `ColorBy` in
+        `Renderer.kt`);
+      - a cross-section cut, to see stress inside the beam (e.g. a clipping
+        plane, plus a cap coloured by the interior nodes' stress).
+- [ ] Gaps / possible next steps:
+      - the legend's range is fixed by the scene (0 to yield); an
+        auto-scale option, and a choice of field (signed bending stress
+        σxx, shear), would need the per-vertex values sent rather than
+        colours;
+      - stress concentrates where the supports and the weight press on
+        single rows of nodes; bearing plates would spread it;
+      - the model stays elastic past yield (no plasticity);
+      - the viewer rebuilds every mesh's geometry and edge overlay each
+        frame. That's fine at 6.5k triangles, but not measured in a GPU
+        browser yet;
+      - Poisson's ratio is fixed at 1/4.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

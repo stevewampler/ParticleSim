@@ -31,4 +31,24 @@ object ColorRamp {
         val (from, to, f) = if (c <= 0.5) Triple(green, yellow, c * 2.0) else Triple(yellow, red, (c - 0.5) * 2.0)
         return Color(from.r + (to.r - from.r) * f, from.g + (to.g - from.g) * f, from.b + (to.b - from.b) * f)
     }
+
+    /** Blue → cyan → green → yellow → red, evenly spaced: the usual stress-plot ramp, low to
+     * high. Display (sRGB) values, unlike [Color]'s usual linear ones - the viewer draws them
+     * as given, so the legend's CSS gradient and the surface match. */
+    val STRESS_STOPS: List<Color> = listOf(
+        Color(0.16, 0.27, 0.86),
+        Color(0.0, 0.75, 0.92),
+        Color(0.2, 0.8, 0.27),
+        Color(0.98, 0.84, 0.1),
+        Color(0.86, 0.12, 0.1),
+    )
+
+    /** [STRESS_STOPS] at [t] (clamped to `[0,1]`), linear between neighbouring stops. */
+    fun stress(t: Double): Color {
+        val c = t.coerceIn(0.0, 1.0) * (STRESS_STOPS.size - 1)
+        val i = minOf(c.toInt(), STRESS_STOPS.size - 2)
+        val f = c - i
+        val from = STRESS_STOPS[i]; val to = STRESS_STOPS[i + 1]
+        return Color(from.r + (to.r - from.r) * f, from.g + (to.g - from.g) * f, from.b + (to.b - from.b) * f)
+    }
 }
