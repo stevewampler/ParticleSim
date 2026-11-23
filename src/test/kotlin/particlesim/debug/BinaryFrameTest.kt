@@ -14,6 +14,8 @@ import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
 import particlesim.render.ColorLegend
+import particlesim.render.ScalarField
+import particlesim.render.SceneOption
 import particlesim.render.ConnectionStyle
 import particlesim.render.ConnectionShape
 import particlesim.render.Light
@@ -228,7 +230,7 @@ class BinaryFrameTest {
     }
 
     @Test
-    fun `round-trips a mesh's vertex colours, legend, rest positions and flat shading`() {
+    fun `round-trips a mesh's vertex colours, legend and flat shading, and the frame's rest positions`() {
         val store = ParticleStore()
         val a = store.create(position = Vector3(0.0, 0.0, 0.0))
         val b = store.create(position = Vector3(1.0, 0.0, 0.0))
@@ -239,20 +241,49 @@ class BinaryFrameTest {
             flatShading = true,
             vertexColors = mapOf(a to Color(1.0, 0.0, 0.0), c to Color(0.0, 1.0, 0.0)),
             legend = legend,
-            restPositions = mapOf(a to Vector3.ZERO, b to Vector3(1.0, 0.0, 0.0), c to Vector3(0.0, 0.0, 1.0)),
-            deformationScale = 100.0,
         )
+        val rest = mapOf(a to Vector3.ZERO, b to Vector3(1.0, 0.0, 0.0), c to Vector3(0.0, 0.0, 1.0))
         val decoded = BinaryFrame.decode(
-            BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(a, b, c), connections = emptyList(), meshes = listOf(mesh, SurfaceRenderer(Surface(listOf(Triangle(a, b, c)))))),
+            BinaryFrame.encode(
+                t = 0.0, step = 0L, store = store, ids = listOf(a, b, c), connections = emptyList(),
+                meshes = listOf(mesh, SurfaceRenderer(Surface(listOf(Triangle(a, b, c))))), restPositions = rest, deformationScale = 100.0,
+            ),
         )
         val (colored, plain) = decoded.meshes
         assertTrue(colored.flatShading)
         assertEquals(mapOf(a to Color(1.0, 0.0, 0.0), c to Color(0.0, 1.0, 0.0)), colored.vertexColors)
         assertEquals(legend, colored.legend)
-        assertEquals(mesh.restPositions, colored.restPositions)
-        assertEquals(100.0, colored.deformationScale)
+        assertEquals(rest, decoded.restPositions)
+        assertEquals(100.0, decoded.deformationScale)
         // A mesh that declares none of it decodes to the defaults.
         assertEquals(DecodedMesh(wireframe = false, triangles = listOf(Triangle(a, b, c))), plain)
+    }
+
+    @Test
+    fun `round-trips a mesh's scalar fields, scene options and the line legend`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3(0.0, 0.0, 0.0))
+        val b = store.create(position = Vector3(1.0, 0.0, 0.0))
+        val c = store.create(position = Vector3(0.0, 0.0, 1.0))
+        val vonMises = ScalarField("von Mises stress", "MPa", 0.0, 250.0, listOf(Color(0.0, 0.0, 1.0), Color(1.0, 0.0, 0.0)), mapOf(a to 10.0, b to 20.5, c to 30.25))
+        // A field with no value for c: it comes back without one.
+        val bending = ScalarField("bending stress", "MPa", -250.0, 250.0, listOf(Color(0.0, 0.0, 1.0), Color(1.0, 1.0, 1.0), Color(1.0, 0.0, 0.0)), mapOf(a to -5.0, b to 7.5))
+        val mesh = SurfaceRenderer(Surface(listOf(Triangle(a, b, c)), name = "beam"), scalarFields = listOf(vonMises, bending))
+        val options = listOf(SceneOption("failure", listOf("off", "on"), "on"), SceneOption("springs", listOf("hidden", "stretch", "force"), "hidden"))
+        val lineLegend = ColorLegend("spring stretch", "%", -0.125, 0.125, listOf(Color(0.0, 0.0, 1.0), Color(1.0, 0.0, 0.0)))
+        val decoded = BinaryFrame.decode(
+            BinaryFrame.encode(
+                t = 0.0, step = 0L, store = store, ids = listOf(a, b, c), connections = emptyList(), meshes = listOf(mesh),
+                options = options, lineLegend = lineLegend,
+            ),
+        )
+        assertEquals(listOf(vonMises, bending), decoded.meshes.single().scalarFields)
+        assertEquals(options, decoded.options)
+        assertEquals(lineLegend, decoded.lineLegend)
+        // None of it declared: empty, empty, null.
+        val plain = BinaryFrame.decode(BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(a), connections = emptyList()))
+        assertEquals(emptyList(), plain.options)
+        assertNull(plain.lineLegend)
     }
 
     @Test

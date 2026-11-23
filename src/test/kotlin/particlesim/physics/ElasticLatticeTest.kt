@@ -129,4 +129,68 @@ class ElasticLatticeTest {
         assertEquals(v / 2, block.nodeVolume(block.nodeId(1, 0, 1)!!), 1e-15)
         assertEquals(8 * v, block.nodeIds.sumOf { block.nodeVolume(it) }, 1e-12)
     }
+
+    @Test
+    fun `with failure on, a spring stretched past yield takes a permanent set and holds the yield force`() {
+        val store = ParticleStore(); val groups = Groups()
+        val bar = lattice(box(3, 2, 2), store, groups)
+        val yieldStrain = bar.yieldStress / e
+        val xEdges = (0 until bar.springCount).filter { s ->
+            val (p, q) = bar.springEnds(s)
+            bar.isEdge(s) && bar.indexOf(p)!!.i != bar.indexOf(q)!!.i
+        }
+        // Off: stretched 3x the yield strain, nothing yields.
+        strain(bar, store, 3 * yieldStrain, 0.0, 0.0)
+        netForces(bar, store, groups)
+        assertTrue((0 until bar.springCount).all { bar.plasticStrain(it) == 0.0 })
+        assertEquals(3 * yieldStrain, bar.elasticStrain(store, xEdges.first()), 1e-9)
+
+        // On: each spring along the stretch yields, keeping the yield strain as its elastic part.
+        bar.failure = true
+        netForces(bar, store, groups)
+        for (s in xEdges) {
+            assertEquals(2 * yieldStrain, bar.plasticStrain(s), 1e-9)
+            assertEquals(yieldStrain, bar.elasticStrain(store, s), 1e-9)
+        }
+        // Let go: it doesn't spring all the way back - the springs that yielded are now too long
+        // and push (compression), a permanent set.
+        strain(bar, store, 0.0, 0.0, 0.0)
+        for (s in xEdges) assertTrue(bar.tension(store, s) < 0.0)
+        assertTrue(bar.nodePlasticStrains(bar.nodeIds).values.max() > 1.9 * yieldStrain)
+    }
+
+    @Test
+    fun `stretched past the rupture strain, springs tear, their cubes fail and the skin opens up`() {
+        val store = ParticleStore(); val groups = Groups()
+        val bar = lattice(box(3, 2, 2), store, groups)
+        bar.failure = true
+        val intactSkin = bar.boundarySurface().triangles.size
+        // Stretch only the middle cube column (nodes at i = 2 and 3 pulled along) by 25%.
+        for ((id, rest) in bar.restPositions) if (bar.indexOf(id)!!.i >= 2) store.setPosition(id, rest + Vector3(0.25 * a, 0.0, 0.0))
+        netForces(bar, store, groups)
+        assertTrue(bar.hasTorn)
+        val torn = (0 until bar.springCount).filter { bar.isTorn(it) }
+        assertTrue(torn.all { s -> val (p, q) = bar.springEnds(s); setOf(bar.indexOf(p)!!.i, bar.indexOf(q)!!.i) == setOf(1, 2) })
+        assertEquals(0.0, bar.tension(store, torn.first()))
+        assertEquals((0 until 2).flatMap { j -> (0 until 2).map { k -> LatticeIndex(1, j, k) } }.toSet(), bar.failedCells())
+        // The failed middle cubes drop out; the two 1x2x2 end blocks each show a closed skin of
+        // 16 squares, including the faces where the middle used to be.
+        assertEquals(2 * 16 * 2, bar.boundarySurface().triangles.size)
+        assertEquals(64, intactSkin)
+        // Tearing is for good, even with failure switched off again.
+        bar.failure = false
+        netForces(bar, store, groups)
+        assertTrue(torn.all { bar.isTorn(it) })
+    }
+
+    @Test
+    fun `yield stress and rupture strain are live-editable`() {
+        val bar = lattice(box(1, 1, 1))
+        assertEquals(mapOf("yieldStressMPa" to FieldValue.Scalar(250.0), "ruptureStrainPercent" to FieldValue.Scalar(20.0)), bar.editableFields())
+        assertTrue(bar.setField("yieldStressMPa", FieldValue.Scalar(355.0)))
+        assertEquals(355e6, bar.yieldStress)
+        assertTrue(bar.setField("ruptureStrainPercent", FieldValue.Scalar(10.0)))
+        assertEquals(0.1, bar.ruptureStrain, 1e-12)
+        assertTrue(!bar.setField("yieldStressMPa", FieldValue.Scalar(-1.0)))
+    }
 }

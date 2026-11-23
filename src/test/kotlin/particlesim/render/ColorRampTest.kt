@@ -61,4 +61,20 @@ class ColorRampTest {
         assertEquals((stops[0].g + stops[1].g) / 2, between.g, 1e-12)
         assertTrue(stops.first().b > stops.first().r && stops.last().r > stops.last().b, "blue low, red high")
     }
+
+    @Test
+    fun `the signed ramp is blue for negative, white at zero, red for positive, clamped`() {
+        assertEquals(ColorRamp.SIGNED_STOPS.first(), ColorRamp.signed(-1.0))
+        assertEquals(ColorRamp.SIGNED_STOPS.first(), ColorRamp.signed(-5.0))
+        assertEquals(ColorRamp.SIGNED_STOPS[2], ColorRamp.signed(0.0))
+        assertEquals(ColorRamp.SIGNED_STOPS.last(), ColorRamp.signed(2.0))
+        assertTrue(ColorRamp.signed(-1.0).b > ColorRamp.signed(-1.0).r && ColorRamp.signed(1.0).r > ColorRamp.signed(1.0).b)
+    }
+
+    @Test
+    fun `display colours convert to linear by the sRGB curve`() {
+        assertEquals(Color(0.0, 1.0, 0.0), Color(0.0, 1.0, 0.0).srgbToLinear())
+        assertEquals(0.2140, Color(0.5, 0.5, 0.5).srgbToLinear().r, 1e-4)
+        assertEquals(0.02 / 12.92, Color(0.02, 0.0, 0.0).srgbToLinear().r, 1e-12)
+    }
 }

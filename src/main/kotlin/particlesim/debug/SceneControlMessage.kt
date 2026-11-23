@@ -47,6 +47,10 @@ sealed interface SceneControlMessage {
      * choose to respect it — see `Groups.isEnabled`/`setEnabled`. */
     data class SetGroupEnabled(val name: String, val enabled: Boolean) : SceneControlMessage
 
+    /** §9.6: pick [choice] for the active scene's option [name] (a [particlesim.render.SceneOption]
+     * it declared). A scene with no such option, or a choice it doesn't offer, ignores it. */
+    data class SetSceneOption(val name: String, val choice: String) : SceneControlMessage
+
     /** §10.4's numeric field editing write path — [kind] is `"force"` or `"constraint"`,
      * matching [particlesim.debug.DecodedFieldEntry.kind] on the read side. Two message types
      * (scalar vs. vector), not one carrying a variant payload, because SnakeYAML/JSON has no
@@ -121,6 +125,11 @@ sealed interface SceneControlMessage {
                     val name = data["name"] as? String ?: return null
                     val enabled = data["enabled"] as? Boolean ?: return null
                     SetGroupEnabled(name, enabled)
+                }
+                "set_scene_option" -> {
+                    val name = data["name"] as? String ?: return null
+                    val choice = data["choice"] as? String ?: return null
+                    SetSceneOption(name, choice)
                 }
                 "set_scalar_field" -> {
                     val kind = data["kind"] as? String ?: return null

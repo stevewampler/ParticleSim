@@ -1,17 +1,19 @@
 package particlesim.examples
 
+import particlesim.collision.Collider
+import particlesim.collision.CollisionSystem
+import particlesim.collision.ParticleColliderRule
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
 import particlesim.physics.ChunkAccumulator
 import particlesim.physics.Constraint
-import particlesim.physics.Drag
 import particlesim.physics.EditableFields
 import particlesim.physics.ElasticLattice
 import particlesim.physics.FieldValue
-import particlesim.physics.FixedAxis
 import particlesim.physics.FixedPosition
 import particlesim.physics.Force
+import particlesim.physics.Integrator
 import particlesim.physics.LatticeIndex
 import kotlin.math.PI
 import kotlin.math.sqrt
@@ -125,6 +127,76 @@ class SelfWeight(
     }
 }
 
+/**
+ * Linear damping on every member of [group]: a force of [coefficient] times its velocity, against
+ * it - like [particlesim.physics.Drag], but adjustable, so a beam that has torn apart can let its
+ * pieces fall instead of oozing down at settling speed. Live-editable: `coefficient`.
+ */
+class SettlingDamping(
+    private val group: String,
+    coefficient: Double,
+    override val name: String? = "settling damping",
+) : Force, EditableFields {
+    var coefficient: Double = coefficient
+
+    override fun editableFields(): Map<String, FieldValue> = mapOf("coefficient" to FieldValue.Scalar(coefficient))
+
+    override fun setField(field: String, value: FieldValue): Boolean {
+        if (field != "coefficient" || value !is FieldValue.Scalar || !value.value.isFinite() || value.value < 0.0) return false
+        coefficient = value.value
+        return true
+    }
+
+    override fun accumulate(store: ParticleStore, groups: Groups, t: Double, chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int) {
+        if (!groups.isEnabled(group) || coefficient == 0.0) return
+        val members = groups.membersOf(group).toList()
+        var i = chunkIndex
+        while (i < members.size) {
+            val id = members[i]
+            chunk.add(store.slotOf(id), store.velocity(id) * -coefficient)
+            i += chunkCount
+        }
+    }
+}
+
+/**
+ * A roller bearing (§6): each member of [group] is held at its height and kept from drifting
+ * sideways (fixed in y and z), and slides freely along the beam (x) - but only [travel] either
+ * way from where it started, where it stops as if against the bearing's keeper plate, rather than
+ * running off the end of its pier.
+ */
+class RollerBearing(
+    private val group: String,
+    store: ParticleStore,
+    groups: Groups,
+    private val travel: Double = Double.POSITIVE_INFINITY,
+    override val name: String? = null,
+) : Constraint {
+    private val start: Map<Int, Vector3> = groups.membersOf(group).associateWith { store.position(it) }
+
+    override fun applyVelocity(store: ParticleStore, groups: Groups, t: Double) {
+        if (!groups.isEnabled(group)) return
+        for ((id, p0) in start) {
+            val v = store.velocity(id)
+            val x = store.position(id).x - p0.x
+            // Against a stop and still pushing into it: no x velocity either.
+            val vx = if ((x >= travel && v.x > 0.0) || (x <= -travel && v.x < 0.0)) 0.0 else v.x
+            store.setVelocity(id, Vector3(vx, 0.0, 0.0))
+        }
+    }
+
+    override fun applyPosition(store: ParticleStore, groups: Groups, t: Double) {
+        if (!groups.isEnabled(group)) return
+        for ((id, p0) in start) {
+            val free = store.position(id).x - p0.x
+            val x = free.coerceIn(-travel, travel)
+            store.setPosition(id, Vector3(p0.x + x, p0.y, p0.z))
+            // Reached a stop: it stops there.
+            if (x != free) store.setVelocity(id, Vector3.ZERO)
+        }
+    }
+}
+
 /** 0 to 1 over [seconds], smoothly (zero slope at both ends). */
 private fun ramp(t: Double, seconds: Double): Double {
     if (seconds <= 0.0) return 1.0
@@ -142,9 +214,16 @@ private fun ramp(t: Double, seconds: Double): Double {
  *
  * Masses are scaled for a time step of [dt] ([ElasticLattice.stableNodeMass]), which leaves the
  * settled stress and sag those of real steel but makes the beam sway far more slowly than real
- * steel would - the motion here is only the beam settling, not a real vibration. Linear [Drag]
+ * steel would - the motion here is only the beam settling, not a real vibration. [SettlingDamping]
  * damps the first bending mode near critically, and spring damping the fast ones, so it comes to
  * rest within a few of its (slowed) sways. Loads ramp on over [rampSeconds], by default two sways.
+ *
+ * With the lattice's [ElasticLattice.failure] on, a heavy enough weight yields the steel and then
+ * tears it. Once the steel has clearly given way - permanently stretched more than
+ * [GIVEN_WAY_STRAIN] anywhere - or anything has torn, [step] cuts the settling damping to a
+ * twentieth, so the beam collapses and its pieces fall rather than ooze down at settling speed.
+ * Still in slow motion, since the masses are scaled: about 400 times slower than real steel for
+ * this beam. [colliders] (the ground, the piers) catch the pieces.
  */
 class IBeam(
     val shape: IBeamShape = IBeamShape(),
@@ -157,6 +236,9 @@ class IBeam(
     youngsModulus: Double = STEEL_YOUNGS_MODULUS,
     density: Double = STEEL_DENSITY,
     rampSeconds: Double? = null,
+    colliders: List<Collider> = emptyList(),
+    /** How far the roller end may slide either way before it stops (see [RollerBearing]). */
+    rollerTravel: Double = Double.POSITIVE_INFINITY,
 ) {
     val store = ParticleStore()
     val groups = Groups()
@@ -164,7 +246,7 @@ class IBeam(
 
     val lattice = ElasticLattice(
         store, groups, BEAM_GROUP, shape.cells(), shape.spacing, origin, youngsModulus, nodeMass,
-        stiffnessDamping = 0.6 * dt, name = "steel",
+        stiffnessDamping = 0.6 * dt, name = "steel", nodeRadius = NODE_RADIUS,
     )
 
     /** The first bending mode's angular frequency at the scaled mass (simply supported beam
@@ -195,19 +277,53 @@ class IBeam(
     val pinnedNodes: List<Int> = bottomEdgeAt(0).onEach { groups.add(PINNED_GROUP, it) }
     val rollerNodes: List<Int> = bottomEdgeAt(shape.lengthCells).onEach { groups.add(ROLLER_GROUP, it) }
 
+    /** Critical for the first bending mode while it settles. */
+    val settlingCoefficient: Double = 2.0 * firstModeOmega * nodeMass
+    val settlingDamping = SettlingDamping(BEAM_GROUP, settlingCoefficient)
+
     val forces: List<Force> = listOfNotNull(
         lattice,
-        Drag(BEAM_GROUP, coefficient = 2.0 * firstModeOmega * nodeMass, name = "settling damping"),
+        settlingDamping,
         weight,
         selfWeightForce,
     )
     val constraints: List<Constraint> = listOf(
         FixedPosition.atCurrentPositions(PINNED_GROUP, store, groups, name = "pinned support"),
-        FixedAxis(ROLLER_GROUP, Vector3(0.0, 1.0, 0.0), store, groups, name = "roller support"),
-        FixedAxis(ROLLER_GROUP, Vector3(0.0, 0.0, 1.0), store, groups),
+        RollerBearing(ROLLER_GROUP, store, groups, rollerTravel, name = "roller support"),
     )
 
+    init {
+        // Each support bears on one row of nodes - far more concentrated than a real bearing.
+        lattice.neverTearAt(pinnedNodes + rollerNodes)
+    }
+
+    val collisions = CollisionSystem(
+        colliders.map { ParticleColliderRule(BEAM_GROUP, it, restitution = 0.0, staticFriction = 0.6, kineticFriction = 0.5) },
+    )
+    private val integrator = Integrator()
+    private var stepCount = 0L
+
+    /** Whether the steel has given way (see the class doc) and the settling damping is cut. */
+    var hasGivenWay: Boolean = false
+        private set
+
+    /** One step of [dt] from time [t]: forces and constraints, then collisions with [colliders]. */
+    fun step(t: Double) {
+        integrator.step(store, groups, forces, constraints, t, dt)
+        collisions.resolve(store, groups, t, dt)
+        // Checked every so often: it scans every spring.
+        if (!hasGivenWay && lattice.failure && stepCount++ % GIVEN_WAY_CHECK_STEPS == 0L &&
+            (lattice.hasTorn || lattice.maxPlasticStrain() > GIVEN_WAY_STRAIN)) {
+            hasGivenWay = true
+            settlingDamping.coefficient = settlingCoefficient * GIVEN_WAY_DAMPING_FRACTION
+        }
+    }
+
     companion object {
+        const val NODE_RADIUS = 0.005
+        const val GIVEN_WAY_DAMPING_FRACTION = 0.05
+        const val GIVEN_WAY_STRAIN = 0.01
+        private const val GIVEN_WAY_CHECK_STEPS = 50L
         const val BEAM_GROUP = "beam"
         const val PINNED_GROUP = "pinned support"
         const val ROLLER_GROUP = "roller support"

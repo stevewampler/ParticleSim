@@ -1095,17 +1095,25 @@ external image onto a mesh's surface.
   scenery (the `murmuration` scene's ground). The viewer's mouse picking
   (§9.4 drag, double-click delete, §10.3 right-click) ignores that mesh, so
   clicks pass through it. It still draws and stays in the outliner.
-- **Per-surface `colorBy` (vertex colors) and deformation exaggeration**: a
-  `SurfaceRenderer` may paint each vertex its own color (e.g. stress mapped
-  through a blue → cyan → green → yellow → red ramp), with a `ColorLegend`
-  (label, unit, range, stops) the viewer draws as a color bar; colors are
-  resolved server-side like every other `colorBy`, and follow the global
-  "forces & stresses" switch (§10.3). It may also send each vertex's rest
-  position, so the viewer can draw deflections too small to see (a steel
-  beam sagging millimetres) exaggerated by a "deformation" slider, starting
-  at a scene-chosen scale; display only, never physics. Added for the
-  `iBeam` scene, whose surface shows von Mises stress from an elastic
-  lattice solid (§5.1, §7).
+- **Per-surface `colorBy` (vertex colors and colour fields), line legends,
+  and deformation exaggeration**: a `SurfaceRenderer` may paint each vertex
+  its own color, with a `ColorLegend` (label, unit, range, stops) the
+  viewer draws as a color bar, or send `scalarFields` (per-vertex values,
+  each with a name, unit, range and ramp) for the viewer to color by. The
+  person picks the field from the legend's menu, and can auto-scale to the
+  frame's own range (kept symmetric for signed fields). A scene may also
+  send a `lineLegend` explaining its connection colors. All of this
+  follows the global "forces & stresses" switch (§10.3). A frame may
+  carry particles' rest positions, so the viewer draws deflections too
+  small to see (a steel beam sagging millimetres) exaggerated by a
+  "deformation" slider. The slider follows the scene's suggested scale
+  whenever that changes. Display only, never physics. Added for the
+  `iBeam` scene, whose surface shows stress from an elastic lattice solid
+  (§5.1, §7) that can yield and tear (§5.4).
+- **Scene options** (§9.6): a scene may offer named choices
+  (`SceneOption`), which the viewer shows as menus in an "options" section.
+  Picking one sends `set_scene_option` to the scene (e.g. `iBeam`'s
+  "failure: off/on" and "springs: hidden/stretch/force").
 - N-body gravity and custom forces (§5.3) are lower priority / `[stretch]`
   — N-body isn't localized to a renderable pair (force exists between
   every pair), and custom forces don't have a defined shape yet.

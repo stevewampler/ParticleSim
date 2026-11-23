@@ -117,8 +117,12 @@
     font: 12px/1.4 monospace; color: #ddd; background: rgba(0,0,0,0.6);
     padding: 6px 10px; border-radius: 4px;
   }
-  #colorLegendBar { height: 12px; border-radius: 2px; margin: 4px 0 2px; }
-  #colorLegendTicks { display: flex; justify-content: space-between; }
+  #colorLegendBar, .legendBar { height: 12px; border-radius: 2px; margin: 4px 0 2px; }
+  #colorLegendTicks, .legendTicks { display: flex; justify-content: space-between; }
+  #colorFieldSelect { width: 100%; font: inherit; color: #ddd; background: #222; border: 1px solid #555; border-radius: 3px; }
+  #meshLegend + #lineLegend { margin-top: 8px; }
+  #sceneOptionsBody label { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  #sceneOptionsBody select { font: inherit; color: #ddd; background: #222; border: 1px solid #555; border-radius: 3px; }
   #statusBar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 1;
     font: 12px/1.4 monospace; color: #ddd; background: rgba(0,0,0,0.6);
@@ -185,11 +189,24 @@
       <div id="objectPanelBody"></div>
     </div>
   </div>
-  <div id="colorLegend"><div id="colorLegendTitle"></div><div id="colorLegendBar"></div><div id="colorLegendTicks"></div></div>
+  <div id="colorLegend">
+    <div id="meshLegend">
+      <select id="colorFieldSelect" title="What the surface is coloured by"></select><div id="colorLegendTitle"></div>
+      <div id="colorLegendBar"></div><div id="colorLegendTicks"></div>
+      <label id="autoScaleRow" title="Stretch the colours over this frame's own lowest to highest value, instead of the scene's fixed range"><input type="checkbox" id="autoScaleToggle"> auto-scale</label>
+    </div>
+    <div id="lineLegend">
+      <div id="lineLegendTitle"></div><div id="lineLegendBar" class="legendBar"></div><div id="lineLegendTicks" class="legendTicks"></div>
+    </div>
+  </div>
   <div id="controlPanel">
     <section id="scenePicker" style="display:none;">
       <h4>scene</h4>
       <select id="sceneSelect"></select>
+    </section>
+    <section id="sceneOptions" style="display:none;">
+      <h4>options</h4>
+      <div id="sceneOptionsBody"></div>
     </section>
     <section>
       <h4>display</h4>
@@ -293,6 +310,7 @@ const deformationRowEl = document.getElementById("deformationRow");
 const deformationSliderEl = document.getElementById("deformationSlider");
 const deformationTextEl = document.getElementById("deformationText");
 let deformationScale = 1;
+let lastSuggestedDeformation = null;
 function setDeformationScale(scale) {
   deformationScale = Math.max(1, scale);
   deformationSliderEl.value = String(Math.log10(deformationScale));
@@ -304,29 +322,160 @@ deformationSliderEl.addEventListener("input", () => {
 });
 setDeformationScale(1);
 
-// The colour bar for a mesh's per-vertex colours - rebuilt only when the legend changes.
+// The colour bar(s) beside the view: one for a mesh's colours - from the scene's own per-vertex
+// colours, or from whichever of its scalar fields is picked in the menu, over the scene's range
+// or (auto-scale) the frame's own - and one for the connections' colours when the scene sends a
+// line legend. DOM is only touched when what's shown changes.
 const colorLegendEl = document.getElementById("colorLegend");
+const meshLegendEl = document.getElementById("meshLegend");
+const colorFieldSelectEl = document.getElementById("colorFieldSelect");
 const colorLegendTitleEl = document.getElementById("colorLegendTitle");
 const colorLegendBarEl = document.getElementById("colorLegendBar");
 const colorLegendTicksEl = document.getElementById("colorLegendTicks");
-let shownLegendKey = null;
-function updateMeshColorLegend(legend) {
-  const key = legend ? JSON.stringify(legend) : null;
-  if (key === shownLegendKey) return;
-  shownLegendKey = key;
-  colorLegendEl.style.display = legend ? "block" : "none";
-  if (!legend) return;
-  const css = (c) => `rgb(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)})`;
-  colorLegendTitleEl.textContent = legend.unit ? `${legend.label} (${legend.unit})` : legend.label;
-  colorLegendBarEl.style.background = `linear-gradient(to right, ${legend.stops.map(css).join(", ")})`;
-  const fmt = (v) => (Math.abs(v) >= 100 || v === 0 ? v.toFixed(0) : v.toPrecision(3));
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => legend.min + (legend.max - legend.min) * f);
-  colorLegendTicksEl.innerHTML = "";
+const autoScaleRowEl = document.getElementById("autoScaleRow");
+const autoScaleToggleEl = document.getElementById("autoScaleToggle");
+const lineLegendEl = document.getElementById("lineLegend");
+let colorFieldName = null; // the scalar field picked in the legend's menu (null: the first)
+let autoScale = false;
+colorFieldSelectEl.addEventListener("change", () => { colorFieldName = colorFieldSelectEl.value; });
+autoScaleToggleEl.addEventListener("change", () => { autoScale = autoScaleToggleEl.checked; });
+
+const legendCss = (c) => `rgb(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)})`;
+function formatLegendValue(v) {
+  if (v === 0) return "0";
+  const a = Math.abs(v);
+  return a >= 100 ? v.toFixed(0) : a >= 1 ? v.toPrecision(3) : v.toPrecision(2);
+}
+function fillLegendBar(barEl, ticksEl, stops, min, max, clamped) {
+  barEl.style.background = `linear-gradient(to right, ${stops.map(legendCss).join(", ")})`;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => min + (max - min) * f);
+  ticksEl.innerHTML = "";
   ticks.forEach((v, i) => {
     const span = document.createElement("span");
-    span.textContent = fmt(v) + (i === ticks.length - 1 ? "+" : "");
-    colorLegendTicksEl.appendChild(span);
+    let text = formatLegendValue(v);
+    // A fixed range clamps: values past either end show the end colour.
+    if (clamped && i === ticks.length - 1) text += "+";
+    if (clamped && i === 0 && min < 0) text = "≤" + text;
+    span.textContent = text;
+    ticksEl.appendChild(span);
   });
+}
+
+// The scalar field a mesh is coloured by right now, and the range its colours span - or null if
+// it has none (or "forces & stresses" is off).
+function meshFieldColoring(meshDecl) {
+  if (!showForcesAndStresses || meshDecl.scalarFields.length === 0) return null;
+  const field = meshDecl.scalarFields.find((f) => f.name === colorFieldName) || meshDecl.scalarFields[0];
+  let min = field.min, max = field.max;
+  const signed = field.min < 0 && field.min === -field.max;
+  if (autoScale) {
+    let lo = Infinity, hi = -Infinity;
+    for (const v of field.values) { if (Number.isNaN(v)) continue; if (v < lo) lo = v; if (v > hi) hi = v; }
+    if (lo <= hi) {
+      if (signed) { const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1; min = -m; max = m; }
+      else { min = lo; max = hi > lo ? hi : lo + 1; }
+    }
+  }
+  return { field, min, max };
+}
+
+function rampColor(stops, t) {
+  const c = Math.min(1, Math.max(0, t)) * (stops.length - 1);
+  if (c >= stops.length - 1) return stops[stops.length - 1];
+  const i = Math.floor(c), f = c - i, a = stops[i], b = stops[i + 1];
+  return { r: a.r + (b.r - a.r) * f, g: a.g + (b.g - a.g) * f, b: a.b + (b.b - a.b) * f };
+}
+
+// undefined, not null: the first frame must set the legends' visibility either way.
+let shownMeshLegendKey = undefined;
+let shownLineLegendKey = undefined;
+function updateColorLegends(frame) {
+  // Mesh legend: the first mesh with scalar fields, else the first with a fixed legend.
+  const fieldMesh = frame.meshes.find((m) => m.scalarFields.length > 0);
+  let mesh = null;
+  if (showForcesAndStresses && fieldMesh) {
+    const coloring = meshFieldColoring(fieldMesh);
+    const names = fieldMesh.scalarFields.map((f) => `${f.name}|${f.unit}`).join(";");
+    mesh = { names, fields: fieldMesh.scalarFields, title: null, stops: coloring.field.stops, min: coloring.min, max: coloring.max, selected: coloring.field.name };
+  } else {
+    const legend = showForcesAndStresses ? frame.meshes.find((m) => m.legend)?.legend : null;
+    if (legend) mesh = { names: null, title: legend.unit ? `${legend.label} (${legend.unit})` : legend.label, stops: legend.stops, min: legend.min, max: legend.max };
+  }
+  const meshKey = mesh ? JSON.stringify([mesh.names, mesh.title, mesh.selected, mesh.min, mesh.max, mesh.stops, autoScale]) : null;
+  if (meshKey !== shownMeshLegendKey) {
+    shownMeshLegendKey = meshKey;
+    meshLegendEl.style.display = mesh ? "block" : "none";
+    if (mesh) {
+      const hasFields = mesh.names !== null;
+      colorFieldSelectEl.style.display = hasFields ? "block" : "none";
+      autoScaleRowEl.style.display = hasFields ? "flex" : "none";
+      colorLegendTitleEl.style.display = hasFields ? "none" : "block";
+      if (hasFields) {
+        if (colorFieldSelectEl.dataset.names !== mesh.names) {
+          colorFieldSelectEl.dataset.names = mesh.names;
+          colorFieldSelectEl.innerHTML = "";
+          for (const f of mesh.fields) {
+            const option = document.createElement("option");
+            option.value = f.name;
+            option.textContent = f.unit ? `${f.name} (${f.unit})` : f.name;
+            colorFieldSelectEl.appendChild(option);
+          }
+        }
+        colorFieldSelectEl.value = mesh.selected;
+      } else {
+        colorLegendTitleEl.textContent = mesh.title;
+      }
+      fillLegendBar(colorLegendBarEl, colorLegendTicksEl, mesh.stops, mesh.min, mesh.max, !(hasFields && autoScale));
+    }
+  }
+  const line = showForcesAndStresses ? frame.lineLegend : null;
+  const lineKey = line ? JSON.stringify(line) : null;
+  if (lineKey !== shownLineLegendKey) {
+    shownLineLegendKey = lineKey;
+    lineLegendEl.style.display = line ? "block" : "none";
+    if (line) {
+      document.getElementById("lineLegendTitle").textContent = line.unit ? `${line.label} (${line.unit})` : line.label;
+      fillLegendBar(document.getElementById("lineLegendBar"), document.getElementById("lineLegendTicks"), line.stops, line.min, line.max, true);
+    }
+  }
+  colorLegendEl.style.display = mesh || line ? "block" : "none";
+}
+
+// §9.6 scene options: one menu per option the scene declares; picking one tells the scene.
+const sceneOptionsEl = document.getElementById("sceneOptions");
+const sceneOptionsBodyEl = document.getElementById("sceneOptionsBody");
+let shownOptionsKey = null;
+function updateSceneOptions(options) {
+  const key = JSON.stringify(options);
+  if (key === shownOptionsKey) return;
+  // Don't rebuild a menu out from under someone choosing from it.
+  if (sceneOptionsBodyEl.contains(document.activeElement) && shownOptionsKey !== null &&
+      JSON.stringify(JSON.parse(shownOptionsKey).map((o) => [o.name, o.choices])) === JSON.stringify(options.map((o) => [o.name, o.choices]))) {
+    for (const o of options) {
+      const select = sceneOptionsBodyEl.querySelector(`select[data-name="${CSS.escape(o.name)}"]`);
+      if (select && select !== document.activeElement) select.value = o.selected;
+    }
+    shownOptionsKey = key;
+    return;
+  }
+  shownOptionsKey = key;
+  sceneOptionsEl.style.display = options.length > 0 ? "block" : "none";
+  sceneOptionsBodyEl.innerHTML = "";
+  for (const o of options) {
+    const label = document.createElement("label");
+    label.textContent = o.name;
+    const select = document.createElement("select");
+    select.dataset.name = o.name;
+    for (const choice of o.choices) {
+      const option = document.createElement("option");
+      option.value = choice; option.textContent = choice;
+      select.appendChild(option);
+    }
+    select.value = o.selected;
+    select.addEventListener("change", () => sendEdit({ type: "set_scene_option", name: o.name, choice: select.value }));
+    label.appendChild(select);
+    sceneOptionsBodyEl.appendChild(label);
+  }
 }
 
 const meshEdgesToggleEl = document.getElementById("meshEdgesToggle");
@@ -971,7 +1120,9 @@ function isDefaultLineColor(color) {
 }
 
 function updateColorLegend(frame) {
-  const active = showForcesAndStresses && frame.connections.some((c) => !isDefaultLineColor(c.color));
+  // A scene that explains its line colours with a legend of its own (frame.lineLegend) isn't
+  // showing break proximity.
+  const active = showForcesAndStresses && !frame.lineLegend && frame.connections.some((c) => !isDefaultLineColor(c.color));
   statusBarLegendEl.classList.toggle("active", active);
 }
 scene.add(lines);
@@ -1138,8 +1289,9 @@ function buildMeshGeometry(meshDecl, byId) {
   const positions = [];
   const colors = []; // parallel to positions - only used when meshDecl.vertexColors is non-empty
   const scratchColor = new THREE.Color();
-  const exaggerate = meshDecl.rest.size > 0 && deformationScale !== 1;
-  const painted = showForcesAndStresses && meshDecl.vertexColors.size > 0;
+  const coloring = meshFieldColoring(meshDecl);
+  const fieldIndex = coloring ? meshDecl.scalarFieldIndex : null;
+  const painted = coloring !== null || (showForcesAndStresses && meshDecl.vertexColors.size > 0);
   const uvs = []; // parallel to positions/3 - only meaningful when meshDecl.uvs is non-empty
   const indices = [];
   const triangleVertexIds = [];
@@ -1149,13 +1301,16 @@ function buildMeshGeometry(meshDecl, byId) {
     for (const [id, p] of [[tri.a, a], [tri.b, b], [tri.c, c]]) {
       if (!localIndexOf.has(id)) {
         localIndexOf.set(id, positions.length / 3);
-        // Deformation exaggeration: each vertex drawn deformationScale times as far from where
-        // it started as it really is.
-        const r = exaggerate ? meshDecl.rest.get(id) : null;
-        if (r) positions.push(r.x + (p.x - r.x) * deformationScale, r.y + (p.y - r.y) * deformationScale, r.z + (p.z - r.z) * deformationScale);
-        else positions.push(p.x, p.y, p.z);
+        positions.push(p.x, p.y, p.z);
         if (painted) {
-          const c = meshDecl.vertexColors.get(id) || meshDecl.material.color;
+          let c = null;
+          if (coloring) {
+            const k = fieldIndex.get(id);
+            const v = k === undefined ? NaN : coloring.field.values[k];
+            c = Number.isNaN(v) ? meshDecl.material.color : rampColor(coloring.field.stops, (v - coloring.min) / (coloring.max - coloring.min));
+          } else {
+            c = meshDecl.vertexColors.get(id) || meshDecl.material.color;
+          }
           // Vertex colours arrive as display sRGB; three.js shades in linear.
           scratchColor.setRGB(c.r, c.g, c.b, THREE.SRGBColorSpace);
           colors.push(scratchColor.r, scratchColor.g, scratchColor.b);
@@ -1209,6 +1364,18 @@ function applyFrame(frame) {
     }
   }
 
+  // Deformation exaggeration: every particle the scene gave a rest position is drawn
+  // deformationScale times as far from it as it really is - mesh, lines and dots alike. Display
+  // only (the scene draws nothing it lets you pick this way).
+  if (frame.rest.size > 0 && deformationScale !== 1) {
+    for (const p of frame.particles) {
+      const r = frame.rest.get(p.id);
+      if (!r) continue;
+      p.x = r.x + (p.x - r.x) * deformationScale;
+      p.y = r.y + (p.y - r.y) * deformationScale;
+      p.z = r.z + (p.z - r.z) * deformationScale;
+    }
+  }
   const byId = new Map();
   frame.particles.forEach((p) => byId.set(p.id, p));
   const sphereRadii = new Map(frame.spheres.map((s) => [s.id, s.radius]));
@@ -1361,9 +1528,15 @@ function applyFrame(frame) {
     meshGroup.remove(meshEdgeOverlays.pop());
   }
   meshEdgesToggleEl.style.display = frame.meshes.length > 0 ? "inline" : "none";
-  deformationRowEl.style.display = frame.meshes.some((m) => m.rest.size > 0) ? "inline" : "none";
+  deformationRowEl.style.display = frame.rest.size > 0 ? "inline" : "none";
   // Stress colours follow the global "forces & stresses" switch, like every other stress colour.
-  updateMeshColorLegend(showForcesAndStresses ? frame.meshes.find((m) => m.legend)?.legend ?? null : null);
+  updateColorLegends(frame);
+  updateSceneOptions(frame.options);
+  // Follow the scene's suggested exaggeration whenever it changes (on load, or e.g. down to 1
+  // once a beam has failed); the slider overrides it in between.
+  const suggestedDeformation = frame.rest.size > 0 ? frame.suggestedDeformation : null;
+  if (suggestedDeformation !== null && suggestedDeformation !== lastSuggestedDeformation) setDeformationScale(suggestedDeformation);
+  lastSuggestedDeformation = suggestedDeformation;
   frame.meshes.forEach((meshDecl, i) => {
     const obj = meshObjects[i];
     obj.geometry.dispose();
@@ -1377,7 +1550,7 @@ function applyFrame(frame) {
     // a textured wireframe here) - a texture only applies to the solid-shaded case.
     obj.material = wireframe ? wireframeMeshMaterial(meshDecl.material)
       : meshDecl.textureUrl ? texturedMeshMaterial(meshDecl.textureUrl, meshDecl.material, meshDecl.uvRepeats)
-      : showForcesAndStresses && meshDecl.vertexColors.size > 0 ? vertexColoredMeshMaterial(meshDecl.material, meshDecl.flatShading)
+      : showForcesAndStresses && (meshDecl.vertexColors.size > 0 || meshDecl.scalarFields.length > 0) ? vertexColoredMeshMaterial(meshDecl.material, meshDecl.flatShading)
       : solidMeshMaterial(meshDecl.material);
     if (meshDecl.flatShading && obj.material.flatShading === false) obj.material.flatShading = true;
 
@@ -1754,16 +1927,29 @@ function decodeFrame(buffer) {
       stops.push({ r: view.getUint8(offset) / 255, g: view.getUint8(offset + 1) / 255, b: view.getUint8(offset + 2) / 255 }); offset += 3;
     }
     const legend = legendLabel ? { label: legendLabel, unit: legendUnit, min: legendMin, max: legendMax, stops } : null;
-    const restCount = view.getInt32(offset, true); offset += 4;
-    const rest = new Map(); // particleId -> {x, y, z}
-    for (let j = 0; j < restCount; j++) {
-      const id = view.getInt32(offset, true); offset += 4;
-      const x = view.getFloat32(offset, true), y = view.getFloat32(offset + 4, true), z = view.getFloat32(offset + 8, true); offset += 12;
-      rest.set(id, { x, y, z });
+    // Scalar fields the viewer colours by itself (one at a time, picked from the legend), all
+    // over one shared vertex list: values[k] belongs to the k-th id.
+    const fieldCount = view.getInt32(offset, true); offset += 4;
+    const scalarFields = [];
+    const scalarFieldIndex = new Map(); // particleId -> k
+    if (fieldCount > 0) {
+      const vertexCount = view.getInt32(offset, true); offset += 4;
+      for (let k = 0; k < vertexCount; k++) { scalarFieldIndex.set(view.getInt32(offset, true), k); offset += 4; }
+      for (let f = 0; f < fieldCount; f++) {
+        const fieldName = readString();
+        const unit = readString();
+        const min = view.getFloat64(offset, true); offset += 8;
+        const max = view.getFloat64(offset, true); offset += 8;
+        const stopCount = view.getInt32(offset, true); offset += 4;
+        const fieldStops = [];
+        for (let j = 0; j < stopCount; j++) { fieldStops.push({ r: view.getUint8(offset) / 255, g: view.getUint8(offset + 1) / 255, b: view.getUint8(offset + 2) / 255 }); offset += 3; }
+        const values = new Float32Array(vertexCount);
+        for (let k = 0; k < vertexCount; k++) { values[k] = view.getFloat32(offset, true); offset += 4; }
+        scalarFields.push({ name: fieldName, unit, min, max, stops: fieldStops, values });
+      }
     }
-    const deformationScale = view.getFloat64(offset, true); offset += 8;
     meshes[i] = { wireframe, pickable, name, triangles, textureUrl, uvs, uvRepeats, material: { color: { r: matR, g: matG, b: matB }, roughness, opacity },
-      flatShading, vertexColors, legend, rest, deformationScale };
+      flatShading, vertexColors, legend, scalarFields, scalarFieldIndex };
   }
 
   // Arrow samples grouped by their source force's name (§10.3's per-force visibility toggle -
@@ -1930,10 +2116,42 @@ function decodeFrame(buffer) {
     }
   }
 
+  // §9.6 scene options (menus) and the connections' colour legend.
+  const optionCount = view.getInt32(offset, true); offset += 4;
+  const options = [];
+  for (let i = 0; i < optionCount; i++) {
+    const name = readString();
+    const choiceCount = view.getInt32(offset, true); offset += 4;
+    const choices = [];
+    for (let j = 0; j < choiceCount; j++) choices.push(readString());
+    const selectedIndex = view.getInt32(offset, true); offset += 4;
+    options.push({ name, choices, selected: choices[selectedIndex] });
+  }
+  let lineLegend = null;
+  const lineLegendLabel = readString();
+  if (lineLegendLabel) {
+    const unit = readString();
+    const min = view.getFloat64(offset, true); offset += 8;
+    const max = view.getFloat64(offset, true); offset += 8;
+    const stopCount = view.getInt32(offset, true); offset += 4;
+    const stops = [];
+    for (let j = 0; j < stopCount; j++) { stops.push({ r: view.getUint8(offset) / 255, g: view.getUint8(offset + 1) / 255, b: view.getUint8(offset + 2) / 255 }); offset += 3; }
+    lineLegend = { label: lineLegendLabel, unit, min, max, stops };
+  }
+  // Particles' unloaded positions, for exaggerating deformation (see applyFrame).
+  const restCount = view.getInt32(offset, true); offset += 4;
+  const rest = new Map(); // particleId -> {x, y, z}
+  for (let j = 0; j < restCount; j++) {
+    const id = view.getInt32(offset, true); offset += 4;
+    const x = view.getFloat32(offset, true), y = view.getFloat32(offset + 4, true), z = view.getFloat32(offset + 8, true); offset += 12;
+    rest.set(id, { x, y, z });
+  }
+  const suggestedDeformation = view.getFloat64(offset, true); offset += 8;
+
   return {
     t, step, particles, connections, camera: cam, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
     colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
-    skyColor, solidParticleColors, trailSeconds,
+    skyColor, solidParticleColors, trailSeconds, options, lineLegend, rest, suggestedDeformation,
   };
 }
 
@@ -1991,6 +2209,8 @@ document.getElementById("stepOnceBtn").addEventListener("click", () => {
 // same thing (or exist at all).
 function resetViewerStateForSceneChange(sceneName) {
   resetStats();
+  lastSuggestedDeformation = null; // the new scene's suggestion applies afresh
+  colorFieldName = null;
   silenceSounds();
   selectedKind = null;
   selectedName = null;
@@ -2302,8 +2522,6 @@ function seedHiddenGroupsFromFrame(frame) {
   if (hiddenGroupsSeedScene !== null && frame.activeScene !== hiddenGroupsSeedScene) return;
   for (const name of frame.hiddenByDefaultGroups) hiddenGroups.add(name);
   for (const name of frame.shownByDefaultArrows) shownForces.add(name);
-  // Each scene load starts its deformation exaggeration at the scene's own suggestion.
-  setDeformationScale(frame.meshes.reduce((m, mesh) => (mesh.rest.size > 0 ? Math.max(m, mesh.deformationScale) : m), 1));
   hiddenGroupsSeeded = true;
   if (selectedKind === "groups") renderObjectPanel();
 }

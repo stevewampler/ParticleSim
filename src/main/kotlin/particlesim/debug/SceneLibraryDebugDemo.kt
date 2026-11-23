@@ -118,6 +118,10 @@ fun main(args: Array<String>) {
                 solidParticleColors = frame.solidParticleColors,
                 accelerations = library.accelerations,
                 trailSeconds = frame.trailSeconds,
+                options = frame.options,
+                restPositions = frame.restPositions,
+                deformationScale = frame.deformationScale,
+                lineLegend = frame.lineLegend,
             )
         } catch (e: Exception) {
             System.err.println("scene loop error on '${library.activeName}': $e")

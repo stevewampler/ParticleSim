@@ -64,6 +64,20 @@ data class SceneFrame(
      * 0 for none. Drawn viewer-side from the positions it has already been sent, like a long
      * exposure, so it costs nothing on the wire. E.g. [FireworksScene]'s streaking stars. */
     val trailSeconds: Double = 0.0,
+    /** Particles' unloaded positions, so the viewer can exaggerate how far each has moved
+     * from it - deflections too small to see (a steel beam sagging a few millimetres) drawn
+     * [deformationScale] times larger, wherever the particle shows up (mesh, line or dot).
+     * Display only. Empty: everything drawn where it is. */
+    val restPositions: Map<Int, Vector3> = emptyMap(),
+    /** The exaggeration the viewer uses for [restPositions]; it starts there when the scene
+     * loads, and moves there again whenever the scene changes it (e.g. down to 1 once a beam has
+     * failed and its real deflection is large); the viewer's slider changes it in between. */
+    val deformationScale: Double = 1.0,
+    /** Scene-level choices the viewer shows as menus (e.g. [IBeamScene]'s "failure"). */
+    val options: List<particlesim.render.SceneOption> = emptyList(),
+    /** What [lineColors] mean, drawn as a colour bar beside the view - null for none (the
+     * status bar's own break-proximity legend still covers that case). */
+    val lineLegend: particlesim.render.ColorLegend? = null,
     val registry: SceneRegistry = SceneRegistry.build(),
     val colliders: List<Collider> = emptyList(),
     val events: List<SimEvent> = emptyList(),

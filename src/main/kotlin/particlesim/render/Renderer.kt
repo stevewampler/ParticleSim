@@ -75,12 +75,10 @@ data class SurfaceRenderer(
     val vertexColors: Map<Int, Color>? = null,
     /** What [vertexColors] mean, drawn as a colour bar beside the view. */
     val legend: ColorLegend? = null,
-    /** Each vertex's unloaded position, so the viewer can exaggerate how far the surface has
-     * moved from it - deflections too small to see (a steel beam sagging a few millimetres)
-     * drawn [deformationScale] times larger. Null: drawn where it is. */
-    val restPositions: Map<Int, particlesim.core.Vector3>? = null,
-    /** The exaggeration the viewer starts at when the scene loads; its slider changes it. */
-    val deformationScale: Double = 1.0,
+    /** Values per vertex the viewer can colour the surface by, one field at a time - picked from
+     * the colour legend's menu, each with its own range and ramp (§10.2's per-surface
+     * `colorBy`, chosen viewer-side). Takes over from [vertexColors] where both are given. */
+    val scalarFields: List<ScalarField> = emptyList(),
 ) {
     /** §10.2's `[stretch]` "Lighting & materials": [material] verbatim when this renderer
      * declared one, otherwise the exact hardcoded appearance this class rendered with before
@@ -92,6 +90,25 @@ data class SurfaceRenderer(
      * this codebase already follows. */
     val effectiveMaterial: Material
         get() = material ?: Material(color = if (textureName != null) Material.UNTINTED else Material.DEFAULT_COLOR)
+}
+
+/** One set of per-vertex values a mesh can be coloured by ([SurfaceRenderer.scalarFields]):
+ * [values] (particle id → value, in [unit]s) mapped across [stops] from [min] to [max]. A range
+ * symmetric about zero (`min == -max`) is read as signed - e.g. tension red, compression blue - and
+ * the viewer keeps it symmetric when auto-scaling. */
+data class ScalarField(
+    val name: String,
+    val unit: String,
+    val min: Double,
+    val max: Double,
+    val stops: List<Color>,
+    val values: Map<Int, Double>,
+)
+
+/** A scene-level choice the viewer offers as a menu (§9.6), e.g. "failure: off / on" - the scene
+ * applies whatever's picked ([particlesim.debug.SceneControlMessage.SetSceneOption]). */
+data class SceneOption(val name: String, val choices: List<String>, val selected: String) {
+    init { require(selected in choices) { "'$selected' isn't one of $choices" } }
 }
 
 /** The colour bar explaining a mesh's [SurfaceRenderer.vertexColors]: [stops] spread evenly

@@ -193,4 +193,14 @@ class SceneControlMessageTest {
         assertNull(SceneControlMessage.parse("""{"type": "pause"}"""))
         assertNull(SceneControlMessage.parse("""{"type": "unknown_future_type"}"""))
     }
+
+    @Test
+    fun `parses set_scene_option with its name and choice, rejecting either missing`() {
+        assertEquals(
+            SceneControlMessage.SetSceneOption("failure", "on"),
+            SceneControlMessage.parse("""{"type": "set_scene_option", "name": "failure", "choice": "on"}"""),
+        )
+        assertNull(SceneControlMessage.parse("""{"type": "set_scene_option", "name": "failure"}"""))
+        assertNull(SceneControlMessage.parse("""{"type": "set_scene_option", "choice": "on"}"""))
+    }
 }

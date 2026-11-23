@@ -6296,50 +6296,124 @@ load. Full `./gradlew test -q` suite green throughout.
         - the weight's `tonnes` edit and ramp.
 - [x] **Viewer: per-vertex mesh colors, color legend, deformation
       exaggeration, flat shading** (§10.2):
-      - `SurfaceRenderer` gains `vertexColors`, `legend` (`ColorLegend`),
-        `restPositions`, `deformationScale` and `flatShading`. These are
-        appended to each mesh record.
-      - The viewer paints the vertex colors (sRGB to linear) over a white
-        material, and draws the legend as a bar at the bottom right. Both
-        follow "forces & stresses".
-      - A log "deformation ×" slider (1-1000) in DISPLAY appears when a mesh
-        has rest positions, and resets to the scene's scale on load.
-      - `ColorRamp.stress` is the blue→red ramp.
+      - `SurfaceRenderer` gains `vertexColors`, `legend` (`ColorLegend`) and
+        `flatShading`, appended to each mesh record. The viewer paints the
+        vertex colours (sRGB to linear) over a white material and draws the
+        legend as a bar at the bottom right. Both follow "forces & stresses".
+      - Rest positions and a suggested `deformationScale` are per frame
+        (`SceneFrame.restPositions`), not per mesh, so the viewer
+        exaggerates every particle it draws (mesh, lines, dots) the same
+        way. A log "deformation ×" slider (1-1000) in DISPLAY appears when a
+        frame has rest positions. It follows the scene's suggestion whenever
+        that changes (on load, or e.g. dropping to 1 once a beam fails).
+      - `ColorRamp.stress` (blue→red), `ColorRamp.signed` (blue-white-red),
+        `ColorRamp.along` and `Color.srgbToLinear`.
       - Round-trip and ramp tested.
+- [x] **Viewer: colour fields chosen in the legend, and auto-scale**
+      (§10.2):
+      - `SurfaceRenderer.scalarFields` sends per-vertex values (f32, over
+        one shared vertex list), each field with its own name, unit, range
+        and ramp. The viewer colours the mesh itself.
+      - The legend's title is a menu of the fields; it was suggested to
+        cycle through them by clicking the legend instead, but a menu shows
+        what's available and lets you jump straight to one.
+      - An "auto-scale" box stretches the colours over the frame's own
+        range, kept symmetric for signed fields (`min == -max`).
+      - Both are per-viewer and instant (no round trip).
+      - Round-trip tested.
+- [x] **Scene options** (§9.6): `SceneFrame.options` (`SceneOption`: name,
+      choices, selected) appear as menus in a new "options" section of the
+      control panel. Picking one sends `set_scene_option`, which reaches
+      `DemoScene.handleControl` as `SetSceneOption`. Parse and round-trip
+      tested.
+- [x] **Line legend** (§10.2): `SceneFrame.lineLegend`, drawn under the
+      mesh legend. The status bar's break-proximity legend stays off while
+      a scene explains its line colours this way. Round-trip tested.
+- [x] **Failure** (`ElasticLattice.failure`, the `iBeam` "failure" option):
+      - Each spring yields elastic-perfectly-plastic, its rest length
+        following it past its yield strain. It tears (permanently, §5.4)
+        past `ruptureStrain`, 20% by default. `yieldStressMPa` and
+        `ruptureStrainPercent` are editable on the steel force.
+      - Diagonal springs yield at 0.375 of the edge strain, so in plain
+        tension every load-carrying spring yields at once at exactly the
+        yield stress. With equal limits the lattice gave way only at twice
+        the yield stress: in a probe, the beam held 450 t when theory says
+        it collapses at 360 t. The cost is that shear yields early (about
+        0.3 of the yield stress rather than von Mises' 0.58).
+      - A cube with a torn spring has failed. The skin leaves failed cubes
+        out and shows the faces around them, so cracks open.
+      - `neverTearAt` protects the support rows: bearing on one row of
+        nodes, they otherwise tore the beam off its piers.
+      - `IBeam` cuts the settling damping to 5% once the steel gives way
+        (over 1% permanent stretch, or anything torn), so it collapses
+        rather than oozing down. It also gained `RollerBearing`, whose
+        slide stops at a travel limit (the pier's edge), and collisions
+        with the ground and piers.
+      - The piers are 0.5 m tall so that a beam folding in the middle
+        reaches the ground while its roller end is still on its pier.
+        Gravity on the scaled-up masses would crush the pieces, so torn-off
+        pieces don't fall on their own: the earlier 1 m piers left the
+        folded halves standing as a V in mid-air.
+      - Probe results, 150 t default scene: at 300 t it yields slightly and
+        holds. At 700 t it gives way at about 12 s, tears at about 15 s,
+        and its middle is on the ground by about 26 s.
+      - Tested:
+        - permanent set and the yield force held;
+        - tearing, failed cubes and the skin opening;
+        - torn springs staying torn;
+        - editable limits;
+        - the test beam holding at 0.6× its theoretical collapse load (a
+          single-row point load yields it locally by 0.8×);
+        - the test beam giving way and tearing at 1.5×, never at the
+          supports;
+        - the test beam staying elastic with failure off;
+        - the roller stop;
+        - settling damping.
+- [x] **Spring colouring** (the `iBeam` "springs" option: hidden /
+      stretch / force):
+      - The edge springs (about 12k) replace the skin, coloured on a signed
+        ramp by elastic stretch, or by tension, with full scale at the
+        yield strain. A legend of their own is shown.
+      - The skin is left out of the registry meanwhile. Listed, it got a
+        default mesh whose edges hid the springs.
+      - Done scene-side, not as generic `ColorBy.STRETCH`/`FORCE` line
+        modes.
+      - Tested.
 - [x] **`iBeam` scene**: a 4 m I-beam (500 mm deep, 300 mm flanges, 100 mm
-      flanges and web; 4,649 particles, about 33k springs) on two concrete
-      piers, with a 150 t weight at mid-span. The skin is coloured by von
-      Mises stress, from 0 to steel's 250 MPa yield, and drawn at ×100
-      deformation.
-      - Measured: the mid-span bottom fibre settles at 136.3 MPa (beam
-        theory predicts 137), within 1% of that by t = 15 s. The highest
-        stress anywhere is 152 MPa, on the top flange under the weight. The
-        sag under the weight is 4.2 mm.
-      - The beam skin is unpickable: it's drawn exaggerated, so a click
-        would land far from the node really there.
-      - Raising the weight to 400 t turns the flanges red.
+      flanges and web; 4,649 particles, about 33k springs) on two 0.5 m
+      concrete piers, with a 150 t weight at mid-span. The skin carries
+      four colour fields (von Mises, bending stress σxx, web shear τxy,
+      permanent stretch) and is drawn at ×100 deformation until the beam
+      tears or sags over 2 cm.
+      - Measured (elastic, before the piers were lowered, which doesn't
+        change the beam): the mid-span bottom fibre settles at 136.3 MPa
+        (beam theory predicts 137), within 1% of that by t = 15 s. The
+        highest stress anywhere is 152 MPa, on the top flange under the
+        weight. The sag under the weight is 4.2 mm.
+      - Nothing is pickable: it's drawn exaggerated, so a click would land
+        far from the node really there.
       - About 0.8 ms per step and 6 ms per frame; 0.9× real time measured
-        with a bare WebSocket client. Headless Chromium's software
-        rendering draws only about 180 steps/s.
-      - Scene tested: colours, legend, rest positions, the stress peaking at
-        mid-span, and the weight riding the sag.
+        with a bare WebSocket client.
+      - Scene tested: fields, rest positions, options, springs mode, the
+        stress peaking at mid-span, and the weight riding the sag.
 - [ ] Optional extras, for later:
-      - colour the springs themselves by stretch or force: the deferred
-        `ColorBy.STRETCH`/`FORCE` line modes (see `ColorBy` in
-        `Renderer.kt`);
       - a cross-section cut, to see stress inside the beam (e.g. a clipping
-        plane, plus a cap coloured by the interior nodes' stress).
+        plane, plus a cap coloured by the interior nodes' stress);
+      - generic `ColorBy.STRETCH`/`FORCE` line modes for `Spring` and
+        `MeshSprings` (see `ColorBy` in `Renderer.kt`); `iBeam` colours its
+        springs itself.
 - [ ] Gaps / possible next steps:
-      - the legend's range is fixed by the scene (0 to yield). An
-        auto-scale option, and a choice of field (signed bending stress
-        σxx, shear), would need the per-vertex values sent rather than
-        colours;
+      - collapse plays in slow motion (masses are scaled about 1.4e5×, so
+        motion runs about 400× slower than real steel). Torn-off pieces
+        don't fall; they're only pushed by the weight;
+      - shear yields early (see Failure); a von Mises yield per cube (spring
+        shares per cube, a return map) would fix it at roughly twice the
+        cost per step;
       - stress concentrates where the supports and the weight press on
         single rows of nodes; bearing plates would spread it;
-      - the model stays elastic past yield (no plasticity);
       - the viewer rebuilds every mesh's geometry and edge overlay each
-        frame. That's fine at 6.5k triangles, but not measured in a GPU
-        browser yet;
+        frame. Fine at 6.5k triangles, and smooth in a GPU browser by
+        report;
       - Poisson's ratio is fixed at 1/4.
 
 ## Docs (ongoing, not a phase)

@@ -11,6 +11,8 @@ import particlesim.render.ArrowSample
 import particlesim.render.CameraPose
 import particlesim.render.Color
 import particlesim.render.ColorLegend
+import particlesim.render.ScalarField
+import particlesim.render.SceneOption
 import particlesim.render.ConnectionStyle
 import particlesim.render.ConnectionShape
 import particlesim.render.Light
@@ -84,14 +86,15 @@ import kotlin.math.roundToInt
  *               i32 legendLabelLen, legendLabelLen UTF-8 bytes, i32 legendUnitLen, legendUnitLen
  *               UTF-8 bytes, f64 legendMin, f64 legendMax, i32 legendStopCount,
  *               legendStopCount * { u8 r, g, b },
- *               i32 restCount, restCount * { i32 particleId, f32 x, y, z },
- *               f64 deformationScale
+ *               i32 scalarFieldCount; if > 0: i32 fieldVertexCount, fieldVertexCount * i32 particleId,
+ *               then per field { i32 nameLen, name, i32 unitLen, unit, f64 min, f64 max,
+ *               i32 stopCount, stopCount * { u8 r, g, b }, fieldVertexCount * f32 value }
  *               (§10.2's per-surface colorBy: vertex colors are display sRGB, drawn as given and
  *               painted over the material color; a vertex with no entry keeps the material
- *               color. legendLabelLen 0 = no legend (its other fields are still sent, zero).
- *               Rest positions let the viewer exaggerate each vertex's movement from where it
- *               started by its deformation slider, which starts at deformationScale; restCount 0
- *               = drawn where it is. f32 is plenty for positions only ever drawn.)
+ *               color. legendLabelLen 0 = no legend (its other fields are still sent, zero). Scalar
+ *               fields are values the viewer colours by itself, one at a time, chosen from the
+ *               legend - all fields share one vertex list; a vertex a field has no value for is
+ *               sent as NaN.)
  * i32  arrowGroupCount
  * arrowGroupCount * { i32 nameLen, nameLen UTF-8 bytes, i32 sampleCount,
  *                      sampleCount * { f64 ox, oy, oz, f64 vx, vy, vz } }
@@ -193,6 +196,17 @@ import kotlin.math.roundToInt
  *                particle block at the top - only sent while the viewer asks for it, for its
  *                acceleration arrows. f32 because it's only ever drawn; a particle with no
  *                value yet is sent as zero)
+ * i32  optionCount; optionCount * { i32 nameLen, name, i32 choiceCount, choiceCount * { i32 len,
+ *                choice }, i32 selectedIndex }
+ *                (§9.6 scene options, shown as menus; picking one sends set_scene_option)
+ * i32  lineLegendLabelLen, label; if > 0: i32 unitLen, unit, f64 min, f64 max, i32 stopCount,
+ *                stopCount * { u8 r, g, b }
+ *                (what the connections' colours mean; 0 = no line legend)
+ * i32  restCount; restCount * { i32 particleId, f32 x, y, z }; f64 deformationScale
+ *                (particles' unloaded positions: the viewer draws each one deformationScale
+ *                times as far from its rest position as it really is - its deformation slider
+ *                starts there and follows changes to it. f32 is plenty for positions only ever
+ *                drawn; restCount 0 = everything drawn where it is)
  * ```
  *
  * The event section is §9.1's discrete-event channel ([SimEvent]) — everything above it in this
@@ -372,6 +386,10 @@ object BinaryFrame {
         solidParticleColors: Boolean = false,
         accelerations: Map<Int, Vector3>? = null,
         trailSeconds: Double = 0.0,
+        options: List<SceneOption> = emptyList(),
+        lineLegend: ColorLegend? = null,
+        restPositions: Map<Int, Vector3> = emptyMap(),
+        deformationScale: Double = 1.0,
     ): ByteBuffer {
         val coloredArrowGroups = arrowGroups.withIndex().filter { (_, g) -> g.samples.any { it.color != null } }
         val styleTable = connectionStyles.values.distinct()
@@ -411,7 +429,11 @@ object BinaryFrame {
             4 + coloredArrowGroups.sumOf { 4 + it.value.samples.size * 3 } +
             nameListSize(shownByDefaultArrows) +
             1 + (if (skyColor != null) 24 else 0) + 1 + 8 +
-            1 + (if (accelerations != null) ids.size * 12 else 0)
+            1 + (if (accelerations != null) ids.size * 12 else 0) +
+            4 + options.sumOf { stringSize(it.name) + 4 + it.choices.sumOf { c -> stringSize(c) } + 4 } +
+            stringSize(lineLegend?.label ?: "") +
+            (if (lineLegend != null && lineLegend.label.isNotEmpty()) stringSize(lineLegend.unit) + 8 + 8 + 4 + lineLegend.stops.size * 3 else 0) +
+            4 + restPositions.size * 16 + 8
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
         buffer.putDouble(t)
@@ -625,6 +647,25 @@ object BinaryFrame {
                 buffer.putFloat(a.x.toFloat()); buffer.putFloat(a.y.toFloat()); buffer.putFloat(a.z.toFloat())
             }
         }
+        buffer.putInt(options.size)
+        for (option in options) {
+            putString(buffer, option.name)
+            buffer.putInt(option.choices.size)
+            for (c in option.choices) putString(buffer, c)
+            buffer.putInt(option.choices.indexOf(option.selected))
+        }
+        putString(buffer, lineLegend?.label ?: "")
+        if (lineLegend != null && lineLegend.label.isNotEmpty()) {
+            putString(buffer, lineLegend.unit)
+            buffer.putDouble(lineLegend.min); buffer.putDouble(lineLegend.max)
+            putColors(buffer, lineLegend.stops)
+        }
+        buffer.putInt(restPositions.size)
+        for ((id, p) in restPositions) {
+            buffer.putInt(id)
+            buffer.putFloat(p.x.toFloat()); buffer.putFloat(p.y.toFloat()); buffer.putFloat(p.z.toFloat())
+        }
+        buffer.putDouble(deformationScale)
 
         buffer.flip()
         return buffer
@@ -698,11 +739,20 @@ object BinaryFrame {
             val legendMax = buf.double
             val stops = (0 until buf.int).map { Color(byteToColorChannel(buf.get()), byteToColorChannel(buf.get()), byteToColorChannel(buf.get())) }
             val legend = if (legendLabel.isEmpty()) null else ColorLegend(legendLabel, legendUnit, legendMin, legendMax, stops)
-            val rest = (0 until buf.int).associate {
-                buf.int to Vector3(buf.float.toDouble(), buf.float.toDouble(), buf.float.toDouble())
+            val fieldCount = buf.int
+            val scalarFields = if (fieldCount == 0) emptyList() else {
+                val vertices = (0 until buf.int).map { buf.int }
+                (0 until fieldCount).map {
+                    val fieldName = getString(buf)
+                    val unit = getString(buf)
+                    val min = buf.double
+                    val max = buf.double
+                    val stops = getColors(buf)
+                    val values = vertices.associateWith { buf.float.toDouble() }.filterValues { !it.isNaN() }
+                    ScalarField(fieldName, unit, min, max, stops, values)
+                }
             }
-            val deformationScale = buf.double
-            DecodedMesh(wireframe, triangles, name, textureUrl, uvs, material, pickable, flatShading, vertexColors, legend, rest, deformationScale)
+            DecodedMesh(wireframe, triangles, name, textureUrl, uvs, material, pickable, flatShading, vertexColors, legend, scalarFields)
         }
         val arrowGroupCount = buf.int
         val arrowGroups = (0 until arrowGroupCount).map {
@@ -805,10 +855,22 @@ object BinaryFrame {
         } else {
             null
         }
+        val options = (0 until buf.int).map {
+            val name = getString(buf)
+            val choices = (0 until buf.int).map { getString(buf) }
+            SceneOption(name, choices, choices[buf.int])
+        }
+        val lineLegendLabel = getString(buf)
+        val lineLegend = if (lineLegendLabel.isEmpty()) null else {
+            val unit = getString(buf)
+            ColorLegend(lineLegendLabel, unit, buf.double, buf.double, getColors(buf))
+        }
+        val restPositions = (0 until buf.int).associate { buf.int to Vector3(buf.float.toDouble(), buf.float.toDouble(), buf.float.toDouble()) }
+        val deformationScale = buf.double
         return DecodedFrame(
             t, step, particles, connections, camera, spheres, particleColors, meshes, coloredArrowGroups, visibleIds, registry,
             colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
-            skyColor, solidParticleColors, accelerations, trailSeconds,
+            skyColor, solidParticleColors, accelerations, trailSeconds, options, lineLegend, restPositions, deformationScale,
         )
     }
 
@@ -837,8 +899,25 @@ object BinaryFrame {
         val legend = mesh.legend
         return 1 + 4 + (mesh.vertexColors?.size ?: 0) * (4 + 3) +
             stringSize(legend?.label ?: "") + stringSize(legend?.unit ?: "") + 8 + 8 + 4 + (legend?.stops?.size ?: 0) * 3 +
-            4 + (mesh.restPositions?.size ?: 0) * (4 + 12) + 8
+            scalarFieldsSize(mesh)
     }
+
+    private fun scalarFieldVertices(mesh: SurfaceRenderer): List<Int> =
+        mesh.scalarFields.flatMap { it.values.keys }.distinct()
+
+    private fun scalarFieldsSize(mesh: SurfaceRenderer): Int {
+        if (mesh.scalarFields.isEmpty()) return 4
+        val n = scalarFieldVertices(mesh).size
+        return 4 + 4 + n * 4 + mesh.scalarFields.sumOf { stringSize(it.name) + stringSize(it.unit) + 8 + 8 + 4 + it.stops.size * 3 + n * 4 }
+    }
+
+    private fun putColors(buffer: ByteBuffer, colors: List<Color>) {
+        buffer.putInt(colors.size)
+        for (c in colors) { buffer.put(colorChannelToByte(c.r)); buffer.put(colorChannelToByte(c.g)); buffer.put(colorChannelToByte(c.b)) }
+    }
+
+    private fun getColors(buf: ByteBuffer): List<Color> =
+        (0 until buf.int).map { Color(byteToColorChannel(buf.get()), byteToColorChannel(buf.get()), byteToColorChannel(buf.get())) }
 
     private fun putMeshExtras(buffer: ByteBuffer, mesh: SurfaceRenderer) {
         buffer.put(if (mesh.flatShading) 1 else 0)
@@ -858,13 +937,19 @@ object BinaryFrame {
         for (c in stops) {
             buffer.put(colorChannelToByte(c.r)); buffer.put(colorChannelToByte(c.g)); buffer.put(colorChannelToByte(c.b))
         }
-        val rest = mesh.restPositions ?: emptyMap()
-        buffer.putInt(rest.size)
-        for ((id, p) in rest) {
-            buffer.putInt(id)
-            buffer.putFloat(p.x.toFloat()); buffer.putFloat(p.y.toFloat()); buffer.putFloat(p.z.toFloat())
+        buffer.putInt(mesh.scalarFields.size)
+        if (mesh.scalarFields.isNotEmpty()) {
+            val vertices = scalarFieldVertices(mesh)
+            buffer.putInt(vertices.size)
+            for (id in vertices) buffer.putInt(id)
+            for (field in mesh.scalarFields) {
+                putString(buffer, field.name)
+                putString(buffer, field.unit)
+                buffer.putDouble(field.min); buffer.putDouble(field.max)
+                putColors(buffer, field.stops)
+                for (id in vertices) buffer.putFloat((field.values[id] ?: Double.NaN).toFloat())
+            }
         }
-        buffer.putDouble(mesh.deformationScale)
     }
 
     private fun textureUrlOf(mesh: SurfaceRenderer): String = mesh.textureName?.let { "/textures/$it.png" } ?: ""
@@ -1109,8 +1194,7 @@ data class DecodedMesh(
     val flatShading: Boolean = false,
     val vertexColors: Map<Int, Color> = emptyMap(),
     val legend: ColorLegend? = null,
-    val restPositions: Map<Int, Vector3> = emptyMap(),
-    val deformationScale: Double = 1.0,
+    val scalarFields: List<ScalarField> = emptyList(),
 )
 
 /** One named group and its current member ids (§10.3's group visibility toggle needs to know
@@ -1224,4 +1308,8 @@ data class DecodedFrame(
     /** Particle id to acceleration, or null when the frame carried none. */
     val accelerations: Map<Int, Vector3>? = null,
     val trailSeconds: Double = 0.0,
+    val options: List<SceneOption> = emptyList(),
+    val lineLegend: ColorLegend? = null,
+    val restPositions: Map<Int, Vector3> = emptyMap(),
+    val deformationScale: Double = 1.0,
 )

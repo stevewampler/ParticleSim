@@ -61,6 +61,21 @@ data class Stress(val xx: Double, val yy: Double, val zz: Double, val xy: Double
  * [stiffnessDamping] (seconds) adds a dashpot across every spring proportional to its stiffness,
  * which damps the lattice's fast vibrations; damping of the slow, whole-body motion is better
  * done with linear [Drag].
+ *
+ * **Failure** (off unless [failure] is set). Each spring then yields on its own: once its stretch
+ * or squeeze passes its yield strain its rest length moves with it, holding its force at the yield
+ * value (elastic-perfectly-plastic, the way mild steel behaves) and leaving a permanent set when the
+ * load comes off. An edge spring's yield strain is `yieldStress / E`; a face diagonal's is
+ * [DIAGONAL_YIELD_FRACTION] of that - in plain tension the diagonals stretch only that fraction as
+ * much as the edges, so with it every spring carrying the load yields at once and the solid as a
+ * whole yields at exactly [yieldStress] and then carries no more (with equal yield strains the
+ * diagonals keep carrying load, and the solid only gives way at twice [yieldStress]). The catch -
+ * a lattice of central springs can't match von Mises in every direction with one limit per
+ * spring - is that shear yields early, at about 0.3 [yieldStress] rather than 0.58: right for
+ * bending, the way beams fail, but not for a solid failing in shear. A spring stretched past
+ * [ruptureStrain] of its original length tears - for good (§5.4) - after contributing its force
+ * that step, like [MeshSprings]' breaking.
+ * Live-editable: `yieldStressMPa`, `ruptureStrainPercent` (the switch itself is the scene's).
  */
 class ElasticLattice(
     store: ParticleStore,
@@ -73,7 +88,37 @@ class ElasticLattice(
     nodeMass: Double,
     private val stiffnessDamping: Double = 0.0,
     override val name: String? = null,
-) : Force {
+    /** Each node's radius, for colliding with [particlesim.collision.Collider]s; null = none. */
+    nodeRadius: Double? = null,
+    /** Mild structural steel's 250 MPa by default. */
+    yieldStress: Double = 250e6,
+    /** Mild steel stretches about 20% before it tears. */
+    ruptureStrain: Double = 0.2,
+) : Force, EditableFields {
+    /** Whether springs yield and tear ([yieldStress], [ruptureStrain]); off, the solid stays
+     * elastic however hard it's loaded. Yielding and tearing already done stay done. */
+    @Volatile var failure: Boolean = false
+
+    var yieldStress: Double = yieldStress
+        private set
+    var ruptureStrain: Double = ruptureStrain
+        private set
+
+    override fun editableFields(): Map<String, FieldValue> = mapOf(
+        "yieldStressMPa" to FieldValue.Scalar(yieldStress / 1e6),
+        "ruptureStrainPercent" to FieldValue.Scalar(ruptureStrain * 100),
+    )
+
+    override fun setField(field: String, value: FieldValue): Boolean {
+        if (value !is FieldValue.Scalar || !value.value.isFinite() || value.value <= 0.0) return false
+        when (field) {
+            "yieldStressMPa" -> yieldStress = value.value * 1e6
+            "ruptureStrainPercent" -> ruptureStrain = value.value / 100
+            else -> return false
+        }
+        return true
+    }
+
     /** A spring's stiffness deep inside: [youngsModulus] times [spacing] / 2.5. */
     val bulkStiffness: Double = bulkStiffness(youngsModulus, spacing)
 
@@ -88,7 +133,7 @@ class ElasticLattice(
         val corners = sortedSetOf(compareBy<LatticeIndex>({ it.i }, { it.j }, { it.k }))
         for (c in this.cells) for (d in CORNERS) corners += LatticeIndex(c.i + d.i, c.j + d.j, c.k + d.k)
         for (n in corners) {
-            val id = store.create(position = restPositionOf(n), mass = ScalarExpr.of(nodeMass))
+            val id = store.create(position = restPositionOf(n), mass = ScalarExpr.of(nodeMass), radius = nodeRadius?.let { ScalarExpr.of(it) })
             groups.add(group, id)
             nodeIdByIndex[n] = id
             nodeIndexById[id] = n
@@ -151,7 +196,83 @@ class ElasticLattice(
         bondRest = DoubleArray(bondA.size) { (store.position(bondB[it]) - store.position(bondA[it])).length() }
     }
 
+    /** Each spring's rest length after any yielding (its original one until it yields). */
+    private val plasticRest: DoubleArray = bondRest.copyOf()
+    /** Each spring's yield strain as a fraction of an edge's (see the class doc). */
+    private val yieldFraction = DoubleArray(bondA.size) { if (bondRest[it] < spacing * 1.2) 1.0 else DIAGONAL_YIELD_FRACTION }
+
+    /** Springs that never tear (see [neverTearAt]). */
+    private val untearable = BooleanArray(bondA.size)
+
+    /** Springs attached to any of [ids] still yield but never tear - e.g. at a support that
+     * bears on a single row of nodes, where the load concentrates far more than on any real
+     * bearing and would otherwise tear the solid away from it. */
+    fun neverTearAt(ids: Collection<Int>) {
+        val set = ids.toSet()
+        for (i in bondA.indices) if (bondA[i] in set || bondB[i] in set) untearable[i] = true
+    }
+
+    /** Springs torn apart (§5.4: permanent). */
+    private val torn = BooleanArray(bondA.size)
+    @Volatile private var anyTorn = false
+
     val springCount: Int get() = bondA.size
+
+    /** Whether any spring has torn. */
+    val hasTorn: Boolean get() = anyTorn
+
+    fun isTorn(spring: Int): Boolean = torn[spring]
+
+    /** How far [spring]'s rest length has moved from its original, as a fraction of it:
+     * positive stretched for good, negative squeezed, 0 if it never yielded. */
+    fun plasticStrain(spring: Int): Double = (plasticRest[spring] - bondRest[spring]) / bondRest[spring]
+
+    /** [spring]'s current stretch beyond its (possibly yielded) rest length, as a fraction of
+     * its original length - the elastic part, what its force comes from. 0 once torn. */
+    fun elasticStrain(store: ParticleStore, spring: Int): Double {
+        if (torn[spring]) return 0.0
+        return (springLength(store, spring) - plasticRest[spring]) / bondRest[spring]
+    }
+
+    /** [spring]'s tension in newtons (negative: compression), elastic part only. 0 once torn. */
+    fun tension(store: ParticleStore, spring: Int): Double =
+        if (torn[spring]) 0.0 else bondStiffness[spring] * (springLength(store, spring) - plasticRest[spring])
+
+    private fun springLength(store: ParticleStore, spring: Int): Double {
+        val a = slotA[spring]; val b = slotB[spring]
+        val dx = store.xAt(b) - store.xAt(a); val dy = store.yAt(b) - store.yAt(a); val dz = store.zAt(b) - store.zAt(a)
+        return sqrt(dx * dx + dy * dy + dz * dz)
+    }
+
+    /** Whether [spring] runs along a cube edge (rather than a face diagonal). */
+    fun isEdge(spring: Int): Boolean = bondRest[spring] < spacing * 1.2
+
+    fun springEnds(spring: Int): Pair<Int, Int> = bondA[spring] to bondB[spring]
+
+    /** The largest permanent set of any spring ([plasticStrain], by size). */
+    fun maxPlasticStrain(): Double {
+        var max = 0.0
+        for (i in bondA.indices) {
+            val p = abs(plasticRest[i] - bondRest[i]) / bondRest[i]
+            if (p > max) max = p
+        }
+        return max
+    }
+
+    /** For each node, the springs attached to it. */
+    private val springsOfNode: Map<Int, IntArray> by lazy {
+        val lists = HashMap<Int, MutableList<Int>>()
+        for (i in bondA.indices) {
+            lists.getOrPut(bondA[i]) { ArrayList() } += i
+            lists.getOrPut(bondB[i]) { ArrayList() } += i
+        }
+        lists.mapValues { it.value.toIntArray() }
+    }
+
+    /** Each of [ids]' largest permanent set among the springs attached to it ([plasticStrain],
+     * by size), as a fraction. */
+    fun nodePlasticStrains(ids: Collection<Int>): Map<Int, Double> =
+        ids.associateWith { id -> springsOfNode[id]?.maxOfOrNull { abs(plasticStrain(it)) } ?: 0.0 }
 
     /** Each spring's endpoints and its stiffness (summed over the cubes it borders). */
     fun springs(): List<Triple<Int, Int, Double>> = bondA.indices.map { Triple(bondA[it], bondB[it], bondStiffness[it]) }
@@ -167,23 +288,37 @@ class ElasticLattice(
     ) {
         if (!groups.isEnabled(group)) return
         val damped = stiffnessDamping != 0.0
+        val failing = failure
+        val edgeYieldStrain = yieldStress / youngsModulus
         var i = chunkIndex
         while (i < bondA.size) {
+            if (torn[i]) { i += chunkCount; continue }
             val a = slotA[i]
             val b = slotB[i]
             val dx = store.xAt(b) - store.xAt(a)
             val dy = store.yAt(b) - store.yAt(a)
             val dz = store.zAt(b) - store.zAt(a)
-            val length = sqrt(dx * dx + dy * dy + dz * dz)
+            // Floored so a spring crushed to nothing can't divide by zero.
+            val length = maxOf(sqrt(dx * dx + dy * dy + dz * dz), MIN_LENGTH_FRACTION * bondRest[i])
             val inv = 1.0 / length
             val nx = dx * inv; val ny = dy * inv; val nz = dz * inv
-            var tension = bondStiffness[i] * (length - bondRest[i])
+            var stretch = length - plasticRest[i]
+            if (failing) {
+                // Yield: the rest length follows, holding the stretch at the yield strain.
+                val limit = edgeYieldStrain * yieldFraction[i] * bondRest[i]
+                if (stretch > limit) { plasticRest[i] = length - limit; stretch = limit }
+                else if (stretch < -limit) { plasticRest[i] = length + limit; stretch = -limit }
+            }
+            var tension = bondStiffness[i] * stretch
             if (damped) {
                 val opening = (store.vxAt(b) - store.vxAt(a)) * nx + (store.vyAt(b) - store.vyAt(a)) * ny + (store.vzAt(b) - store.vzAt(a)) * nz
                 tension += stiffnessDamping * bondStiffness[i] * opening
             }
             chunk.add(a, nx * tension, ny * tension, nz * tension)
             chunk.add(b, -nx * tension, -ny * tension, -nz * tension)
+            // Tears after this step's force, the way a breaking spring does (§5.4). Each spring
+            // belongs to exactly one chunk, so writing its own entry here is safe.
+            if (failing && !untearable[i] && length - bondRest[i] > ruptureStrain * bondRest[i]) { torn[i] = true; anyTorn = true }
             i += chunkCount
         }
     }
@@ -205,7 +340,8 @@ class ElasticLattice(
                 val dx = pb.x - pa.x; val dy = pb.y - pa.y; val dz = pb.z - pa.z
                 val length = sqrt(dx * dx + dy * dy + dz * dz)
                 // T * d (x) d / |d|
-                val w = cellBondShare[ci * BONDS_PER_CELL + s] * (length - bondRest[bond]) / length
+                if (torn[bond]) continue
+                val w = cellBondShare[ci * BONDS_PER_CELL + s] * (length - plasticRest[bond]) / length
                 xx += w * dx * dx; yy += w * dy * dy; zz += w * dz * dz
                 xy += w * dx * dy; yz += w * dy * dz; zx += w * dz * dx
             }
@@ -262,13 +398,27 @@ class ElasticLattice(
 
     // ---- Skin.
 
-    /** The solid's outer skin: every cube face with no filled cube on its other side, as two
-     * triangles wound to face outward. */
+    /** Cubes with a torn spring: they've come apart, so the skin leaves them out and shows the
+     * faces of the cubes around them instead - the crack's two sides. */
+    fun failedCells(): Set<LatticeIndex> {
+        if (!anyTorn) return emptySet()
+        val failed = HashSet<LatticeIndex>()
+        for ((ci, c) in cells.withIndex()) {
+            for (s in 0 until BONDS_PER_CELL) if (torn[cellBonds[ci * BONDS_PER_CELL + s]]) { failed += c; break }
+        }
+        return failed
+    }
+
+    /** The solid's outer skin: every face of an intact cube with no intact cube on its other
+     * side (none at all, or one in [failedCells]), as two triangles wound to face outward. */
     fun boundarySurface(name: String? = null): Surface {
+        val failed = failedCells()
         val triangles = ArrayList<Triangle>()
         for (c in cells) {
+            if (c in failed) continue
             for (axis in 0 until 3) for (sign in intArrayOf(-1, 1)) {
-                if (offset(c, axis, sign) in cellSet) continue
+                val neighbour = offset(c, axis, sign)
+                if (neighbour in cellSet && neighbour !in failed) continue
                 val u = (axis + 1) % 3
                 val v = (axis + 2) % 3
                 val base = if (sign > 0) offset(c, axis, 1) else c
@@ -287,6 +437,10 @@ class ElasticLattice(
     companion object {
         private const val BONDS_PER_CELL = 24
         const val MAX_SPRINGS_PER_NODE = 18
+        private const val MIN_LENGTH_FRACTION = 0.05
+        /** A face diagonal stretches (1 - Poisson's ratio) / 2 = 0.375 as much as an edge along
+         * a plain pull - its yield strain, as a fraction of an edge's. */
+        const val DIAGONAL_YIELD_FRACTION = 0.375
 
         private val CORNERS: List<LatticeIndex> =
             (0..1).flatMap { i -> (0..1).flatMap { j -> (0..1).map { k -> LatticeIndex(i, j, k) } } }

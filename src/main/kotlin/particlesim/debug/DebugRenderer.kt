@@ -67,6 +67,10 @@ class DebugRenderer(
         solidParticleColors: Boolean = false,
         accelerations: Map<Int, Vector3>? = null,
         trailSeconds: Double = 0.0,
+        options: List<particlesim.render.SceneOption> = emptyList(),
+        lineLegend: particlesim.render.ColorLegend? = null,
+        restPositions: Map<Int, Vector3> = emptyMap(),
+        deformationScale: Double = 1.0,
     ) {
         // Fills in a default-region arrow group (§10.2) for any named UniformFieldForce the
         // registry carries that arrowGroups didn't already cover - this is the single call site
@@ -87,7 +91,7 @@ class DebugRenderer(
                 t, step, store, ids, connections, camera, lineColors, connectionNames, sphereRadii, particleColors, allMeshes,
                 allArrowGroups, visibleIds, registry, colliders.filter { it.active }, events, availableScenes, activeScene, lights,
                 hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows, skyColor, solidParticleColors,
-                accelerations, trailSeconds,
+                accelerations, trailSeconds, options, lineLegend, restPositions, deformationScale,
             ),
         )
     }

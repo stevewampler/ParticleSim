@@ -14,12 +14,11 @@ class IBeamTest {
     private val shape = IBeamShape(lengthCells = 42, depthCells = 6, flangeWidthCells = 4, flangeThicknessCells = 2, webThicknessCells = 2)
 
     private fun settle(beam: IBeam): Double {
-        val integrator = Integrator()
         var t = 0.0
         val periods = 3.0
         val steps = ((beam.rampSeconds + periods * 2 * PI / beam.firstModeOmega) / beam.dt).toInt()
         repeat(steps) {
-            integrator.step(beam.store, beam.groups, beam.forces, beam.constraints, t, beam.dt)
+            beam.step(t)
             t += beam.dt
         }
         return t
@@ -97,5 +96,92 @@ class IBeamTest {
         assertTrue(!weight.setField("tonnes", particlesim.physics.FieldValue.Scalar(Double.NaN)))
         assertTrue(!weight.setField("mass", particlesim.physics.FieldValue.Scalar(1.0)))
         assertEquals(25.0, weight.tonnes)
+    }
+
+    // Beam theory's collapse load for the test beam: four times its plastic moment over the span.
+    private val collapseTonnes: Double = run {
+        val a = shape.spacing
+        // Plastic section modulus: each half of the section's area times its centroid's distance
+        // from the neutral axis, summed cube by cube.
+        val z = (0 until shape.depthCells).sumOf { j ->
+            (0 until shape.flangeWidthCells).count { shape.inSection(j, it) } * a * a * kotlin.math.abs((j + 0.5) * a - shape.neutralAxis)
+        }
+        4 * z * STEEL_YIELD_STRESS / shape.length / (1000 * STANDARD_GRAVITY)
+    }
+
+    private fun run(beam: IBeam, seconds: Double, until: () -> Boolean = { false }): Double {
+        var t = 0.0
+        while (t < seconds && !until()) { beam.step(t); t += beam.dt }
+        return t
+    }
+
+    @Test
+    fun `with failure on, below its collapse load the beam yields a little and holds`() {
+        // 0.6: the whole weight bears on one row of nodes here, which yields the flange under it
+        // locally - by 0.8 of beam theory's collapse load that's enough to give way.
+        val beam = IBeam(shape, tonnes = 0.6 * collapseTonnes, weightPositions = listOf(0.5), weightLengthCells = 0, selfWeight = false)
+        beam.lattice.failure = true
+        settle(beam)
+        assertTrue(!beam.hasGivenWay && !beam.lattice.hasTorn)
+        assertTrue(beam.lattice.maxPlasticStrain() < IBeam.GIVEN_WAY_STRAIN)
+        assertTrue(Diagnostics.kineticEnergy(beam.store) < 1e-6 * beam.weight.weightAt(1e9) * shape.spacing, "came to rest")
+    }
+
+    @Test
+    fun `with failure on, well past its collapse load it gives way, the damping drops, and it tears`() {
+        val beam = IBeam(shape, tonnes = 1.5 * collapseTonnes, weightPositions = listOf(0.5), weightLengthCells = 0, selfWeight = false)
+        beam.lattice.failure = true
+        run(beam, 60.0) { beam.lattice.hasTorn }
+        assertTrue(beam.hasGivenWay)
+        assertEquals(beam.settlingCoefficient * IBeam.GIVEN_WAY_DAMPING_FRACTION, beam.settlingDamping.coefficient, 1e-6)
+        assertTrue(beam.lattice.hasTorn, "tore within a minute of simulated time")
+        // ...but never at the supports, where the load bears on a single row of nodes.
+        val supports = (beam.pinnedNodes + beam.rollerNodes).toSet()
+        assertTrue((0 until beam.lattice.springCount).filter { beam.lattice.isTorn(it) }.none { s ->
+            val (p, q) = beam.lattice.springEnds(s); p in supports || q in supports
+        })
+    }
+
+    @Test
+    fun `with failure off, the same load leaves it elastic`() {
+        val beam = IBeam(shape, tonnes = 1.5 * collapseTonnes, weightPositions = listOf(0.5), weightLengthCells = 0, selfWeight = false)
+        settle(beam)
+        assertEquals(0.0, beam.lattice.maxPlasticStrain())
+        assertTrue(!beam.hasGivenWay)
+    }
+
+    @Test
+    fun `settling damping pushes against velocity and is live-editable`() {
+        val store = particlesim.core.ParticleStore()
+        val groups = particlesim.core.Groups()
+        val id = store.create(velocity = particlesim.core.Vector3(2.0, 0.0, -1.0))
+        groups.add("g", id)
+        val damping = SettlingDamping("g", 3.0)
+        val chunk = particlesim.physics.ChunkAccumulator(store.capacity)
+        damping.accumulate(store, groups, 0.0, chunk, 0, 1)
+        assertEquals(particlesim.core.Vector3(-6.0, 0.0, 3.0), chunk.at(store.slotOf(id)))
+        assertTrue(damping.setField("coefficient", particlesim.physics.FieldValue.Scalar(0.5)))
+        assertEquals(0.5, damping.coefficient)
+        assertTrue(!damping.setField("coefficient", particlesim.physics.FieldValue.Scalar(-1.0)))
+    }
+
+    @Test
+    fun `a roller bearing holds height and line, slides along x, and stops at its travel`() {
+        val store = particlesim.core.ParticleStore()
+        val groups = particlesim.core.Groups()
+        val id = store.create(position = particlesim.core.Vector3(1.0, 2.0, 3.0))
+        groups.add("r", id)
+        val bearing = RollerBearing("r", store, groups, travel = 0.2)
+        val push = particlesim.physics.ConstantForce("r", particlesim.core.Vector3(5.0, -9.0, 4.0))
+        val integrator = Integrator()
+        var t = 0.0
+        repeat(10) { integrator.step(store, groups, listOf(push), listOf(bearing), t, 0.01); t += 0.01 }
+        val p = store.position(id)
+        assertEquals(2.0, p.y, 1e-12)
+        assertEquals(3.0, p.z, 1e-12)
+        assertTrue(p.x > 1.0 && p.x < 1.2, "sliding: $p")
+        repeat(200) { integrator.step(store, groups, listOf(push), listOf(bearing), t, 0.01); t += 0.01 }
+        assertEquals(1.2, store.position(id).x, 1e-12)
+        assertEquals(particlesim.core.Vector3.ZERO, store.velocity(id), "stopped against the stop")
     }
 }

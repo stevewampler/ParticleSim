@@ -10,6 +10,13 @@ data class Color(val r: Double, val g: Double, val b: Double) {
     }
 }
 
+/** [this] display (sRGB) colour as the linear values [Color] usually carries - for a ramp colour
+ * (display values, so it matches its legend) going somewhere linear is expected, like a line. */
+fun Color.srgbToLinear(): Color {
+    fun ch(c: Double) = if (c <= 0.04045) c / 12.92 else Math.pow((c + 0.055) / 1.055, 2.4)
+    return Color(ch(r), ch(g), ch(b))
+}
+
 object ColorRamp {
     private val green = Color(0.0 / 255, 170.0 / 255, 60.0 / 255)
     private val yellow = Color(240.0 / 255, 200.0 / 255, 0.0 / 255)
@@ -43,12 +50,29 @@ object ColorRamp {
         Color(0.86, 0.12, 0.1),
     )
 
+    /** Blue → near-white → red: a signed quantity, compression (negative) blue and tension
+     * red, nothing white. Display (sRGB) values, like [STRESS_STOPS]. */
+    val SIGNED_STOPS: List<Color> = listOf(
+        Color(0.12, 0.3, 0.8),
+        Color(0.45, 0.65, 0.95),
+        Color(0.93, 0.93, 0.93),
+        Color(0.97, 0.6, 0.45),
+        Color(0.82, 0.1, 0.1),
+    )
+
+    /** [SIGNED_STOPS] at [t] from -1 (blue) through 0 (white) to 1 (red), clamped. */
+    fun signed(t: Double): Color = along(SIGNED_STOPS, (t.coerceIn(-1.0, 1.0) + 1.0) / 2.0)
+
     /** [STRESS_STOPS] at [t] (clamped to `[0,1]`), linear between neighbouring stops. */
-    fun stress(t: Double): Color {
-        val c = t.coerceIn(0.0, 1.0) * (STRESS_STOPS.size - 1)
-        val i = minOf(c.toInt(), STRESS_STOPS.size - 2)
+    fun stress(t: Double): Color = along(STRESS_STOPS, t)
+
+    /** [stops] spread evenly over 0..1, at [t] (clamped), linear between neighbours. */
+    fun along(stops: List<Color>, t: Double): Color {
+        val c = t.coerceIn(0.0, 1.0) * (stops.size - 1)
+        if (c >= stops.size - 1) return stops.last()
+        val i = c.toInt()
         val f = c - i
-        val from = STRESS_STOPS[i]; val to = STRESS_STOPS[i + 1]
+        val from = stops[i]; val to = stops[i + 1]
         return Color(from.r + (to.r - from.r) * f, from.g + (to.g - from.g) * f, from.b + (to.b - from.b) * f)
     }
 }
