@@ -2019,6 +2019,14 @@ real prerequisite, not just unstarted — see the note below.
       the legend would correctly stay hidden — the positive case (does it
       actually *appear* when it should) remains unverified by an actual
       colored demo or a human in a browser. Full suite now 264 green.
+- [x] **Space pauses/resumes** (viewer): Space clicks the pause/resume
+      button from anywhere but a text field (where it types a space). Its
+      default action is suppressed on keydown and keyup, so a focused
+      button or checkbox isn't also pressed; held-down repeats are ignored.
+      Checked headless (the driver gained `key` and `focus` commands):
+      pause freezes sim time, resume continues, and Space after ticking
+      "sound" or clicking "restart" only pauses, while in the bookmark
+      name field it types. No viewer JS test harness exists to unit-test it.
 - [x] **Time controls**: pause/resume, a speed multiplier, and step-once,
       as a new bidirectional-channel message type (`TimeControlMessage`)
       applied uniformly via a new `TimeControl` class rather than each

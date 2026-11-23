@@ -1212,7 +1212,8 @@ readout to debug a scene without a separate tool.
 - **Time controls** (pause, speed multiplier, step-once) are already
   specified in §9.1 but are UI surface, not just engine capability —
   listed here as part of what this viewer needs to actually expose, not
-  a new requirement.
+  a new requirement. The Space bar pauses and resumes, from anywhere but
+  a text field.
 - **Live parameter tweaking**: editing an entity's numeric parameters
   from its per-object panel, with the change taking effect in the
   running simulation. Deliberately distinct from everything else in this

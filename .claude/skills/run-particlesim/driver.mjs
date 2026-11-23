@@ -144,6 +144,21 @@ const COMMANDS = {
     console.log('mouseup');
   },
 
+  // Presses a key (Playwright key name, e.g. "Space", "Escape", "a") on whatever has focus.
+  async key(name) {
+    if (!page) return console.log('ERROR: launch first');
+    await page.keyboard.press(name);
+    console.log('pressed', name);
+  },
+
+  // Focuses the element matching a CSS selector - e.g. to check a key's behaviour while a text
+  // field (or a checkbox) has focus.
+  async focus(sel) {
+    if (!page) return console.log('ERROR: launch first');
+    await page.focus(sel);
+    console.log('focused', sel);
+  },
+
   // Zooms via mouse wheel, centered on the canvas (positive = out, negative = in) - matches
   // OrbitControls' own wheel handling, same as a person scrolling over the 3D view.
   async zoom(deltaY) {

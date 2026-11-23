@@ -80,6 +80,8 @@ port 8888/8887 listeners (same two `lsof` lines as above).
 | `orbit <dx> <dy>` | left-drag the 3D view by (dx, dy) pixels - most scenes start framed near the origin, so geometry offset from it (e.g. multiShape's flag) may need this to come into view |
 | `zoom <deltaY>` | mouse-wheel zoom, centered on the canvas (positive = out, negative = in) |
 | `mousedown <x> <y>` / `mousemove <x> <y>` / `mouseup` | raw pointer gesture primitives (page pixel coordinates - find them from a prior `ss`), for verifying §9.4's interactive particle drag: `mousedown` over a particle, one or more `mousemove`s (screenshot between them to check for jank), `mouseup` to release and check the resulting throw velocity |
+| `key <name>` | press a key on whatever has focus (Playwright key names: `Space`, `Escape`, `a`...) - e.g. `key Space` pauses/resumes |
+| `focus <css-sel>` | focus an element, e.g. to check a key's behaviour while a text field has focus |
 | `text [css-sel]` | print innerText of the whole page, or one selector |
 | `eval <js>` | evaluate an expression in the page, print it as JSON |
 | `console` | print any browser console errors seen so far |

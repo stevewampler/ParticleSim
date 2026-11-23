@@ -1843,6 +1843,26 @@ playPauseBtn.addEventListener("click", () => {
   if (!isPaused) resetStats();
 });
 
+// Space pauses and resumes, from anywhere but a text field (where it types a space). Its default
+// action is suppressed on both keydown and keyup - a browser presses a focused button or ticks a
+// focused checkbox on Space's keyup - so after clicking, say, "restart" or the "sound" box,
+// Space still just pauses rather than also restarting or unticking. Held-down repeats are
+// ignored, so holding it doesn't flicker between the two.
+function isTypingField(el) {
+  if (!el) return false;
+  if (el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable) return true;
+  return el.tagName === "INPUT" && !["checkbox", "radio", "range", "button", "submit"].includes(el.type);
+}
+for (const type of ["keydown", "keyup"]) {
+  document.addEventListener(type, (event) => {
+    if (event.code !== "Space" || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (isTypingField(document.activeElement)) return;
+    event.preventDefault();
+    if (type === "keydown" && !event.repeat) playPauseBtn.click();
+  });
+}
+playPauseBtn.title = "Pause / resume (Space)";
+
 document.getElementById("stepOnceBtn").addEventListener("click", () => {
   send({ type: "step_once" });
   // TimeControl always leaves the engine paused right after a step (see its own doc comment) -
