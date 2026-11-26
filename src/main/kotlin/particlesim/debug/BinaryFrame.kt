@@ -12,6 +12,7 @@ import particlesim.render.CameraPose
 import particlesim.render.Color
 import particlesim.render.ColorLegend
 import particlesim.render.ScalarField
+import particlesim.render.SceneControl
 import particlesim.render.SceneOption
 import particlesim.render.ConnectionStyle
 import particlesim.render.ConnectionShape
@@ -197,8 +198,9 @@ import kotlin.math.roundToInt
  *                acceleration arrows. f32 because it's only ever drawn; a particle with no
  *                value yet is sent as zero)
  * i32  optionCount; optionCount * { i32 nameLen, name, i32 choiceCount, choiceCount * { i32 len,
- *                choice }, i32 selectedIndex }
- *                (§9.6 scene options, shown as menus; picking one sends set_scene_option)
+ *                choice }, i32 selectedIndex, u8 toggle }
+ *                (§9.6 scene options, shown as menus - or, toggle 1, as a checkbox whose choices
+ *                are "off" and "on"; picking one sends set_scene_option)
  * i32  lineLegendLabelLen, label; if > 0: i32 unitLen, unit, f64 min, f64 max, i32 stopCount,
  *                stopCount * { u8 r, g, b }
  *                (what the connections' colours mean; 0 = no line legend)
@@ -207,6 +209,10 @@ import kotlin.math.roundToInt
  *                times as far from its rest position as it really is - its deformation slider
  *                starts there and follows changes to it. f32 is plenty for positions only ever
  *                drawn; restCount 0 = everything drawn where it is)
+ * i32  controlCount; controlCount * { i32 nameLen, name, i32 unitLen, unit, f64 min, f64 max,
+ *                f64 value, u8 hasCurrent, [f64 current] }
+ *                (§9.6 scene controls: numbers the person sets with a slider or by typing,
+ *                sending set_scene_control; current is where the thing driven has got to)
  * ```
  *
  * The event section is §9.1's discrete-event channel ([SimEvent]) — everything above it in this
@@ -390,6 +396,7 @@ object BinaryFrame {
         lineLegend: ColorLegend? = null,
         restPositions: Map<Int, Vector3> = emptyMap(),
         deformationScale: Double = 1.0,
+        controls: List<SceneControl> = emptyList(),
     ): ByteBuffer {
         val coloredArrowGroups = arrowGroups.withIndex().filter { (_, g) -> g.samples.any { it.color != null } }
         val styleTable = connectionStyles.values.distinct()
@@ -430,10 +437,11 @@ object BinaryFrame {
             nameListSize(shownByDefaultArrows) +
             1 + (if (skyColor != null) 24 else 0) + 1 + 8 +
             1 + (if (accelerations != null) ids.size * 12 else 0) +
-            4 + options.sumOf { stringSize(it.name) + 4 + it.choices.sumOf { c -> stringSize(c) } + 4 } +
+            4 + options.sumOf { stringSize(it.name) + 4 + it.choices.sumOf { c -> stringSize(c) } + 4 + 1 } +
             stringSize(lineLegend?.label ?: "") +
             (if (lineLegend != null && lineLegend.label.isNotEmpty()) stringSize(lineLegend.unit) + 8 + 8 + 4 + lineLegend.stops.size * 3 else 0) +
-            4 + restPositions.size * 16 + 8
+            4 + restPositions.size * 16 + 8 +
+            4 + controls.sumOf { stringSize(it.name) + stringSize(it.unit) + 24 + 1 + (if (it.current != null) 8 else 0) }
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
         buffer.putDouble(t)
@@ -653,6 +661,7 @@ object BinaryFrame {
             buffer.putInt(option.choices.size)
             for (c in option.choices) putString(buffer, c)
             buffer.putInt(option.choices.indexOf(option.selected))
+            buffer.put(if (option.toggle) 1 else 0)
         }
         putString(buffer, lineLegend?.label ?: "")
         if (lineLegend != null && lineLegend.label.isNotEmpty()) {
@@ -666,6 +675,14 @@ object BinaryFrame {
             buffer.putFloat(p.x.toFloat()); buffer.putFloat(p.y.toFloat()); buffer.putFloat(p.z.toFloat())
         }
         buffer.putDouble(deformationScale)
+        buffer.putInt(controls.size)
+        for (control in controls) {
+            putString(buffer, control.name)
+            putString(buffer, control.unit)
+            buffer.putDouble(control.min); buffer.putDouble(control.max); buffer.putDouble(control.value)
+            buffer.put(if (control.current != null) 1 else 0)
+            if (control.current != null) buffer.putDouble(control.current)
+        }
 
         buffer.flip()
         return buffer
@@ -858,7 +875,8 @@ object BinaryFrame {
         val options = (0 until buf.int).map {
             val name = getString(buf)
             val choices = (0 until buf.int).map { getString(buf) }
-            SceneOption(name, choices, choices[buf.int])
+            val selected = choices[buf.int]
+            SceneOption(name, choices, selected, toggle = buf.get().toInt() != 0)
         }
         val lineLegendLabel = getString(buf)
         val lineLegend = if (lineLegendLabel.isEmpty()) null else {
@@ -867,10 +885,16 @@ object BinaryFrame {
         }
         val restPositions = (0 until buf.int).associate { buf.int to Vector3(buf.float.toDouble(), buf.float.toDouble(), buf.float.toDouble()) }
         val deformationScale = buf.double
+        val controls = (0 until buf.int).map {
+            val name = getString(buf)
+            val unit = getString(buf)
+            val min = buf.double; val max = buf.double; val value = buf.double
+            SceneControl(name, unit, min, max, value, if (buf.get().toInt() != 0) buf.double else null)
+        }
         return DecodedFrame(
             t, step, particles, connections, camera, spheres, particleColors, meshes, coloredArrowGroups, visibleIds, registry,
             colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
-            skyColor, solidParticleColors, accelerations, trailSeconds, options, lineLegend, restPositions, deformationScale,
+            skyColor, solidParticleColors, accelerations, trailSeconds, options, lineLegend, restPositions, deformationScale, controls,
         )
     }
 
@@ -1312,4 +1336,5 @@ data class DecodedFrame(
     val lineLegend: ColorLegend? = null,
     val restPositions: Map<Int, Vector3> = emptyMap(),
     val deformationScale: Double = 1.0,
+    val controls: List<SceneControl> = emptyList(),
 )

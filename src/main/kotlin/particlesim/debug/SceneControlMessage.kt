@@ -51,6 +51,9 @@ sealed interface SceneControlMessage {
      * it declared). A scene with no such option, or a choice it doesn't offer, ignores it. */
     data class SetSceneOption(val name: String, val choice: String) : SceneControlMessage
 
+    /** §9.6: a scene control ([particlesim.render.SceneControl]) set to [value]. */
+    data class SetSceneControl(val name: String, val value: Double) : SceneControlMessage
+
     /** §10.4's numeric field editing write path — [kind] is `"force"` or `"constraint"`,
      * matching [particlesim.debug.DecodedFieldEntry.kind] on the read side. Two message types
      * (scalar vs. vector), not one carrying a variant payload, because SnakeYAML/JSON has no
@@ -130,6 +133,11 @@ sealed interface SceneControlMessage {
                     val name = data["name"] as? String ?: return null
                     val choice = data["choice"] as? String ?: return null
                     SetSceneOption(name, choice)
+                }
+                "set_scene_control" -> {
+                    val name = data["name"] as? String ?: return null
+                    val value = (data["value"] as? Number)?.toDouble()?.takeIf { it.isFinite() } ?: return null
+                    SetSceneControl(name, value)
                 }
                 "set_scalar_field" -> {
                     val kind = data["kind"] as? String ?: return null

@@ -73,11 +73,14 @@ data class SceneFrame(
      * loads, and moves there again whenever the scene changes it (e.g. down to 1 once a beam has
      * failed and its real deflection is large); the viewer's slider changes it in between. */
     val deformationScale: Double = 1.0,
-    /** Scene-level choices the viewer shows as menus (e.g. [IBeamScene]'s "failure"). */
+    /** Scene-level choices the viewer shows as menus or checkboxes (e.g. [IBeamScene]'s "failure"). */
     val options: List<particlesim.render.SceneOption> = emptyList(),
     /** What [lineColors] mean, drawn as a colour bar beside the view - null for none (the
      * status bar's own break-proximity legend still covers that case). */
     val lineLegend: particlesim.render.ColorLegend? = null,
+    /** §9.6's scene controls: numbers the viewer offers as sliders under "controls" (e.g.
+     * [TowerCraneScene]'s slew, radius, hook height and load). */
+    val controls: List<particlesim.render.SceneControl> = emptyList(),
     val registry: SceneRegistry = SceneRegistry.build(),
     val colliders: List<Collider> = emptyList(),
     val events: List<SimEvent> = emptyList(),

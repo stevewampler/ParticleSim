@@ -1,7 +1,6 @@
 package particlesim.debug
 
 import particlesim.core.Vector3
-import particlesim.examples.CraneControls
 import particlesim.render.ColorRamp
 import particlesim.render.srgbToLinear
 import kotlin.math.PI
@@ -39,7 +38,9 @@ class TowerCraneSceneTest {
         assertEquals(emptySet(), frame.visibleIds)
         assertTrue(frame.meshes.none { it.pickable })
         assertEquals(listOf("ballast", "winch", "cab", "trolley", "hook block", "foundation", "ground"), frame.meshes.map { it.surface.name })
-        assertEquals(listOf("colours" to "stress"), frame.options.map { it.name to it.selected })
+        assertEquals(listOf("failure" to "off", "colours" to "stress"), frame.options.map { it.name to it.selected })
+        assertEquals(listOf(true, false), frame.options.map { it.toggle }, "failure is a checkbox")
+        assertTrue(scene.model.forces.none { it.name == "controls" }, "the controls aren't a force any more")
     }
 
     @Test
@@ -50,18 +51,30 @@ class TowerCraneSceneTest {
         assertTrue(frame.lineColors.isEmpty())
         assertNull(frame.lineLegend)
         scene.handleControl(SceneControlMessage.SetSceneOption("colours", "plaid"), 0.0)
-        assertEquals("paint", scene.frame(0.0).options.single().selected)
+        assertEquals("paint", scene.frame(0.0).options.single { it.name == "colours" }.selected)
     }
 
     @Test
-    fun `the controls answer the viewer's field edits, and a load hangs on slings below the hook`() {
+    fun `the scene's controls set the crane's targets, show where it has got to, and a load hangs on slings`() {
         val scene = TowerCraneScene()
-        scene.handleControl(SceneControlMessage.SetScalarField("force", "controls", CraneControls.LOAD, 3.0), 0.0)
-        scene.handleControl(SceneControlMessage.SetScalarField("force", "controls", CraneControls.SLEW, 45.0), 0.0)
         val crane = scene.model
+        val before = scene.frame(0.0).controls
+        assertEquals(listOf("slew", "radius", "hook height", "load"), before.map { it.name })
+        assertEquals(listOf("°", "m", "m", "t"), before.map { it.unit })
+        assertEquals(crane.spec.minRadius to crane.spec.maxRadius, before[1].min to before[1].max)
+        scene.handleControl(SceneControlMessage.SetSceneControl("load", 3.0), 0.0)
+        scene.handleControl(SceneControlMessage.SetSceneControl("slew", 45.0), 0.0)
+        scene.handleControl(SceneControlMessage.SetSceneControl("radius", 500.0), 0.0)
         assertEquals(3.0, crane.loadTonnes)
         assertEquals(45.0, crane.slew.target)
+        assertEquals(crane.spec.maxRadius, crane.trolley.target, "clamped")
+        // Nonsense is refused.
+        assertTrue(!scene.setControl("load", -2.0) && !scene.setControl("slew", Double.NaN) && !scene.setControl("speed", 1.0))
+        assertEquals(3.0, crane.loadTonnes)
         val frame = scene.frame(0.0)
+        val slew = frame.controls.single { it.name == "slew" }
+        assertEquals(45.0 to 0.0, slew.value to slew.current, "set to 45, still at 0")
+        assertEquals(0.0, frame.controls.single { it.name == "load" }.current, "the load hasn't come on yet")
         assertTrue("load" in frame.meshes.map { it.surface.name })
         val slings = frame.connections.filter { it.first == crane.hookNode }
         assertEquals(4, slings.size)
@@ -75,7 +88,7 @@ class TowerCraneSceneTest {
     fun `the ballast and cab turn with the slew`() {
         val scene = TowerCraneScene()
         var t = run(scene, scene.model.readyAt)
-        scene.handleControl(SceneControlMessage.SetScalarField("force", "controls", CraneControls.SLEW, 90.0), t)
+        scene.handleControl(SceneControlMessage.SetSceneControl("slew", 90.0), t)
         t = run(scene, 32.0, t)
         val frame = scene.frame(t)
         fun centre(name: String): Vector3 {
@@ -90,5 +103,25 @@ class TowerCraneSceneTest {
         val cab = centre("cab")
         // The cab rides beside the turntable on the +z side; turned 90 degrees that side faces +x.
         assertTrue(cab.x > 1.0 && cab.z < 0.0, "the cab has swung round with it: $cab")
+    }
+
+    @Test
+    fun `the failure checkbox switches the steel's failure on, and torn members aren't drawn`() {
+        val scene = TowerCraneScene()
+        scene.handleControl(SceneControlMessage.SetSceneOption("failure", "on"), 0.0)
+        assertTrue(scene.model.failure)
+        assertEquals("on", scene.frame(0.0).options.single { it.name == "failure" }.selected)
+        // Twice the load chart brings it down; what tore is left out of the drawing.
+        var t = run(scene, scene.model.readyAt + 1.0)
+        scene.handleControl(SceneControlMessage.SetSceneControl("radius", scene.model.spec.maxLoadRadius), t)
+        scene.handleControl(SceneControlMessage.SetSceneControl("load", 2.5 * scene.model.spec.maxLoadTonnes), t)
+        t = run(scene, 25.0, t)
+        val crane = scene.model
+        val torn = (0 until crane.truss.size).filter { crane.truss.isTorn(it) }.map { crane.truss.members[it].let { m -> m.a to m.b } }
+        assertTrue(torn.isNotEmpty(), "something tore")
+        val frame = scene.frame(t)
+        assertTrue(torn.none { it in frame.connections || it in frame.connectionStyles || it in frame.lineColors })
+        scene.handleControl(SceneControlMessage.SetSceneOption("failure", "off"), t)
+        assertTrue(!crane.failure)
     }
 }

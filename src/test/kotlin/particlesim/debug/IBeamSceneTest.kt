@@ -40,6 +40,7 @@ class IBeamSceneTest {
         assertEquals(listOf("I-beam", "weight", "pier 1", "pier 2", "ground"), frame.meshes.map { it.surface.name })
         assertTrue(frame.meshes.none { it.pickable }, "the beam is drawn exaggerated, so picking it would miss")
         assertEquals(listOf("failure" to "off", "springs" to "hidden", "section" to "off"), frame.options.map { it.name to it.selected })
+        assertEquals(listOf(true, false, false), frame.options.map { it.toggle }, "failure is a checkbox")
         assertNull(frame.lineLegend)
         assertTrue(frame.connections.isEmpty())
     }

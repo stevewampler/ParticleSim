@@ -111,6 +111,18 @@ always clean up the JVM it spawned).
 ./gradlew test
 ```
 
+## Scene panel notes
+
+- Every section of the SCENE panel (scene, options, controls, display, time,
+  stats, camera bookmarks) collapses when its heading is clicked, and the
+  closed ones are remembered in the browser's localStorage. A fresh headless
+  launch starts with everything open; if a `toggle`/`click` reports
+  `NOT_FOUND` in a reused profile, its section may be closed.
+- Scene controls (e.g. `towerCrane`'s slew/radius/hook height/load) are
+  sliders plus number boxes under CONTROLS. Set one with `eval`, e.g.
+  `eval (()=>{const b=document.querySelector('#sceneControlsBody .controlRow[data-name="load"] input[type=number]'); b.value='8'; b.dispatchEvent(new Event('change')); return 'ok'})()`.
+- Checkbox options (e.g. `failure`) are `#sceneOptionsBody input[type=checkbox][data-name="failure"]`.
+
 ## Gotchas
 
 - **`toggle`/`click`/`eval` need their whole argument as one string, not

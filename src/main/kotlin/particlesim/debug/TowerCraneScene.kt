@@ -12,6 +12,7 @@ import particlesim.render.ColorRamp
 import particlesim.render.ConnectionStyle
 import particlesim.render.Light
 import particlesim.render.Material
+import particlesim.render.SceneControl
 import particlesim.render.SceneOption
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
@@ -23,17 +24,24 @@ import particlesim.surface.Triangle
  * §9.6 scene-library demo for [TowerCrane]: a hammerhead tower crane - 40 m mast, 55 m jib,
  * 8 t - working at real speed, its steel members coloured by the stress in them.
  *
- * **Controls** (FORCES: controls): `slewDegrees` (where to turn to; positive turns
- * counter-clockwise seen from above), `radius` (the trolley's distance from the mast, 3.5-54 m), `hookHeight` (above
- * the ground) and `loadTonnes` (what's on the hook). The crane drives toward them at its own
- * speeds - slewing at up to 0.8 rpm, the trolley and hoist at up to 1 m/s - speeding up and
+ * **Controls** (the viewer's "controls" section): `slew` (where to turn to, degrees; positive
+ * turns counter-clockwise seen from above), `radius` (the trolley's distance from the mast,
+ * 3.5-54 m), `hook height` (above the ground) and `load` (tonnes on the hook, coming on over a
+ * second or two). Each shows where the crane has actually got to beside it. The crane drives
+ * toward them at its own speeds - slewing at up to 0.8 rpm, the trolley and hoist at up to 1 m/s - speeding up and
  * slowing down smoothly, so the load lags, swings, and keeps swinging after a stop. The drives
  * answer once the crane has settled under its own weight, about 7 s after a (re)start.
  *
  * **Colours** (options: `colours`): `stress` colours each member by its axial stress -
  * compression blue, tension red, white unloaded, full colour at ±160 MPa - with a legend;
  * `paint` shows the crane's yellow. The load chart's limits are 8 t out to 16.5 m and 1.85 t at
- * the tip; past them the members just work harder (nothing fails).
+ * the tip.
+ *
+ * **Failure** (options: `failure`, a checkbox, off by default): off, the members just work
+ * harder past the load chart; on, they yield, buckle and tear (see [particlesim.physics.Truss]) -
+ * about 1.5 times the chart's load moment starts members going, and by 1.65-2 times the crane
+ * comes down, landing on the ground. Torn members disappear. What has failed stays failed until
+ * a restart.
  */
 class TowerCraneScene : DemoScene {
     private val crane = TowerCrane()
@@ -42,6 +50,7 @@ class TowerCraneScene : DemoScene {
     private val spec = crane.spec
 
     private var colours = COLOUR_MODES.first()
+    private var failure = false
 
     private val members: List<Pair<Int, Int>> = crane.truss.members.map { it.a to it.b }
 
@@ -177,13 +186,42 @@ class TowerCraneScene : DemoScene {
         if (applyEditableFieldMessage(message, crane.forces, crane.constraints, store, t, lights)) return
         when (message) {
             is SceneControlMessage.SetGroupEnabled -> crane.groups.setEnabled(message.name, message.enabled)
-            is SceneControlMessage.SetSceneOption -> if (message.name == COLOURS_OPTION && message.choice in COLOUR_MODES) colours = message.choice
+            is SceneControlMessage.SetSceneOption -> when (message.name) {
+                COLOURS_OPTION -> if (message.choice in COLOUR_MODES) colours = message.choice
+                FAILURE_OPTION -> if (message.choice in SceneOption.ON_OFF) { failure = message.choice == "on"; crane.failure = failure }
+            }
+            is SceneControlMessage.SetSceneControl -> setControl(message.name, message.value)
             else -> {}
         }
     }
 
-    /** Each member's colour for its axial stress, and the legend for it. */
-    internal fun stressColours(): Map<Pair<Int, Int>, Color> = members.indices.associate { i ->
+    /** Sets control [name] (see [controls]); false if there's no such control or [value] makes
+     * no sense for it (a negative load). Targets out of range are clamped by the crane. */
+    internal fun setControl(name: String, value: Double): Boolean {
+        if (!value.isFinite()) return false
+        when (name) {
+            SLEW -> crane.slew.target = value
+            RADIUS -> crane.trolley.target = value
+            HOOK_HEIGHT -> crane.hookHeightTarget = value
+            LOAD -> { if (value < 0.0) return false; crane.loadTonnes = value }
+            else -> return false
+        }
+        return true
+    }
+
+    /** The operator's controls: each target, with where the crane has got to. */
+    internal fun controls(): List<SceneControl> = listOf(
+        SceneControl(SLEW, "°", -360.0, 360.0, crane.slew.target, crane.slewDegrees),
+        SceneControl(RADIUS, "m", spec.minRadius, spec.maxRadius, crane.trolley.target, crane.radius),
+        SceneControl(HOOK_HEIGHT, "m", spec.minHookHeight, spec.turntableTop - TowerCrane.MIN_ROPE, crane.hookHeightTarget, store.position(crane.hookNode).y),
+        SceneControl(LOAD, "t", 0.0, MAX_LOAD_CONTROL, crane.loadTonnes, (store.mass(crane.hookNode) - spec.hookBlockMass) / 1000),
+    )
+
+    /** The members still standing: torn ones aren't drawn. */
+    private fun standing(): List<Int> = members.indices.filter { !crane.truss.isTorn(it) }
+
+    /** Each standing member's colour for its axial stress. */
+    internal fun stressColours(): Map<Pair<Int, Int>, Color> = standing().associate { i ->
         // Line colours travel as linear values; the ramp is display values, like its legend.
         members[i] to ColorRamp.signed(crane.truss.stress(store, i) / FULL_SCALE_STRESS).srgbToLinear()
     }
@@ -194,17 +232,20 @@ class TowerCraneScene : DemoScene {
         val loaded = crane.loadTonnes > 0.0
         val slings = if (loaded) listOf(2, 3, 6, 7).map { crane.hookNode to loadBlock.ids[it] } else emptyList()
         val byStress = colours == "stress"
+        val drawn = if (crane.truss.hasTorn) standing().map { members[it] } else members
         return SceneFrame(
             camera = CAMERA,
-            connections = members + slings,
-            connectionStyles = connectionStyles + (slings styledAs ConnectionStyles.cable("slings", Color(0.2, 0.2, 0.22), radius = 0.015)),
+            connections = drawn + slings,
+            connectionStyles = (if (crane.truss.hasTorn) connectionStyles.filterKeys { it in drawn.toSet() } else connectionStyles) +
+                (slings styledAs ConnectionStyles.cable("slings", Color(0.2, 0.2, 0.22), radius = 0.015)),
             lineColors = if (byStress) stressColours() else emptyMap(),
             lineLegend = if (byStress) ColorLegend("member stress", "MPa", -FULL_SCALE_STRESS / 1e6, FULL_SCALE_STRESS / 1e6, ColorRamp.SIGNED_STOPS) else null,
             meshes = listOf(ballastMesh, winchMesh, cabMesh, trolleyMesh, hookMesh) + (if (loaded) listOf(loadMesh) else emptyList()) + foundationMesh + groundMesh,
             visibleIds = emptySet(),
             lights = lights,
             skyColor = SKY,
-            options = listOf(SceneOption(COLOURS_OPTION, COLOUR_MODES, colours)),
+            options = listOf(SceneOption.toggle(FAILURE_OPTION, failure), SceneOption(COLOURS_OPTION, COLOUR_MODES, colours)),
+            controls = controls(),
             registry = SceneRegistry.build(forces = crane.forces, constraints = crane.constraints, groups = crane.groups, lights = lights),
         )
     }
@@ -213,6 +254,13 @@ class TowerCraneScene : DemoScene {
         val CRANE_YELLOW = Color(0.95, 0.72, 0.1)
         val SKY = Color(0.6, 0.74, 0.9)
         const val COLOURS_OPTION = "colours"
+        const val FAILURE_OPTION = "failure"
+        const val SLEW = "slew"
+        const val RADIUS = "radius"
+        const val HOOK_HEIGHT = "hook height"
+        const val LOAD = "load"
+        /** The load slider's top: 2.5 times the maximum load, room to overload it. */
+        const val MAX_LOAD_CONTROL = 20.0
         val COLOUR_MODES = listOf("stress", "paint")
         /** Full colour on the stress ramp, Pa. */
         const val FULL_SCALE_STRESS = 160e6

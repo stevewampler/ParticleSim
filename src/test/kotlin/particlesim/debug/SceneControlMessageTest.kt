@@ -203,4 +203,16 @@ class SceneControlMessageTest {
         assertNull(SceneControlMessage.parse("""{"type": "set_scene_option", "name": "failure"}"""))
         assertNull(SceneControlMessage.parse("""{"type": "set_scene_option", "choice": "on"}"""))
     }
+
+    @Test
+    fun `parses set_scene_control with its name and a finite number, rejecting anything else`() {
+        assertEquals(
+            SceneControlMessage.SetSceneControl("slew", 45.5),
+            SceneControlMessage.parse("""{"type": "set_scene_control", "name": "slew", "value": 45.5}"""),
+        )
+        assertEquals(SceneControlMessage.SetSceneControl("load", 8.0), SceneControlMessage.parse("""{"type": "set_scene_control", "name": "load", "value": 8}"""))
+        assertNull(SceneControlMessage.parse("""{"type": "set_scene_control", "name": "slew"}"""))
+        assertNull(SceneControlMessage.parse("""{"type": "set_scene_control", "value": 1.0}"""))
+        assertNull(SceneControlMessage.parse("""{"type": "set_scene_control", "name": "slew", "value": "fast"}"""))
+    }
 }

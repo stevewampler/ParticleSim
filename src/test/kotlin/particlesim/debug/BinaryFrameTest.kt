@@ -15,6 +15,7 @@ import particlesim.render.CameraPose
 import particlesim.render.Color
 import particlesim.render.ColorLegend
 import particlesim.render.ScalarField
+import particlesim.render.SceneControl
 import particlesim.render.SceneOption
 import particlesim.render.ConnectionStyle
 import particlesim.render.ConnectionShape
@@ -269,20 +270,24 @@ class BinaryFrameTest {
         // A field with no value for c: it comes back without one.
         val bending = ScalarField("bending stress", "MPa", -250.0, 250.0, listOf(Color(0.0, 0.0, 1.0), Color(1.0, 1.0, 1.0), Color(1.0, 0.0, 0.0)), mapOf(a to -5.0, b to 7.5))
         val mesh = SurfaceRenderer(Surface(listOf(Triangle(a, b, c)), name = "beam"), scalarFields = listOf(vonMises, bending))
-        val options = listOf(SceneOption("failure", listOf("off", "on"), "on"), SceneOption("springs", listOf("hidden", "stretch", "force"), "hidden"))
+        val options = listOf(SceneOption.toggle("failure", true), SceneOption("springs", listOf("hidden", "stretch", "force"), "hidden"))
+        val controls = listOf(SceneControl("slew", "°", -360.0, 360.0, 45.0, 12.5), SceneControl("load", "t", 0.0, 20.0, 8.0))
         val lineLegend = ColorLegend("spring stretch", "%", -0.125, 0.125, listOf(Color(0.0, 0.0, 1.0), Color(1.0, 0.0, 0.0)))
         val decoded = BinaryFrame.decode(
             BinaryFrame.encode(
                 t = 0.0, step = 0L, store = store, ids = listOf(a, b, c), connections = emptyList(), meshes = listOf(mesh),
-                options = options, lineLegend = lineLegend,
+                options = options, lineLegend = lineLegend, controls = controls,
             ),
         )
         assertEquals(listOf(vonMises, bending), decoded.meshes.single().scalarFields)
         assertEquals(options, decoded.options)
+        assertEquals(listOf(true, false), decoded.options.map { it.toggle })
+        assertEquals(controls, decoded.controls, "with and without a current value")
         assertEquals(lineLegend, decoded.lineLegend)
         // None of it declared: empty, empty, null.
         val plain = BinaryFrame.decode(BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(a), connections = emptyList()))
         assertEquals(emptyList(), plain.options)
+        assertEquals(emptyList(), plain.controls)
         assertNull(plain.lineLegend)
     }
 

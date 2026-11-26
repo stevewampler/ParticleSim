@@ -1,13 +1,15 @@
 package particlesim.examples
 
+import particlesim.collision.CollisionSystem
+import particlesim.collision.ParticleColliderRule
+import particlesim.collision.PlaneCollider
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
+import particlesim.core.VectorExpr
 import particlesim.physics.ChunkAccumulator
 import particlesim.physics.Constraint
-import particlesim.physics.EditableFields
-import particlesim.physics.FieldValue
 import particlesim.physics.FixedPosition
 import particlesim.physics.Force
 import particlesim.physics.Integrator
@@ -72,18 +74,24 @@ data class TowerCraneSpec(
     val trolleyMass: Double = 600.0,
     val hookBlockMass: Double = 400.0,
     // Member cross-section areas, m^2.
-    val mastChordArea: Double = 45e-4,
-    val mastWebArea: Double = 15e-4,
+    val mastChordArea: Double = 60e-4,
+    val mastWebArea: Double = 25e-4,
     val turntableArea: Double = 60e-4,
     val jibTopChordArea: Double = 40e-4,
-    val jibBottomChordArea: Double = 20e-4,
-    val jibWebArea: Double = 8e-4,
+    val jibBottomChordArea: Double = 30e-4,
+    val jibWebArea: Double = 14e-4,
     val counterJibChordArea: Double = 60e-4,
     val counterJibWebArea: Double = 20e-4,
-    val towerHeadLegArea: Double = 40e-4,
+    val towerHeadLegArea: Double = 120e-4,
     val tieArea: Double = 40e-4,
     /** Four falls of 16 mm rope's steel. */
     val ropeArea: Double = 4 * 1.2e-4,
+    // Failure (when it's on): S355 crane steel; members buckle by their slenderness, each taken
+    // as a round tube of its area (diameter 20 times its wall); four falls of 16 mm rope at
+    // about 160 kN minimum breaking load each.
+    val yieldStress: Double = 355e6,
+    val ruptureStrain: Double = 0.15,
+    val ropeBreakingForce: Double = 4 * 160e3,
     // Drives: slewing at 0.8 rpm, the trolley and hoist at 60 m/min.
     val slewSpeedDegrees: Double = 4.8,
     val slewAccelerationDegrees: Double = 0.5,
@@ -144,45 +152,6 @@ class Drive(
         const val PLANNED_DECELERATION = 0.9
         const val SNAP = 1e-6
         const val SNAP_SPEED = 1e-2
-    }
-}
-
-/**
- * The crane operator's targets, live-editable (FORCES: controls): where to slew to, how far out
- * the trolley should be, how high the hook, and the load on it. The crane drives toward them at
- * its own speeds ([Drive]); nothing here is a force.
- */
-class CraneControls(
-    private val crane: TowerCrane,
-    override val name: String? = "controls",
-) : Force, EditableFields {
-    override fun accumulate(store: ParticleStore, groups: Groups, t: Double, chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int) {}
-
-    override fun editableFields(): Map<String, FieldValue> = mapOf(
-        SLEW to FieldValue.Scalar(crane.slew.target),
-        RADIUS to FieldValue.Scalar(crane.trolley.target),
-        HOOK_HEIGHT to FieldValue.Scalar(crane.hookHeightTarget),
-        LOAD to FieldValue.Scalar(crane.loadTonnes),
-    )
-
-    override fun setField(field: String, value: FieldValue): Boolean {
-        if (value !is FieldValue.Scalar || !value.value.isFinite()) return false
-        val v = value.value
-        when (field) {
-            SLEW -> crane.slew.target = v
-            RADIUS -> crane.trolley.target = v
-            HOOK_HEIGHT -> crane.hookHeightTarget = v
-            LOAD -> { if (v < 0.0) return false; crane.loadTonnes = v }
-            else -> return false
-        }
-        return true
-    }
-
-    companion object {
-        const val SLEW = "slewDegrees"
-        const val RADIUS = "radius"
-        const val HOOK_HEIGHT = "hookHeight"
-        const val LOAD = "loadTonnes"
     }
 }
 
@@ -295,8 +264,9 @@ class TowerCrane(
     val groups = Groups()
     private val h = spec.halfWidth
 
-    private fun node(p: Vector3, mass: Double, group: String): Int {
-        val id = store.create(position = p, mass = ScalarExpr.of(mass))
+    /** A node; [radius] is for touching the ground once something has failed (null: never). */
+    private fun node(p: Vector3, mass: Double, group: String, radius: Double? = NODE_RADIUS): Int {
+        val id = store.create(position = p, mass = ScalarExpr.of(mass), radius = radius?.let { ScalarExpr.of(it) })
         groups.add(group, id)
         return id
     }
@@ -315,7 +285,8 @@ class TowerCrane(
     val mast: List<List<Int>> = (0..spec.mastPanels).map { level ->
         val y = spec.mastHeight * level / spec.mastPanels
         val mass = if (level == 0) 1.0 else spec.mastMassPerMetre * spec.mastHeight / (spec.mastPanels * 4)
-        (0 until 4).map { c -> val (x, z) = corner(c); node(Vector3(x, y, z), mass, MAST_GROUP) }
+        // The base stands on the ground: no radius, or the ground would push it every step.
+        (0 until 4).map { c -> val (x, z) = corner(c); node(Vector3(x, y, z), mass, MAST_GROUP, if (level == 0) null else NODE_RADIUS) }
     }
     val mastTop: List<Int> get() = mast.last()
 
@@ -362,8 +333,9 @@ class TowerCrane(
     val trolleyNode: Int = node(Vector3(radius.coerceIn(spec.minRadius, spec.maxRadius), spec.turntableTop, 0.0), spec.trolleyMass, TROLLEY_GROUP)
     var loadTonnes: Double = loadTonnes
         set(value) { require(value >= 0.0 && value.isFinite()); field = value }
+    /** The hook's mass with [loadTonnes] on it - which it reaches gradually (see [step]). */
     private fun hookMass() = spec.hookBlockMass + 1000 * loadTonnes
-    val hookNode: Int = node(Vector3(store.position(trolleyNode).x, hookHeight, 0.0), hookMass(), HOOK_GROUP)
+    val hookNode: Int = node(Vector3(store.position(trolleyNode).x, hookHeight, 0.0), hookMass(), HOOK_GROUP, HOOK_RADIUS)
 
     // ---- Members.
 
@@ -373,7 +345,17 @@ class TowerCrane(
     private val memberList = ArrayList<Truss.Member>()
     private val partList = ArrayList<Part>()
     private fun member(a: Int, b: Int, area: Double, part: Part, tensionOnly: Boolean = false, modulus: Double = STEEL_YOUNGS_MODULUS, rest: Double? = null, damping: Double? = null): Int {
-        memberList += Truss.Member(a, b, area, modulus, tensionOnly, rest, damping)
+        val length = (store.position(b) - store.position(a)).length()
+        memberList += if (part == Part.ROPE) {
+            Truss.Member(a, b, area, modulus, tensionOnly, rest, damping, breakingForce = spec.ropeBreakingForce)
+        } else {
+            Truss.Member(
+                a, b, area, modulus, tensionOnly, rest, damping,
+                yieldStress = spec.yieldStress,
+                bucklingStress = if (tensionOnly) null else Truss.rankineBucklingStress(spec.yieldStress, modulus, length, Truss.tubeRadiusOfGyration(area)),
+                ruptureStrain = spec.ruptureStrain,
+            )
+        }
         partList += part
         return memberList.size - 1
     }
@@ -467,7 +449,7 @@ class TowerCrane(
     /** The unstretched rope that hangs the hook's weight - at gravity [t]'s ramp - at the
      * hoist's length, so the hook neither drops onto the rope nor is flung up by it. */
     private fun unstretched(t: Double): Double =
-        hoist.position / (1 + hookMass() * STANDARD_GRAVITY * gravity.factor(t) / ropeAxialStiffness)
+        hoist.position / (1 + store.mass(hookNode) * STANDARD_GRAVITY * gravity.factor(t) / ropeAxialStiffness)
 
     /** The slewing ring: each turntable lower corner held at its slewed place on the mast top. */
     val slewingRing: List<WeightedAttachment> = turntableLower.map { id ->
@@ -483,9 +465,19 @@ class TowerCrane(
 
     val structuralDamping = SlewFrameDamping(SLEWING_GROUP, MAST_GROUP, groups, { slewRate }, SETTLING_DAMPING)
     val gravity = RampedGravity(listOf(MAST_GROUP, SLEWING_GROUP, TROLLEY_GROUP, HOOK_GROUP), groups, rampSeconds)
-    val controls = CraneControls(this)
+    val forces: List<Force> = listOf(truss, gravity, structuralDamping, trolleyCarriage) + slewingRing
 
-    val forces: List<Force> = listOf(truss, controls, gravity, structuralDamping, trolleyCarriage) + slewingRing
+    /** Whether the steel can fail (see [Truss]): off, it stays elastic however it's loaded. */
+    var failure: Boolean
+        get() = truss.failure
+        set(value) { truss.failure = value }
+
+    /** The ground, for whatever falls once something has failed. */
+    val collisions = CollisionSystem(
+        listOf(MAST_GROUP, SLEWING_GROUP, TROLLEY_GROUP, HOOK_GROUP).map { group ->
+            ParticleColliderRule(group, PlaneCollider(VectorExpr.of(Vector3.ZERO), Vector3(0.0, 1.0, 0.0), name = "ground"), restitution = 0.0, staticFriction = 0.6, kineticFriction = 0.5)
+        },
+    )
     val constraints: List<Constraint> = run {
         mast[0].forEach { groups.add(FOUNDATION_GROUP, it) }
         listOf(FixedPosition.atCurrentPositions(FOUNDATION_GROUP, store, groups, name = "foundation"))
@@ -533,10 +525,18 @@ class TowerCrane(
             hoist.target = trolleyHeight - hookHeightTarget
             hoist.advance(dt)
         }
-        if (store.mass(hookNode) != hookMass()) store.setMass(hookNode, ScalarExpr.of(hookMass()), t)
+        // A load comes on (or off) the hook over a second or two, the rope taking it up, rather
+        // than all at once - which would drop the hook onto the rope at twice the load.
+        val mass = store.mass(hookNode)
+        val wanted = hookMass()
+        if (mass != wanted) {
+            val stepMass = LOAD_RAMP_RATE * dt
+            store.setMass(hookNode, ScalarExpr.of(if (abs(wanted - mass) <= stepMass) wanted else mass + sign(wanted - mass) * stepMass), t)
+        }
         updateCouplings(t)
         structuralDamping.coefficient = dampingAt(t)
         integrator.step(store, groups, forces, constraints, t, dt)
+        collisions.resolve(store, groups, t, dt)
     }
 
     /** When the crane has settled under its own weight and the drives start answering. */
@@ -565,6 +565,10 @@ class TowerCrane(
         const val RING_STIFFNESS = 5e8
         const val TROLLEY_STIFFNESS = 1e8
         const val MIN_ROPE = 1.0
+        const val NODE_RADIUS = 0.1
+        const val HOOK_RADIUS = 0.3
+        /** kg/s: how fast a load comes onto or off the hook - 8 t in 2 s. */
+        const val LOAD_RAMP_RATE = 4000.0
         /** s: wire rope's internal friction - about 10% of critical for a loaded hook bouncing
          * on 20 m of rope. */
         const val ROPE_DAMPING = 0.012

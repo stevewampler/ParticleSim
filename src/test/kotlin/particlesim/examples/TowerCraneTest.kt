@@ -1,7 +1,6 @@
 package particlesim.examples
 
 import particlesim.core.Vector3
-import particlesim.physics.FieldValue
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -79,7 +78,8 @@ class TowerCraneTest {
                 if (i in crane.mastBaseChords) chordMoment += at.x * pull.y - at.y * pull.x
             }
             assertEquals(w, lift, 0.01 * w, "load $load t: holds up the weight")
-            assertEquals(m, moment, 0.01 * abs(m) + 1e3, "load $load t: resists the overturning moment")
+            // 2%: the hook still swings a little from settling, adding a sideways pull of its own.
+            assertEquals(m, moment, 0.02 * abs(m) + 1e3, "load $load t: resists the overturning moment")
             assertTrue(chordMoment / moment in 0.9..1.1, "load $load t: the chords carry the moment (${chordMoment / moment})")
             // Balanced like a real crane: unloaded the back chords (x < 0) are the more compressed,
             // loaded the front.
@@ -126,7 +126,7 @@ class TowerCraneTest {
     fun `slewing turns the whole top, and a stopped slew leaves the load swinging`() {
         val crane = TowerCrane(radius = 30.0, hookHeight = 15.0, loadTonnes = 3.0)
         var t = settled(crane)
-        crane.controls.setField(CraneControls.SLEW, FieldValue.Scalar(60.0))
+        crane.slew.target = 60.0
         var peakRate = 0.0
         t = runUntil(crane, t, t + 25.0) { peakRate = maxOf(peakRate, abs(crane.slew.velocity)) }
         assertEquals(60.0, crane.slewDegrees, 1e-9, "arrived")
@@ -156,9 +156,9 @@ class TowerCraneTest {
         val crane = TowerCrane(radius = 15.0, hookHeight = 20.0)
         var t = settled(crane)
         val unloadedTie = crane.truss.axialForce(crane.store, crane.jibTie)
-        crane.controls.setField(CraneControls.RADIUS, FieldValue.Scalar(25.0))
-        crane.controls.setField(CraneControls.HOOK_HEIGHT, FieldValue.Scalar(10.0))
-        crane.controls.setField(CraneControls.LOAD, FieldValue.Scalar(4.0))
+        crane.trolley.target = 25.0
+        crane.hookHeightTarget = 10.0
+        crane.loadTonnes = 4.0
         t = runUntil(crane, t, t + 40.0)
         assertEquals(25.0, crane.radius, 1e-9)
         // Riding the jib at 25 m from the mast's axis (the loaded mast leans the whole jib forward).
@@ -170,19 +170,14 @@ class TowerCraneTest {
     }
 
     @Test
-    fun `the controls are live-editable and refuse nonsense, and the targets stay in range`() {
+    fun `the targets stay in range, and a load can't be negative`() {
         val crane = TowerCrane()
-        val controls = crane.controls
-        assertEquals(setOf(CraneControls.SLEW, CraneControls.RADIUS, CraneControls.HOOK_HEIGHT, CraneControls.LOAD), controls.editableFields().keys)
-        assertTrue(controls.setField(CraneControls.RADIUS, FieldValue.Scalar(500.0)))
+        crane.trolley.target = 500.0
         assertEquals(crane.spec.maxRadius, crane.trolley.target)
-        assertTrue(controls.setField(CraneControls.HOOK_HEIGHT, FieldValue.Scalar(-5.0)))
+        crane.hookHeightTarget = -5.0
         assertEquals(crane.spec.minHookHeight, crane.hookHeightTarget)
-        assertTrue(!controls.setField(CraneControls.LOAD, FieldValue.Scalar(-1.0)))
-        assertTrue(!controls.setField(CraneControls.SLEW, FieldValue.Scalar(Double.NaN)))
-        assertTrue(!controls.setField("speed", FieldValue.Scalar(1.0)))
-        assertTrue(controls.setField(CraneControls.SLEW, FieldValue.Scalar(-90.0)))
-        assertEquals(FieldValue.Scalar(-90.0), controls.editableFields()[CraneControls.SLEW])
+        assertTrue(runCatching { crane.loadTonnes = -1.0 }.isFailure)
+        assertTrue(runCatching { crane.loadTonnes = Double.NaN }.isFailure)
     }
 
     @Test
@@ -275,5 +270,59 @@ class TowerCraneTest {
         damping.accumulate(store, groups, 0.0, off, 0, 1)
         assertEquals(Vector3.ZERO, off.at(store.slotOf(mast)), "a disabled group isn't damped")
         assertEquals(sway, off.at(store.slotOf(swaying)))
+    }
+
+    private fun anythingFailed(crane: TowerCrane) =
+        (0 until crane.truss.size).any { crane.truss.hasBuckled(it) || crane.truss.yieldStrain(it) > 0.0 || crane.truss.isTorn(it) }
+
+    /** Lifts [tonnes] at [radius] - the load coming on from nothing once the crane's ready, the
+     * way a lift does - and runs [seconds] on. Returns how far the jib's tip dropped. */
+    private fun lift(crane: TowerCrane, radius: Double, tonnes: Double, seconds: Double): Double {
+        var t = runUntil(crane, 0.0, crane.readyAt + 1.0)
+        val tip = crane.store.position(crane.jibTop.last()!!).y
+        crane.loadTonnes = tonnes
+        runUntil(crane, t, t + seconds)
+        return tip - crane.store.position(crane.jibTop.last()!!).y
+    }
+
+    @Test
+    fun `with failure on, the crane holds its load chart's limits as the load comes on`() {
+        val spec = TowerCraneSpec()
+        for ((radius, tonnes) in listOf(spec.maxLoadRadius to spec.maxLoadTonnes, spec.maxRadius to spec.tipLoadTonnes)) {
+            val crane = TowerCrane(spec, radius = radius)
+            crane.failure = true
+            val drop = lift(crane, radius, tonnes, 15.0)
+            assertTrue(!anythingFailed(crane), "$tonnes t at $radius m: nothing yields, buckles or tears")
+            assertTrue(drop < 3.0, "$tonnes t at $radius m: just bends, $drop m")
+        }
+    }
+
+    @Test
+    fun `with failure on, twice the load chart brings it down, and with failure off it only bends`() {
+        val spec = TowerCraneSpec()
+        val tonnes = 2 * spec.maxLoadTonnes
+        val failing = TowerCrane(spec, radius = spec.maxLoadRadius).apply { failure = true }
+        val drop = lift(failing, spec.maxLoadRadius, tonnes, 20.0)
+        assertTrue(anythingFailed(failing))
+        assertTrue(drop > 10.0, "collapsed: the tip fell $drop m")
+        // It lands on the ground rather than falling through it.
+        assertTrue(failing.store.liveIds().all { failing.store.position(it).y > -0.5 })
+
+        val elastic = TowerCrane(spec, radius = spec.maxLoadRadius)
+        val bent = lift(elastic, spec.maxLoadRadius, tonnes, 20.0)
+        assertTrue(!anythingFailed(elastic))
+        assertTrue(bent < 3.0, "only bends: $bent m")
+    }
+
+    @Test
+    fun `a load comes onto the hook over a couple of seconds, not all at once`() {
+        val crane = TowerCrane(radius = 15.0)
+        var t = runUntil(crane, 0.0, crane.readyAt)
+        crane.loadTonnes = 8.0
+        t = runUntil(crane, t, t + 1.0)
+        val halfway = crane.store.mass(crane.hookNode)
+        assertEquals(crane.spec.hookBlockMass + TowerCrane.LOAD_RAMP_RATE * 1.0, halfway, 50.0)
+        runUntil(crane, t, t + 2.0)
+        assertEquals(crane.spec.hookBlockMass + 8000.0, crane.store.mass(crane.hookNode))
     }
 }

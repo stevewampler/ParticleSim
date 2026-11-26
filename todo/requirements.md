@@ -394,6 +394,14 @@ run. It does not reform.
   moment than a non-sub-stepped run of the same scene would, since the
   physics is genuinely being evaluated at finer granularity — sub-stepping
   isn't a pure stability knob with zero behavioral consequence.
+- **Truss member failure** (§5.1's truss, switchable per scene): a member
+  yields in tension at its yield stress (plastic flow, the stretch kept),
+  buckles in compression at a Rankine stress from its slenderness and then
+  loses strength as it folds on (to 30% within 1% more shortening - what
+  lets a collapse spread), and tears past a rupture strain; wire rope snaps
+  at its breaking force. Torn members carry nothing and aren't drawn. Turning
+  failure off stops new failure without undoing what has happened. The
+  `towerCrane` scene's checkbox; the elastic lattice (§7) has its own.
 - `[stretch]` Extending breakability to the custom forces in §5.3, or to
   constraints (§6) themselves (e.g. an anchor that gives way under enough
   load), rather than just spring/damper connectors.
@@ -1122,10 +1130,17 @@ external image onto a mesh's surface.
   `iBeam` scene, whose surface shows stress from an elastic lattice solid
   (§5.1, §7) that can yield and tear (§5.4).
 - **Scene options** (§9.6): a scene may offer named choices
-  (`SceneOption`), which the viewer shows as menus in an "options" section.
-  Picking one sends `set_scene_option` to the scene (e.g. `iBeam`'s
-  "failure: off/on", "springs: hidden/stretch/force", and "section", a
-  cross-section cut whose cap is coloured by the stress inside the steel).
+  (`SceneOption`), which the viewer shows as menus in an "options" section -
+  or, for an on/off choice declared as a toggle, a checkbox. Picking one
+  sends `set_scene_option` to the scene (e.g. `iBeam`'s "failure" checkbox,
+  "springs: hidden/stretch/force", and "section", a cross-section cut whose
+  cap is coloured by the stress inside the steel).
+- **Scene controls** (§9.6): a scene may offer numbers to set
+  (`SceneControl`: name, unit, range, value, and optionally where the thing
+  it drives has actually got to), shown in a "controls" section as a slider
+  and a number box, with the current value beside them. Setting one sends
+  `set_scene_control`; it isn't an edit, so "pause on edit" doesn't apply
+  (e.g. `towerCrane`'s slew, radius, hook height and load).
 - N-body gravity and custom forces (§5.3) are lower priority / `[stretch]`
   — N-body isn't localized to a renderable pair (force exists between
   every pair), and custom forces don't have a defined shape yet.
@@ -1181,6 +1196,11 @@ readout to debug a scene without a separate tool.
 - **Scene picker**: a persistent control listing every scene in the
   library (§9.6) by name; switching is available at any time the viewer
   is connected, not just at startup.
+- **The scene panel** (scene, options, controls, display, time, stats,
+  camera bookmarks) scrolls when it's taller than the window, and each of
+  its sections opens and closes by clicking its heading, like Lightroom's
+  panels (alt-click opens only that one). Which are closed is remembered
+  across reloads; all start open.
 - **Global toggles**: scene aids not tied to any particular object —
   the ground grid and axes (§10) — can be switched on/off independent of
   everything else. Both start hidden in every scene; once switched on,

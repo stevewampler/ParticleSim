@@ -105,10 +105,39 @@ data class ScalarField(
     val values: Map<Int, Double>,
 )
 
-/** A scene-level choice the viewer offers as a menu (§9.6), e.g. "failure: off / on" - the scene
- * applies whatever's picked ([particlesim.debug.SceneControlMessage.SetSceneOption]). */
-data class SceneOption(val name: String, val choices: List<String>, val selected: String) {
-    init { require(selected in choices) { "'$selected' isn't one of $choices" } }
+/** A scene-level choice the viewer offers as a menu (§9.6), e.g. "springs: hidden / stretch /
+ * force" - the scene applies whatever's picked ([particlesim.debug.SceneControlMessage.SetSceneOption]).
+ * A [toggle] is offered as a checkbox instead; its choices are always "off" and "on" ([toggle]'s
+ * factory). */
+data class SceneOption(val name: String, val choices: List<String>, val selected: String, val toggle: Boolean = false) {
+    init {
+        require(selected in choices) { "'$selected' isn't one of $choices" }
+        require(!toggle || choices == ON_OFF) { "a toggle's choices are $ON_OFF" }
+    }
+
+    companion object {
+        val ON_OFF = listOf("off", "on")
+
+        /** A checkbox, sent as "on" or "off". */
+        fun toggle(name: String, on: Boolean) = SceneOption(name, ON_OFF, if (on) "on" else "off", toggle = true)
+    }
+}
+
+/**
+ * A number the scene lets the person set (§9.6), shown in the viewer's "controls" section as a
+ * slider from [min] to [max] beside a box for typing it - e.g. where a crane should slew to.
+ * [value] is what it's set to; [current], if given, is where the thing it drives has actually got
+ * to, shown alongside. Setting it sends [particlesim.debug.SceneControlMessage.SetSceneControl].
+ */
+data class SceneControl(
+    val name: String,
+    val unit: String,
+    val min: Double,
+    val max: Double,
+    val value: Double,
+    val current: Double? = null,
+) {
+    init { require(min < max) { "min must be below max" } }
 }
 
 /** The colour bar explaining a mesh's [SurfaceRenderer.vertexColors]: [stops] spread evenly

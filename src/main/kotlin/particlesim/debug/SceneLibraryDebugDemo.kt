@@ -123,6 +123,7 @@ fun main(args: Array<String>) {
                 restPositions = frame.restPositions,
                 deformationScale = frame.deformationScale,
                 lineLegend = frame.lineLegend,
+                controls = frame.controls,
             )
         } catch (e: Exception) {
             System.err.println("scene loop error on '${library.activeName}': $e")

@@ -23,14 +23,32 @@
     display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
   }
   #controlPanel {
-    flex: 0 0 auto;
+    /* Shrinks to the space left in #leftColumn and scrolls, rather than running off the
+       bottom of the window. */
+    flex: 0 1 auto; min-height: 0; overflow-y: auto;
     font: 12px/1.5 monospace; color: #ddd; background: rgba(0,0,0,0.55);
     padding: 8px 10px; border-radius: 4px; min-width: 170px;
   }
   #controlPanel h4 {
     margin: 0 0 4px; font-size: 10px; color: #9cf; font-weight: normal;
     text-transform: uppercase; letter-spacing: 0.05em;
+    /* Click to open or close the section (alt-click: open only this one), like Lightroom's
+       panels. */
+    cursor: pointer; user-select: none;
   }
+  #controlPanel h4::before { content: "▾ "; color: #6a8; }
+  #controlPanel section.collapsed > h4::before { content: "▸ "; }
+  #controlPanel section.collapsed > :not(h4) { display: none !important; }
+  #controlPanel section.collapsed { margin-bottom: 4px; }
+  #sceneControlsBody .controlRow { margin-bottom: 4px; }
+  #sceneControlsBody .controlHead { display: flex; justify-content: space-between; gap: 6px; }
+  #sceneControlsBody .controlNow { color: #9f9; font-size: 10px; white-space: nowrap; }
+  #sceneControlsBody .controlInputs { display: flex; align-items: center; gap: 4px; }
+  #sceneControlsBody input[type=range] { flex: 1; min-width: 90px; margin: 0; }
+  #sceneControlsBody input[type=number] {
+    width: 58px; font: 11px monospace; color: #ddd; background: #222; border: 1px solid #555; border-radius: 3px;
+  }
+  #sceneControlsBody .controlUnit { color: #aaa; font-size: 10px; min-width: 10px; }
   #controlPanel section { margin-bottom: 10px; }
   #controlPanel section:last-child { margin-bottom: 0; }
   #statsPanel { white-space: pre; color: #9f9; }
@@ -207,6 +225,10 @@
     <section id="sceneOptions" style="display:none;">
       <h4>options</h4>
       <div id="sceneOptionsBody"></div>
+    </section>
+    <section id="sceneControls" style="display:none;">
+      <h4>controls</h4>
+      <div id="sceneControlsBody"></div>
     </section>
     <section>
       <h4>display</h4>
@@ -441,19 +463,22 @@ function updateColorLegends(frame) {
   colorLegendEl.style.display = mesh || line ? "block" : "none";
 }
 
-// §9.6 scene options: one menu per option the scene declares; picking one tells the scene.
+// §9.6 scene options: one menu - or, for a toggle, a checkbox - per option the scene declares;
+// picking one tells the scene ("on"/"off" for a checkbox).
 const sceneOptionsEl = document.getElementById("sceneOptions");
 const sceneOptionsBodyEl = document.getElementById("sceneOptionsBody");
 let shownOptionsKey = null;
 function updateSceneOptions(options) {
   const key = JSON.stringify(options);
   if (key === shownOptionsKey) return;
-  // Don't rebuild a menu out from under someone choosing from it.
-  if (sceneOptionsBodyEl.contains(document.activeElement) && shownOptionsKey !== null &&
-      JSON.stringify(JSON.parse(shownOptionsKey).map((o) => [o.name, o.choices])) === JSON.stringify(options.map((o) => [o.name, o.choices]))) {
+  // Don't rebuild a menu out from under someone choosing from it: when only the selections
+  // changed, update the inputs nobody's using in place.
+  if (shownOptionsKey !== null &&
+      JSON.stringify(JSON.parse(shownOptionsKey).map((o) => [o.name, o.choices, o.toggle])) === JSON.stringify(options.map((o) => [o.name, o.choices, o.toggle]))) {
     for (const o of options) {
-      const select = sceneOptionsBodyEl.querySelector(`select[data-name="${CSS.escape(o.name)}"]`);
-      if (select && select !== document.activeElement) select.value = o.selected;
+      const input = sceneOptionsBodyEl.querySelector(`[data-name="${CSS.escape(o.name)}"]`);
+      if (!input || input === document.activeElement) continue;
+      if (o.toggle) input.checked = o.selected === "on"; else input.value = o.selected;
     }
     shownOptionsKey = key;
     return;
@@ -463,6 +488,18 @@ function updateSceneOptions(options) {
   sceneOptionsBodyEl.innerHTML = "";
   for (const o of options) {
     const label = document.createElement("label");
+    if (o.toggle) {
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.dataset.name = o.name;
+      box.checked = o.selected === "on";
+      box.addEventListener("change", () => sendEdit({ type: "set_scene_option", name: o.name, choice: box.checked ? "on" : "off" }));
+      label.style.justifyContent = "flex-start";
+      label.appendChild(box);
+      label.appendChild(document.createTextNode(" " + o.name));
+      sceneOptionsBodyEl.appendChild(label);
+      continue;
+    }
     label.textContent = o.name;
     const select = document.createElement("select");
     select.dataset.name = o.name;
@@ -475,6 +512,89 @@ function updateSceneOptions(options) {
     select.addEventListener("change", () => sendEdit({ type: "set_scene_option", name: o.name, choice: select.value }));
     label.appendChild(select);
     sceneOptionsBodyEl.appendChild(label);
+  }
+}
+
+// §9.6 scene controls: a slider and a number box per control, with where the thing it drives has
+// actually got to. Built only when the set of controls (names, units, ranges) changes; otherwise
+// only the values of inputs nobody is touching are refreshed, so a drag or a half-typed number
+// isn't overwritten by the next frame. Sent with plain send(): operating a scene isn't editing
+// it, so "pause on edit" doesn't apply.
+const sceneControlsEl = document.getElementById("sceneControls");
+const sceneControlsBodyEl = document.getElementById("sceneControlsBody");
+let shownControlsShape = null;
+let controlPointerDown = false;
+document.addEventListener("pointerup", () => { controlPointerDown = false; });
+function formatControl(v) { return Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2); }
+function updateSceneControls(controls) {
+  const shape = JSON.stringify(controls.map((c) => [c.name, c.unit, c.min, c.max]));
+  if (shape !== shownControlsShape) {
+    shownControlsShape = shape;
+    sceneControlsEl.style.display = controls.length > 0 ? "block" : "none";
+    sceneControlsBodyEl.innerHTML = "";
+    for (const c of controls) {
+      const row = document.createElement("div");
+      row.className = "controlRow";
+      row.dataset.name = c.name;
+      const head = document.createElement("div");
+      head.className = "controlHead";
+      const label = document.createElement("span");
+      label.textContent = c.name;
+      const now = document.createElement("span");
+      now.className = "controlNow";
+      head.append(label, now);
+      const inputs = document.createElement("div");
+      inputs.className = "controlInputs";
+      const slider = document.createElement("input");
+      slider.type = "range"; slider.min = c.min; slider.max = c.max; slider.step = (c.max - c.min) / 1000;
+      const box = document.createElement("input");
+      box.type = "number"; box.step = "any";
+      const unit = document.createElement("span");
+      unit.className = "controlUnit";
+      unit.textContent = c.unit;
+      inputs.append(slider, box, unit);
+      row.append(head, inputs);
+      const sendValue = (v) => { if (Number.isFinite(v)) send({ type: "set_scene_control", name: c.name, value: v }); };
+      slider.addEventListener("pointerdown", () => { controlPointerDown = true; });
+      slider.addEventListener("input", () => { box.value = formatControl(Number(slider.value)); sendValue(Number(slider.value)); });
+      box.addEventListener("change", () => sendValue(Number(box.value)));
+      box.addEventListener("keydown", (e) => { if (e.key === "Enter") { sendValue(Number(box.value)); box.blur(); } });
+      sceneControlsBodyEl.appendChild(row);
+    }
+  }
+  for (const c of controls) {
+    const row = sceneControlsBodyEl.querySelector(`.controlRow[data-name="${CSS.escape(c.name)}"]`);
+    if (!row) continue;
+    const [slider, box] = row.querySelectorAll("input");
+    if (slider !== document.activeElement && !controlPointerDown) slider.value = c.value;
+    if (box !== document.activeElement) box.value = formatControl(c.value);
+    row.querySelector(".controlNow").textContent = c.current === null ? "" : `now ${formatControl(c.current)} ${c.unit}`;
+  }
+}
+
+// Every section of the SCENE panel opens and closes by clicking its heading (alt-click opens
+// only that one and closes the rest, like Lightroom's solo mode); which are closed is
+// remembered across reloads. All start open.
+const COLLAPSED_SECTIONS_KEY = "particlesim.collapsedSections";
+const controlPanelSections = [...document.querySelectorAll("#controlPanel > section")];
+function sectionKey(section) { return section.querySelector("h4").textContent.trim(); }
+function saveCollapsedSections() {
+  const closed = controlPanelSections.filter((s) => s.classList.contains("collapsed")).map(sectionKey);
+  try { localStorage.setItem(COLLAPSED_SECTIONS_KEY, JSON.stringify(closed)); } catch (e) { /* storage unavailable */ }
+}
+{
+  let closed = [];
+  try { closed = JSON.parse(localStorage.getItem(COLLAPSED_SECTIONS_KEY) || "[]"); } catch (e) { closed = []; }
+  for (const section of controlPanelSections) {
+    if (closed.includes(sectionKey(section))) section.classList.add("collapsed");
+    section.querySelector("h4").addEventListener("click", (e) => {
+      if (e.altKey) {
+        for (const other of controlPanelSections) other.classList.toggle("collapsed", other !== section);
+      } else {
+        section.classList.toggle("collapsed");
+      }
+      saveCollapsedSections();
+    });
   }
 }
 
@@ -1532,6 +1652,7 @@ function applyFrame(frame) {
   // Stress colours follow the global "forces & stresses" switch, like every other stress colour.
   updateColorLegends(frame);
   updateSceneOptions(frame.options);
+  updateSceneControls(frame.controls);
   // Follow the scene's suggested exaggeration whenever it changes (on load, or e.g. down to 1
   // once a beam has failed); the slider overrides it in between.
   const suggestedDeformation = frame.rest.size > 0 ? frame.suggestedDeformation : null;
@@ -2125,7 +2246,8 @@ function decodeFrame(buffer) {
     const choices = [];
     for (let j = 0; j < choiceCount; j++) choices.push(readString());
     const selectedIndex = view.getInt32(offset, true); offset += 4;
-    options.push({ name, choices, selected: choices[selectedIndex] });
+    const toggle = view.getUint8(offset) !== 0; offset += 1;
+    options.push({ name, choices, selected: choices[selectedIndex], toggle });
   }
   let lineLegend = null;
   const lineLegendLabel = readString();
@@ -2147,11 +2269,23 @@ function decodeFrame(buffer) {
     rest.set(id, { x, y, z });
   }
   const suggestedDeformation = view.getFloat64(offset, true); offset += 8;
+  // §9.6 scene controls: numbers set with a slider or by typing.
+  const controlCount = view.getInt32(offset, true); offset += 4;
+  const controls = [];
+  for (let i = 0; i < controlCount; i++) {
+    const name = readString();
+    const unit = readString();
+    const min = view.getFloat64(offset, true), max = view.getFloat64(offset + 8, true), value = view.getFloat64(offset + 16, true); offset += 24;
+    const hasCurrent = view.getUint8(offset) !== 0; offset += 1;
+    let current = null;
+    if (hasCurrent) { current = view.getFloat64(offset, true); offset += 8; }
+    controls.push({ name, unit, min, max, value, current });
+  }
 
   return {
     t, step, particles, connections, camera: cam, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
     colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
-    skyColor, solidParticleColors, trailSeconds, options, lineLegend, rest, suggestedDeformation,
+    skyColor, solidParticleColors, trailSeconds, options, lineLegend, rest, suggestedDeformation, controls,
   };
 }
 

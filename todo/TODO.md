@@ -6467,8 +6467,8 @@ load. Full `./gradlew test -q` suite green throughout.
         angle), which passes the overturning moment into the mast's chords
         and the slew torque into the mast as a twist.
       - Slew, trolley and hoist are `Drive`s (top speed, acceleration, landing
-        on the target); their targets and the load are live-editable
-        (FORCES: controls). The hoist measures from the trolley's smoothed
+        on the target); their targets and the load are scene controls (see
+        below; they started as a force's editable fields). The hoist measures from the trolley's smoothed
         actual height. The load sets the hook's mass.
       - Gravity ramps on over 3 s under damping near critical for the mast's
         sway (a 7 s period), held 4 s, then eased to ~6% (`SlewFrameDamping`:
@@ -6494,6 +6494,40 @@ load. Full `./gradlew test -q` suite green throughout.
       level, y = 0, so hook heights are above the ground), ground, sky. Scene
       tested. Runs at ~0.8×
       real time in headless Chromium.
+- [x] **Failure** (options: `failure`, a checkbox, off by default):
+      `Truss` members yield in tension (S355, 355 MPa), buckle in compression
+      at a Rankine stress from their slenderness (each taken as a 20:1 round
+      tube of its area) and then soften to 30% over 1% more shortening, and
+      tear past 15% strain; the rope snaps at 640 kN. Torn members aren't
+      drawn; a ground collider catches what falls (the fixed mast base has no
+      radius, so it never touches it). The load now comes onto the hook at
+      4 t/s instead of all at once, which would drop the hook onto the rope
+      at twice the load.
+      - Members resized so the crane holds its chart limits with failure on,
+        load coming on and a 90° slew included (peak utilisation 0.78, 0.69
+        at rest): mast chords 60 cm², mast webs 25 cm² (chord shortening was
+        forcing the diagonals to buckle during slews), jib bottom chords
+        30 cm², jib webs 14 cm², tower-head legs 120 cm².
+      - Measured: members start failing at about 1.5-1.65 times the chart's
+        load moment, and the crane comes down by 1.65-2 times (at 16.5 m the
+        jib's chords go first; at 30 m and the tip, mast chords). With 14 t at
+        30 m the mast buckles near its base and the crane lies down.
+      - Tested: yield, buckling and softening, rupture, rope breaking, failure
+        off staying elastic, Rankine and tube radius; the crane holding both
+        chart limits as the load comes on, collapsing at twice the chart (and
+        landing on the ground), only bending at twice the chart with failure
+        off; the load ramp; torn members not drawn.
+- [x] **Controls moved to the scene panel**: the crane's targets are scene
+      controls (`SceneControl`, `set_scene_control`) in a new CONTROLS section
+      - slider, number box, and where the crane has got to ("now ...") -
+      instead of a force's editable fields. Sent without pausing ("pause on
+      edit" doesn't apply). Wire round-trip and parse tested.
+- [x] **Failure checkboxes**: `SceneOption.toggle` (a u8 flag on the wire)
+      draws as a checkbox sending "on"/"off"; `iBeam`'s and `towerCrane`'s
+      failure use it.
+- [x] **Scene panel scrolls and its sections collapse** (Lightroom-style:
+      click a heading; alt-click opens only that one; remembered in
+      localStorage; all open by default). Checked in headless Chromium.
 - [ ] Possible next steps:
       - mast torsion is soft (a ~10 s twisting period with realistic 15 cm²
         diagonals, so a stopped slew whips the jib tip a metre or two); worth
@@ -6503,7 +6537,8 @@ load. Full `./gradlew test -q` suite green throughout.
       - picking up and setting down loads (ground contact, slack rope);
       - a load-chart readout and overload warning (moment limiter);
       - wind on the jib and load, weathervaning with the slew brake off;
-      - overload failure (buckling, tipping) - not asked for yet.
+      - tipping over (the foundation is fixed; real cranes can also topple
+        their base ballast).
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change

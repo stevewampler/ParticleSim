@@ -35,7 +35,7 @@ import kotlin.math.sqrt
  * frame's own range. The values are computed here; the viewer colours them.
  *
  * **Options** (the viewer's "options" menus):
- * - `failure`: `off` keeps the steel elastic however heavy the weight; `on` lets it yield at
+ * - `failure` (a checkbox): off keeps the steel elastic however heavy the weight; `on` lets it yield at
  *   its yield stress and tear at its rupture strain (both editable on FORCES: steel). With the
  *   default 250 MPa steel, beam theory has this beam first yielding at about 270 t and collapsing
  *   above about 360 t: it sags, folds in the middle and cracks open until the middle rests on
@@ -268,7 +268,7 @@ class IBeamScene : DemoScene {
             restPositions = restPositions,
             deformationScale = if (exaggerationOff) 1.0 else DEFORMATION_SCALE,
             options = listOf(
-                SceneOption(FAILURE_OPTION, ON_OFF, if (failure) "on" else "off"),
+                SceneOption.toggle(FAILURE_OPTION, failure),
                 SceneOption(SPRINGS_OPTION, SPRING_MODES, springs),
                 SceneOption(SECTION_OPTION, SECTIONS, section),
             ),
