@@ -23,8 +23,8 @@ import particlesim.surface.Triangle
  * §9.6 scene-library demo for [TowerCrane]: a hammerhead tower crane - 40 m mast, 55 m jib,
  * 8 t - working at real speed, its steel members coloured by the stress in them.
  *
- * **Controls** (FORCES: controls): `slewDegrees` (where to turn to; positive turns the jib from
- * +x toward -z), `radius` (the trolley's distance from the mast, 3.5-54 m), `hookHeight` (above
+ * **Controls** (FORCES: controls): `slewDegrees` (where to turn to; positive turns
+ * counter-clockwise seen from above), `radius` (the trolley's distance from the mast, 3.5-54 m), `hookHeight` (above
  * the ground) and `loadTonnes` (what's on the hook). The crane drives toward them at its own
  * speeds - slewing at up to 0.8 rpm, the trolley and hoist at up to 1 m/s - speeding up and
  * slowing down smoothly, so the load lags, swings, and keeps swinging after a stop. The drives
@@ -131,8 +131,10 @@ class TowerCraneScene : DemoScene {
 
     private val blocks = listOf(ballast, winch, cab, trolleyBlock, hookBlock, loadBlock)
 
-    private val foundation = Box(Vector3(-3.0, -1.2, -3.0), Vector3(3.0, 0.0, 3.0), "foundation")
-    private val ground = Box(Vector3(-120.0, -1.4, -120.0), Vector3(120.0, -1.2, 120.0), "ground")
+    // The mast stands on the foundation at ground level (y = 0); the pad shows just above grade,
+    // the rest of it buried. Hook heights are measured from the ground.
+    private val foundation = Box(Vector3(-3.0, -1.5, -3.0), Vector3(3.0, 0.05, 3.0), "foundation")
+    private val ground = Box(Vector3(-120.0, -0.2, -120.0), Vector3(120.0, 0.0, 120.0), "ground")
 
     /** A fixed box of 8 particles. */
     private inner class Box(min: Vector3, max: Vector3, name: String) {

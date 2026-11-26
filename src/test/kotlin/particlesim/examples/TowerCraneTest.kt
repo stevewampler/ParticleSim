@@ -232,19 +232,23 @@ class TowerCraneTest {
     @Test
     fun `gravity ramps on smoothly and weighs each particle's current mass`() {
         val store = particlesim.core.ParticleStore()
+        val groups = particlesim.core.Groups()
         val id = store.create(mass = particlesim.core.ScalarExpr.of(10.0))
-        val gravity = RampedGravity(listOf(id), rampSeconds = 2.0)
+        groups.add("load", id)
+        val gravity = RampedGravity(listOf("load"), groups, rampSeconds = 2.0)
         assertEquals(0.0, gravity.factor(0.0))
         assertEquals(0.5, gravity.factor(1.0), 1e-12)
         assertEquals(1.0, gravity.factor(5.0))
         fun force(t: Double): Vector3 {
             val chunk = particlesim.physics.ChunkAccumulator(store.capacity)
-            gravity.accumulate(store, particlesim.core.Groups(), t, chunk, 0, 1)
+            gravity.accumulate(store, groups, t, chunk, 0, 1)
             return chunk.at(store.slotOf(id))
         }
         assertEquals(-10.0 * STANDARD_GRAVITY / 2, force(1.0).y, 1e-9)
         store.setMass(id, particlesim.core.ScalarExpr.of(30.0), 3.0)
         assertEquals(Vector3(0.0, -30.0 * STANDARD_GRAVITY, 0.0), force(3.0))
+        groups.setEnabled("load", false)
+        assertEquals(Vector3.ZERO, force(3.0), "a disabled group has no weight")
     }
 
     @Test
@@ -256,13 +260,20 @@ class TowerCraneTest {
         // ...and one swaying on top of that.
         val swaying = store.create(position = Vector3(-5.0, 40.0, 0.0), velocity = Vector3(0.0, 0.3, omega * 5.0 + 0.2), mass = particlesim.core.ScalarExpr.of(2.0))
         val mast = store.create(position = Vector3(0.8, 10.0, 0.8), velocity = Vector3(0.1, 0.0, 0.0), mass = particlesim.core.ScalarExpr.of(4.0))
-        val damping = SlewFrameDamping(listOf(turning, swaying), listOf(mast), { omega }, coefficient = 0.5)
+        val groups = particlesim.core.Groups()
+        groups.add("top", turning); groups.add("top", swaying); groups.add("mast", mast)
+        val damping = SlewFrameDamping("top", "mast", groups, { omega }, coefficient = 0.5)
         val chunk = particlesim.physics.ChunkAccumulator(store.capacity)
-        damping.accumulate(store, particlesim.core.Groups(), 0.0, chunk, 0, 1)
+        damping.accumulate(store, groups, 0.0, chunk, 0, 1)
         assertTrue(chunk.at(store.slotOf(turning)).length() < 1e-12, "a rigid slew isn't damped")
         val sway = chunk.at(store.slotOf(swaying))
         assertEquals(-0.5 * 2.0 * 0.3, sway.y, 1e-12)
         assertEquals(-0.5 * 2.0 * 0.2, sway.z, 1e-12)
         assertEquals(Vector3(-0.5 * 4.0 * 0.1, 0.0, 0.0), chunk.at(store.slotOf(mast)))
+        groups.setEnabled("mast", false)
+        val off = particlesim.physics.ChunkAccumulator(store.capacity)
+        damping.accumulate(store, groups, 0.0, off, 0, 1)
+        assertEquals(Vector3.ZERO, off.at(store.slotOf(mast)), "a disabled group isn't damped")
+        assertEquals(sway, off.at(store.slotOf(swaying)))
     }
 }

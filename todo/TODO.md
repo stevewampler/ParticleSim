@@ -6473,7 +6473,9 @@ load. Full `./gradlew test -q` suite green throughout.
       - Gravity ramps on over 3 s under damping near critical for the mast's
         sway (a 7 s period), held 4 s, then eased to ~6% (`SlewFrameDamping`:
         relative to a rigid slew, so it never brakes the slew; the hook and
-        trolley aren't in it). The drives answer from 7 s.
+        trolley aren't in it). The drives answer from 7 s. Gravity and this
+        damping act through the crane's groups, so GROUPS' "enabled" toggles
+        work.
       - Masses and member areas aren't from a data sheet: chosen for a
         realistic weight and 100-160 MPa at the load chart's limits.
         Ballast 16.5 t (Potain's MC 175 class runs 12.6-18.3 t) leaves it
@@ -6488,7 +6490,9 @@ load. Full `./gradlew test -q` suite green throughout.
       axial stress (±160 MPa full scale, legend), or `paint` (options:
       `colours`). Ballast, winch, cab, trolley, hook block and a slung load
       drawn as blocks in frames that move with the structure (the load tilts
-      with the rope). Foundation, ground, sky. Scene tested. Runs at ~0.8×
+      with the rope). Foundation (mostly buried; the mast stands at ground
+      level, y = 0, so hook heights are above the ground), ground, sky. Scene
+      tested. Runs at ~0.8×
       real time in headless Chromium.
 - [ ] Possible next steps:
       - mast torsion is soft (a ~10 s twisting period with realistic 15 cm²

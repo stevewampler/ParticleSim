@@ -187,23 +187,27 @@ class CraneControls(
 }
 
 /**
- * Gravity on [ids], ramped on smoothly over [rampSeconds] so the crane settles under its own
- * weight instead of dropping into it. Reads each particle's mass every step, so a load picked up
- * (the hook's mass changing) weighs what it should.
+ * Gravity on the particles of [targetGroups] (each skipped while disabled), ramped on smoothly
+ * over [rampSeconds] so the crane settles under its own weight instead of dropping into it.
+ * Reads each particle's mass every step, so a load picked up (the hook's mass changing) weighs
+ * what it should. Membership is read once, at construction.
  */
 class RampedGravity(
-    private val ids: List<Int>,
+    targetGroups: List<String>,
+    groups: Groups,
     private val rampSeconds: Double,
     override val name: String? = "gravity",
 ) : Force {
+    private val ids: List<Int> = targetGroups.flatMap { groups.membersOf(it) }
+    private val groupOf: List<String> = targetGroups.flatMap { g -> groups.membersOf(g).map { g } }
+
     fun factor(t: Double): Double = if (t >= rampSeconds) 1.0 else 0.5 - 0.5 * cos(PI * t / rampSeconds)
 
     override fun accumulate(store: ParticleStore, groups: Groups, t: Double, chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int) {
         val g = STANDARD_GRAVITY * factor(t)
         var i = chunkIndex
         while (i < ids.size) {
-            val slot = store.slotOf(ids[i])
-            chunk.add(slot, 0.0, -store.mass(ids[i]) * g, 0.0)
+            if (groups.isEnabled(groupOf[i])) chunk.add(store.slotOf(ids[i]), 0.0, -store.mass(ids[i]) * g, 0.0)
             i += chunkCount
         }
     }
@@ -211,28 +215,35 @@ class RampedGravity(
 
 /**
  * Structural damping that leaves slewing alone: a force `-c m (v - v_rigid)` on each node, where
- * `v_rigid` is the velocity the node would have if the slewing part ([slewing]) turned rigidly at
- * the current slew rate about the mast's axis - zero for the mast ([fixed]). It damps the crane's
- * sway and the jib's whip, not the slew itself; the hook and trolley aren't in it, so the load
- * swings freely. [coefficient] (1/s) is `2 zeta omega` for the modes it's tuned to.
+ * `v_rigid` is the velocity the node would have if the slewing part ([slewingGroup]) turned
+ * rigidly at the current slew rate about the mast's axis - zero for the mast ([fixedGroup]). It
+ * damps the crane's sway and the jib's whip, not the slew itself; the hook and trolley aren't in
+ * it, so the load swings freely. [coefficient] (1/s) is `2 zeta omega` for the modes it's tuned
+ * to. Each group is skipped while disabled; membership is read once, at construction.
  */
 class SlewFrameDamping(
-    private val slewing: List<Int>,
-    private val fixed: List<Int>,
+    private val slewingGroup: String,
+    private val fixedGroup: String,
+    groups: Groups,
     private val slewRate: () -> Double,
     coefficient: Double,
     override val name: String? = "structural damping",
 ) : Force {
     var coefficient: Double = coefficient
+    private val slewing: List<Int> = groups.membersOf(slewingGroup).toList()
+    private val fixed: List<Int> = groups.membersOf(fixedGroup).toList()
 
     override fun accumulate(store: ParticleStore, groups: Groups, t: Double, chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int) {
         val c = coefficient
         if (c == 0.0) return
+        val slewingOn = groups.isEnabled(slewingGroup)
+        val fixedOn = groups.isEnabled(fixedGroup)
         val omega = slewRate()
         val total = slewing.size + fixed.size
         var i = chunkIndex
         while (i < total) {
             val rotating = i < slewing.size
+            if (if (rotating) !slewingOn else !fixedOn) { i += chunkCount; continue }
             val id = if (rotating) slewing[i] else fixed[i - slewing.size]
             val s = store.slotOf(id)
             val m = store.mass(id)
@@ -464,15 +475,14 @@ class TowerCrane(
         // Unnamed: four identical entries would only clutter the outliner.
         WeightedAttachment(id, RING_STIFFNESS, 2 * 0.5 * sqrt(RING_STIFFNESS * m))
     }
-    val trolleyCarriage = WeightedAttachment(trolleyNode, TROLLEY_STIFFNESS, 2 * 0.5 * sqrt(TROLLEY_STIFFNESS * spec.trolleyMass), name = "trolley")
+    // Unnamed: it has nothing to edit, and "trolley" is already the group's name.
+    val trolleyCarriage = WeightedAttachment(trolleyNode, TROLLEY_STIFFNESS, 2 * 0.5 * sqrt(TROLLEY_STIFFNESS * spec.trolleyMass))
 
     /** Slew rate, rad/s. */
     val slewRate: Double get() = slew.velocity * PI / 180
 
-    private val slewingNodes = groups.membersOf(SLEWING_GROUP).toList()
-    private val mastNodes = groups.membersOf(MAST_GROUP).toList()
-    val structuralDamping = SlewFrameDamping(slewingNodes, mastNodes, { slewRate }, SETTLING_DAMPING)
-    val gravity = RampedGravity(store.liveIds(), rampSeconds)
+    val structuralDamping = SlewFrameDamping(SLEWING_GROUP, MAST_GROUP, groups, { slewRate }, SETTLING_DAMPING)
+    val gravity = RampedGravity(listOf(MAST_GROUP, SLEWING_GROUP, TROLLEY_GROUP, HOOK_GROUP), groups, rampSeconds)
     val controls = CraneControls(this)
 
     val forces: List<Force> = listOf(truss, controls, gravity, structuralDamping, trolleyCarriage) + slewingRing
