@@ -23,8 +23,9 @@ import kotlin.math.sqrt
 /**
  * The time step for [TowerCrane]: its truss is real steel at real masses, so it vibrates as fast
  * as real steel - the stiffest light node rings at about 3,500 rad/s, stable below ~0.55 ms.
+ * Exactly 80 steps per 60 Hz frame.
  */
-const val CRANE_DT = 2e-4
+const val CRANE_DT = 1.0 / 4800
 
 /** Wire rope's effective Young's modulus (lower than solid steel: the strands are twisted). */
 const val WIRE_ROPE_MODULUS = 100e9
@@ -460,7 +461,8 @@ class TowerCrane(
     /** The slewing ring: each turntable lower corner held at its slewed place on the mast top. */
     val slewingRing: List<WeightedAttachment> = turntableLower.map { id ->
         val m = store.mass(id)
-        WeightedAttachment(id, RING_STIFFNESS, 2 * 0.5 * sqrt(RING_STIFFNESS * m), name = "slewing ring")
+        // Unnamed: four identical entries would only clutter the outliner.
+        WeightedAttachment(id, RING_STIFFNESS, 2 * 0.5 * sqrt(RING_STIFFNESS * m))
     }
     val trolleyCarriage = WeightedAttachment(trolleyNode, TROLLEY_STIFFNESS, 2 * 0.5 * sqrt(TROLLEY_STIFFNESS * spec.trolleyMass), name = "trolley")
 

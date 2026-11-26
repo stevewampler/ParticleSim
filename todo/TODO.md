@@ -6445,6 +6445,62 @@ load. Full `./gradlew test -q` suite green throughout.
         report;
       - Poisson's ratio is fixed at 1/4.
 
+## Tower crane (§5.1/§9.6/§10.2, new requirement) — not yet phased
+- [x] **`Truss`** (`particlesim.physics`): pin-jointed members as one force,
+      each with its own `EA / L`, optionally tension-only, a rest length that
+      can change while running, stiffness-proportional damping along the
+      member (per-member override: the rope damps more). Axial force and
+      stress readouts. Tested: a loaded tripod against statics, slack and
+      paid-out rope, chunking.
+- [x] **`WeightedAttachment`**: a zero-length spring to a weighted blend of
+      particles, its reaction shared back by the same weights - no net force
+      or torque. Drives move it by changing the weights between steps.
+      Tested.
+- [x] **`TowerCrane`** (`particlesim.examples`): a hammerhead crane after the
+      Liebherr 132 EC-H 8 (8 t, 55 m jib, 1.85 t tip load) on a 40 m, 1.6 m
+      mast. 166 particles, 510 members, real steel at real masses, so it moves
+      at real speed (dt = 1/4800 s, 80 steps per frame; ~20 µs per step).
+      - The jib and counter-jib are triangular girders hinged at the
+        turntable and held by one tie each, so the tie tensions follow from
+        statics. The turntable sits on the mast top through four weighted
+        attachments (bilinear weights in the mast-top square at the slew
+        angle), which passes the overturning moment into the mast's chords
+        and the slew torque into the mast as a twist.
+      - Slew, trolley and hoist are `Drive`s (top speed, acceleration, landing
+        on the target); their targets and the load are live-editable
+        (FORCES: controls). The hoist measures from the trolley's smoothed
+        actual height. The load sets the hook's mass.
+      - Gravity ramps on over 3 s under damping near critical for the mast's
+        sway (a 7 s period), held 4 s, then eased to ~6% (`SlewFrameDamping`:
+        relative to a rigid slew, so it never brakes the slew; the hook and
+        trolley aren't in it). The drives answer from 7 s.
+      - Masses and member areas aren't from a data sheet: chosen for a
+        realistic weight and 100-160 MPa at the load chart's limits.
+        Ballast 16.5 t (Potain's MC 175 class runs 12.6-18.3 t) leaves it
+        leaning back ~600 kN·m unloaded and forward about as much at the
+        maximum load moment.
+      - Tested against statics (both ties at 1%; the mast's bottom panel
+        holding the weight and overturning moment, chords carrying 90-110%
+        of it), the pendulum period, slewing (turntable within 0.2°, the
+        load swinging after a stop), trolley/hoist/load, the controls, the
+        drive profile, the ring and trolley weights, gravity and damping.
+- [x] **`towerCrane` scene**: members as yellow steel cylinders coloured by
+      axial stress (±160 MPa full scale, legend), or `paint` (options:
+      `colours`). Ballast, winch, cab, trolley, hook block and a slung load
+      drawn as blocks in frames that move with the structure (the load tilts
+      with the rope). Foundation, ground, sky. Scene tested. Runs at ~0.8×
+      real time in headless Chromium.
+- [ ] Possible next steps:
+      - mast torsion is soft (a ~10 s twisting period with realistic 15 cm²
+        diagonals, so a stopped slew whips the jib tip a metre or two); worth
+        checking against a real crane's figures;
+      - jog controls (hold to slew/move/hoist) rather than typed targets -
+        needs a viewer control type; a scripted lift cycle as a demo option;
+      - picking up and setting down loads (ground contact, slack rope);
+      - a load-chart readout and overload warning (moment limiter);
+      - wind on the jib and load, weathervaning with the slew brake off;
+      - overload failure (buckling, tipping) - not asked for yet.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

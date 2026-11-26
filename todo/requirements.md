@@ -305,6 +305,17 @@ targeted for visualization.
   (bump) stroke and stiffer on the extension (rebound) stroke, or vice
   versa. Applies whether or not the damper is paired with a spring, since
   it depends only on relative velocity, not rest length.
+- **Truss**: a pin-jointed structure's members as one force, each member
+  axial-only with its own stiffness `EA / L` (area, Young's modulus, rest
+  length), optionally tension-only (tie bars, wire rope), with a rest length
+  that can change while running (a hoist paying out rope) and damping along
+  the member proportional to its stiffness. Reads back each member's axial
+  force and stress for colouring. Added for the `towerCrane` scene (§9.6).
+- **Weighted attachment**: a stiff zero-length spring holding one particle
+  at a weighted blend of others (weights summing to one), the reaction
+  shared back by the same weights - so it couples without any net force or
+  torque. Changing the weights between steps is how a drive moves things:
+  the crane's trolley along its jib, its turntable around the mast top.
 
 ### 5.2 Field forces (applied to a group of particles)
 - **Uniform gravity**: constant acceleration vector (e.g. `[0, -9.8, 0]`),
@@ -1915,6 +1926,10 @@ integrator's accuracy (§13.1).
   successive bounce heights should follow `h_n = h_0 · e^(2n)` for
   restitution `e` (§12.5) — the cheapest possible test of collision
   response.
+- **Truss statics**: a determinate truss (a loaded tripod, a crane jib on
+  its hinge and tie) settles to the member forces the method of joints or
+  moments about the hinge gives.
+- **Pendulum**: a hook on a crane's rope swings with period `2π√(L/g)`.
 - **Energy/momentum conservation**: promotes the runtime diagnostic
   already required in §11/§13.5 from *logged* to *asserted* — a closed
   spring-only system without damping should conserve energy within a

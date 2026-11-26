@@ -1,0 +1,227 @@
+package particlesim.debug
+
+import particlesim.core.ParticleStore
+import particlesim.core.ScalarExpr
+import particlesim.core.Vector3
+import particlesim.examples.TowerCrane
+import particlesim.examples.TowerCrane.Part
+import particlesim.render.CameraPose
+import particlesim.render.Color
+import particlesim.render.ColorLegend
+import particlesim.render.ColorRamp
+import particlesim.render.ConnectionStyle
+import particlesim.render.Light
+import particlesim.render.Material
+import particlesim.render.SceneOption
+import particlesim.render.SceneRegistry
+import particlesim.render.SurfaceRenderer
+import particlesim.render.srgbToLinear
+import particlesim.surface.Surface
+import particlesim.surface.Triangle
+
+/**
+ * §9.6 scene-library demo for [TowerCrane]: a hammerhead tower crane - 40 m mast, 55 m jib,
+ * 8 t - working at real speed, its steel members coloured by the stress in them.
+ *
+ * **Controls** (FORCES: controls): `slewDegrees` (where to turn to; positive turns the jib from
+ * +x toward -z), `radius` (the trolley's distance from the mast, 3.5-54 m), `hookHeight` (above
+ * the ground) and `loadTonnes` (what's on the hook). The crane drives toward them at its own
+ * speeds - slewing at up to 0.8 rpm, the trolley and hoist at up to 1 m/s - speeding up and
+ * slowing down smoothly, so the load lags, swings, and keeps swinging after a stop. The drives
+ * answer once the crane has settled under its own weight, about 7 s after a (re)start.
+ *
+ * **Colours** (options: `colours`): `stress` colours each member by its axial stress -
+ * compression blue, tension red, white unloaded, full colour at ±160 MPa - with a legend;
+ * `paint` shows the crane's yellow. The load chart's limits are 8 t out to 16.5 m and 1.85 t at
+ * the tip; past them the members just work harder (nothing fails).
+ */
+class TowerCraneScene : DemoScene {
+    private val crane = TowerCrane()
+    override val dt: Double = crane.dt
+    override val store: ParticleStore = crane.store
+    private val spec = crane.spec
+
+    private var colours = COLOUR_MODES.first()
+
+    private val members: List<Pair<Int, Int>> = crane.truss.members.map { it.a to it.b }
+
+    private val connectionStyles: Map<Pair<Int, Int>, ConnectionStyle> = run {
+        val chord = ConnectionStyles.paintedSteel("chords", CRANE_YELLOW, radius = 0.09)
+        val web = ConnectionStyles.paintedSteel("lattice", CRANE_YELLOW, radius = 0.045, joints = false)
+        val turntable = ConnectionStyles.paintedSteel("turntable", CRANE_YELLOW, radius = 0.14)
+        val tie = ConnectionStyles.cable("tie bars", Color(0.25, 0.25, 0.27), radius = 0.05)
+        val rope = ConnectionStyles.cable("hoist rope", Color(0.2, 0.2, 0.22), radius = 0.02)
+        members.indices.associate { i ->
+            members[i] to when (crane.parts[i]) {
+                Part.MAST_CHORD, Part.JIB_CHORD, Part.COUNTER_JIB_CHORD, Part.TOWER_HEAD -> chord
+                Part.MAST_WEB, Part.JIB_WEB, Part.COUNTER_JIB_WEB -> web
+                Part.TURNTABLE -> turntable
+                Part.TIE -> tie
+                Part.ROPE -> rope
+            }
+        }
+    }
+
+    // ---- Blocks drawn on the structure, each built in a frame that moves with it.
+
+    /** A right-handed frame: [origin] and three unit axes. */
+    private data class Frame(val origin: Vector3, val x: Vector3, val y: Vector3, val z: Vector3) {
+        fun at(local: Vector3): Vector3 = origin + x * local.x + y * local.y + z * local.z
+    }
+
+    /** A frame at [origin] with x along [along] (levelled) and y up. */
+    private fun levelFrame(origin: Vector3, along: Vector3): Frame {
+        val x = Vector3(along.x, 0.0, along.z).normalized()
+        val up = Vector3(0.0, 1.0, 0.0)
+        return Frame(origin, x, up, x.cross(up))
+    }
+
+    private fun pos(id: Int) = store.position(id)
+    private fun mean(ids: List<Int>) = ids.fold(Vector3.ZERO) { s, id -> s + pos(id) } * (1.0 / ids.size)
+    private fun jibDirection() = pos(crane.jibLeft.last()) - pos(crane.jibLeft.first())
+
+    /** A box of 8 particles (nothing acts on them), placed each frame from [frame] and its
+     * local extents [min]..[max]. */
+    private inner class Block(var min: Vector3, var max: Vector3, val name: String, val frame: () -> Frame) {
+        val ids: List<Int> = (0 until 8).map { store.create(mass = ScalarExpr.of(1.0)) }
+        val surface = Surface(FACES.flatMap { (a, b, c, d) -> listOf(Triangle(ids[a], ids[b], ids[c]), Triangle(ids[a], ids[c], ids[d])) }, name = name)
+
+        fun place() {
+            val f = frame()
+            for ((c, id) in ids.withIndex()) {
+                val local = Vector3(if (c and 1 == 0) min.x else max.x, if (c and 2 == 0) min.y else max.y, if (c and 4 == 0) min.z else max.z)
+                store.setPosition(id, f.at(local))
+                store.setVelocity(id, Vector3.ZERO)
+            }
+        }
+    }
+
+    private val ballast = Block(Vector3(-2.6, -2.4, -0.75), Vector3(2.6, -0.05, 0.75), "ballast") {
+        levelFrame(mean(crane.ballastNodes), pos(crane.counterJibLeft.last()) - pos(crane.counterJibLeft.first()))
+    }
+    private val winch = Block(Vector3(-0.8, 0.05, -0.6), Vector3(0.8, 1.1, 0.6), "winch") {
+        val k = spec.counterJibPanels / 2
+        levelFrame(mean(listOf(crane.counterJibLeft[k], crane.counterJibRight[k])), pos(crane.counterJibLeft.last()) - pos(crane.counterJibLeft.first()))
+    }
+    private val cab = Block(Vector3(-1.4, -2.2, 0.05), Vector3(0.6, 0.0, 1.6), "cab") {
+        levelFrame(pos(crane.turntableUpper[2]), jibDirection())
+    }
+    private val trolleyBlock = Block(Vector3(-0.7, -0.35, -0.95), Vector3(0.7, 0.15, 0.95), "trolley") {
+        levelFrame(pos(crane.trolleyNode), jibDirection())
+    }
+    private val hookBlock = Block(Vector3(-0.3, -0.2, -0.18), Vector3(0.3, 0.6, 0.18), "hook block") {
+        levelFrame(pos(crane.hookNode), jibDirection())
+    }
+
+    /** The load hangs on slings below the hook, tilted with the rope. */
+    private val loadBlock = Block(Vector3.ZERO, Vector3.ZERO, "load") {
+        val hook = pos(crane.hookNode)
+        val y = (pos(crane.trolleyNode) - hook).normalized()
+        val z = jibDirection().cross(y).normalized()
+        Frame(hook, y.cross(z), y, z)
+    }
+
+    private fun sizeLoad() {
+        // A crate of steel, 3 m by 1.2 m, as deep as its tonnes need at a steel crate's ~2 t/m^3.
+        val depth = (crane.loadTonnes / (2.0 * 3.0 * 1.2)).coerceIn(0.25, 2.0)
+        val top = -SLING_DROP
+        loadBlock.min = Vector3(-1.5, top - depth, -0.6)
+        loadBlock.max = Vector3(1.5, top, 0.6)
+    }
+
+    private val blocks = listOf(ballast, winch, cab, trolleyBlock, hookBlock, loadBlock)
+
+    private val foundation = Box(Vector3(-3.0, -1.2, -3.0), Vector3(3.0, 0.0, 3.0), "foundation")
+    private val ground = Box(Vector3(-120.0, -1.4, -120.0), Vector3(120.0, -1.2, 120.0), "ground")
+
+    /** A fixed box of 8 particles. */
+    private inner class Box(min: Vector3, max: Vector3, name: String) {
+        val ids: List<Int> = (0 until 8).map { c ->
+            store.create(position = Vector3(if (c and 1 == 0) min.x else max.x, if (c and 2 == 0) min.y else max.y, if (c and 4 == 0) min.z else max.z), mass = ScalarExpr.of(1.0))
+        }
+        val surface = Surface(FACES.flatMap { (a, b, c, d) -> listOf(Triangle(ids[a], ids[b], ids[c]), Triangle(ids[a], ids[c], ids[d])) }, name = name)
+    }
+
+    private fun mesh(surface: Surface, color: Color, roughness: Double = 0.8) =
+        SurfaceRenderer(surface, material = Material(color = color, roughness = roughness), pickable = false, flatShading = true)
+
+    private val ballastMesh = mesh(ballast.surface, Color(0.62, 0.6, 0.56), 0.95)
+    private val winchMesh = mesh(winch.surface, Color(0.3, 0.32, 0.35), 0.5)
+    private val cabMesh = mesh(cab.surface, Color(0.85, 0.85, 0.82), 0.4)
+    private val trolleyMesh = mesh(trolleyBlock.surface, CRANE_YELLOW, 0.5)
+    private val hookMesh = mesh(hookBlock.surface, Color(0.9, 0.55, 0.1), 0.5)
+    private val loadMesh = mesh(loadBlock.surface, Color(0.35, 0.22, 0.15), 0.85)
+    private val foundationMesh = mesh(foundation.surface, Color(0.6, 0.58, 0.54), 0.95)
+    private val groundMesh = mesh(ground.surface, Color(0.42, 0.38, 0.3), 1.0)
+
+    private val lights = listOf(
+        Light.Ambient(color = Color(0.85, 0.9, 1.0), intensity = 0.6, name = "sky light"),
+        Light.Directional(position = Vector3(40.0, 80.0, 50.0), color = Color(1.0, 0.97, 0.92), intensity = 1.1, name = "sun"),
+    )
+
+    init {
+        sizeLoad()
+        blocks.forEach { it.place() }
+    }
+
+    override fun ids(): List<Int> = store.liveIds()
+
+    override fun step(t: Double) = crane.step(t)
+
+    /** The crane itself, for tests and probes. */
+    internal val model: TowerCrane get() = crane
+
+    override fun handleControl(message: SceneControlMessage, t: Double) {
+        if (applyEditableFieldMessage(message, crane.forces, crane.constraints, store, t, lights)) return
+        when (message) {
+            is SceneControlMessage.SetGroupEnabled -> crane.groups.setEnabled(message.name, message.enabled)
+            is SceneControlMessage.SetSceneOption -> if (message.name == COLOURS_OPTION && message.choice in COLOUR_MODES) colours = message.choice
+            else -> {}
+        }
+    }
+
+    /** Each member's colour for its axial stress, and the legend for it. */
+    internal fun stressColours(): Map<Pair<Int, Int>, Color> = members.indices.associate { i ->
+        // Line colours travel as linear values; the ramp is display values, like its legend.
+        members[i] to ColorRamp.signed(crane.truss.stress(store, i) / FULL_SCALE_STRESS).srgbToLinear()
+    }
+
+    override fun frame(t: Double): SceneFrame {
+        sizeLoad()
+        blocks.forEach { it.place() }
+        val loaded = crane.loadTonnes > 0.0
+        val slings = if (loaded) listOf(2, 3, 6, 7).map { crane.hookNode to loadBlock.ids[it] } else emptyList()
+        val byStress = colours == "stress"
+        return SceneFrame(
+            camera = CAMERA,
+            connections = members + slings,
+            connectionStyles = connectionStyles + (slings styledAs ConnectionStyles.cable("slings", Color(0.2, 0.2, 0.22), radius = 0.015)),
+            lineColors = if (byStress) stressColours() else emptyMap(),
+            lineLegend = if (byStress) ColorLegend("member stress", "MPa", -FULL_SCALE_STRESS / 1e6, FULL_SCALE_STRESS / 1e6, ColorRamp.SIGNED_STOPS) else null,
+            meshes = listOf(ballastMesh, winchMesh, cabMesh, trolleyMesh, hookMesh) + (if (loaded) listOf(loadMesh) else emptyList()) + foundationMesh + groundMesh,
+            visibleIds = emptySet(),
+            lights = lights,
+            skyColor = SKY,
+            options = listOf(SceneOption(COLOURS_OPTION, COLOUR_MODES, colours)),
+            registry = SceneRegistry.build(forces = crane.forces, constraints = crane.constraints, groups = crane.groups, lights = lights),
+        )
+    }
+
+    companion object {
+        val CRANE_YELLOW = Color(0.95, 0.72, 0.1)
+        val SKY = Color(0.6, 0.74, 0.9)
+        const val COLOURS_OPTION = "colours"
+        val COLOUR_MODES = listOf("stress", "paint")
+        /** Full colour on the stress ramp, Pa. */
+        const val FULL_SCALE_STRESS = 160e6
+        const val SLING_DROP = 1.2
+        val CAMERA = CameraPose(position = Vector3(52.0, 22.0, 78.0), lookAt = Vector3(16.0, 24.0, 0.0))
+
+        // Corner c has x from bit 0, y from bit 1, z from bit 2; each face wound outward.
+        private val FACES = listOf(
+            listOf(0, 4, 6, 2), listOf(1, 3, 7, 5),
+            listOf(0, 1, 5, 4), listOf(2, 6, 7, 3),
+            listOf(0, 2, 3, 1), listOf(4, 5, 7, 6),
+        )
+    }
+}
