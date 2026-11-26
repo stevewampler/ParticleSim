@@ -6540,6 +6540,52 @@ load. Full `./gradlew test -q` suite green throughout.
       - tipping over (the foundation is fixed; real cranes can also topple
         their base ballast).
 
+## Luffing-jib crane (`luffingCrane`, branch `luffing-crane`)
+- [x] **`LuffingCrane` model** (`particlesim.examples`): a 12 t luffer with a
+      50 m jib working between 15° and 85° (radius 4.6-49 m), as a `Truss` at
+      real stiffness and masses, sharing the hammerhead's `Drive`,
+      `RampedGravity`, `SlewFrameDamping`, slewing-ring weights
+      (`slewedCornerWeights`) and failure model. 40 m mast, 2 m square.
+      - The jib is a box lattice pinned at its foot to the turntable's two
+        front top corners, held up only by the luffing rope (six falls, as one
+        tension-only member) from the A-frame's apex to the jib head. The
+        counter-jib (both winches, 14 t ballast) hangs from the apex on a tie
+        and pulls it back against the rope.
+      - Luffing drives the jib angle (1°/s); the rope's rest length comes from
+        a straight jib's geometry at that angle, trimmed for its stretch, the
+        jib's bending and the mast's lean from the angle the jib really sits
+        at (20 s; 1.5 s while the settling damping holds the jib still). A 3 s
+        trim chased the jib's slow rocking on its rope at high angles (5-8 s
+        periods) until the rope went slack; allowing for the rope's stretch
+        from its own tension cancels its stiffness - both tried and dropped.
+      - Level luffing: the hoist (1.5 m/s) pays out or hauls in as the head
+        rises and falls, so the hook holds its height (within ~1 m on the
+        move). `radiusTarget` is the luff target put as a radius.
+      - The hook is damped while the crane settles (the head moving as the jib
+        sags would leave it swinging), freely swinging after.
+      - Balanced like the hammerhead: about -2.4 MN·m (leaning back) with the
+        jib up and empty, +2.2 MN·m at the tip load. Peak member stress
+        80-116 MPa at the chart's limits, utilisation under 0.5.
+      - With failure on, about 2.5-3 times the chart's load brings it down -
+        the A-frame legs buckle and the jib drops to hang from its foot pins.
+      - Tested: geometry (head radius/height, rope length, angle for a
+        radius), the luffing rope's tension and the mast's bottom panel
+        against statics (averaged over 3 s - the jib bounces a percent or two
+        on its rope), stress at the chart's limits, luffing out and in with
+        the hook level and the rope never slack, a slew with the jib raised,
+        the pendulum period, target clamping, failure holding the chart and
+        collapsing at three times the tip load.
+- [x] **`luffingCrane` scene**: as `towerCrane`'s - steel coloured by stress or
+      paint, failure checkbox, ballast/winches/cab/hook/load blocks - with
+      controls slew, jib angle, radius (the same target as the jib angle, so
+      moving one moves both), hook height and load (to 30 t). The block,
+      fixed-box and frame helpers moved to `CraneSceneParts.kt`, shared with
+      `towerCrane`. Scene tested; checked in headless Chromium.
+- [ ] Possible next steps: a jib backstop at the top of its range, the
+      luffing rope reeved over the apex to a winch on the counter-jib (rather
+      than one member apex to head), a load chart that limits luffing out
+      with a heavy load.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

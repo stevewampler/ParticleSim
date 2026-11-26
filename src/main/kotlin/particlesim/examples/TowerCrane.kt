@@ -110,6 +110,31 @@ data class TowerCraneSpec(
     val apexHeight: Double get() = turntableTop + towerHeadHeight
 }
 
+/** Corner [c] of a square of half-width [h] in the x-z plane, centred on the y axis:
+ * (-h,-h), (h,-h), (h,h), (-h,h). */
+fun squareCorner(c: Int, h: Double): Pair<Double, Double> = when (c) {
+    0 -> -h to -h
+    1 -> h to -h
+    2 -> h to h
+    else -> -h to h
+}
+
+/**
+ * A slewing ring's coupling: the bilinear weights, over the four corners of [square] (in
+ * [squareCorner] order, half-width [h]), of the place corner [c] reaches turned [degrees] about the
+ * y axis (positive turns +x toward -z). A [WeightedAttachment] to them holds a turntable corner
+ * there.
+ */
+fun slewedCornerWeights(square: List<Int>, h: Double, c: Int, degrees: Double): List<Pair<Int, Double>> {
+    val theta = degrees * PI / 180
+    val (x, z) = squareCorner(c, h)
+    val qx = x * cos(theta) + z * sin(theta)
+    val qz = -x * sin(theta) + z * cos(theta)
+    val s = (qx / h + 1) / 2
+    val t = (qz / h + 1) / 2
+    return listOf(square[0] to (1 - s) * (1 - t), square[1] to s * (1 - t), square[2] to s * t, square[3] to (1 - s) * t)
+}
+
 /**
  * One axis of motion driven toward a [target] at up to [maxSpeed], speeding up and slowing down
  * at [acceleration] - how a crane's variable-speed drives move, so the load is started and
@@ -271,13 +296,7 @@ class TowerCrane(
         return id
     }
 
-    /** Corner `c` of a square in the x-z plane: (-h,-h), (h,-h), (h,h), (-h,h). */
-    private fun corner(c: Int): Pair<Double, Double> = when (c) {
-        0 -> -h to -h
-        1 -> h to -h
-        2 -> h to h
-        else -> -h to h
-    }
+    private fun corner(c: Int): Pair<Double, Double> = squareCorner(c, h)
 
     // ---- Nodes.
 
@@ -489,15 +508,7 @@ class TowerCrane(
 
     /** The bilinear weights, over the mast top's corners, of turntable corner [c] slewed by
      * [degrees]. */
-    fun ringWeights(c: Int, degrees: Double): List<Pair<Int, Double>> {
-        val theta = degrees * PI / 180
-        val (x, z) = corner(c)
-        val qx = x * cos(theta) + z * sin(theta)
-        val qz = -x * sin(theta) + z * cos(theta)
-        val s = (qx / h + 1) / 2
-        val t = (qz / h + 1) / 2
-        return listOf(mastTop[0] to (1 - s) * (1 - t), mastTop[1] to s * (1 - t), mastTop[2] to s * t, mastTop[3] to (1 - s) * t)
-    }
+    fun ringWeights(c: Int, degrees: Double): List<Pair<Int, Double>> = slewedCornerWeights(mastTop, h, c, degrees)
 
     /** The trolley's weights over the jib's bottom-chord panel points at [radius]. */
     fun trolleyWeights(radius: Double): List<Pair<Int, Double>> {

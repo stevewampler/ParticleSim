@@ -310,7 +310,7 @@ targeted for visualization.
   length), optionally tension-only (tie bars, wire rope), with a rest length
   that can change while running (a hoist paying out rope) and damping along
   the member proportional to its stiffness. Reads back each member's axial
-  force and stress for colouring. Added for the `towerCrane` scene (§9.6).
+  force and stress for colouring. Added for the `towerCrane` and `luffingCrane` scenes (§9.6).
 - **Weighted attachment**: a stiff zero-length spring holding one particle
   at a weighted blend of others (weights summing to one), the reaction
   shared back by the same weights - so it couples without any net force or
@@ -401,7 +401,7 @@ run. It does not reform.
   lets a collapse spread), and tears past a rupture strain; wire rope snaps
   at its breaking force. Torn members carry nothing and aren't drawn. Turning
   failure off stops new failure without undoing what has happened. The
-  `towerCrane` scene's checkbox; the elastic lattice (§7) has its own.
+  `towerCrane` and `luffingCrane` scenes' checkbox; the elastic lattice (§7) has its own.
 - `[stretch]` Extending breakability to the custom forces in §5.3, or to
   constraints (§6) themselves (e.g. an anchor that gives way under enough
   load), rather than just spring/damper connectors.
@@ -1947,8 +1947,9 @@ integrator's accuracy (§13.1).
   restitution `e` (§12.5) — the cheapest possible test of collision
   response.
 - **Truss statics**: a determinate truss (a loaded tripod, a crane jib on
-  its hinge and tie) settles to the member forces the method of joints or
-  moments about the hinge gives.
+  its hinge and tie, a luffing jib on its foot pins and luffing rope)
+  settles to the member forces the method of joints or moments about the
+  hinge gives.
 - **Pendulum**: a hook on a crane's rope swings with period `2π√(L/g)`.
 - **Energy/momentum conservation**: promotes the runtime diagnostic
   already required in §11/§13.5 from *logged* to *asserted* — a closed
