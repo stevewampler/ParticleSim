@@ -16,9 +16,8 @@ checking whether the Kotlin plugin has since added JVM 23 support.
 
 Progress against the design is tracked in **`todo/TODO.md`** (living
 checklist, phased by implementation dependency) — check it before assuming
-what's implemented. `docs/manual.md` is a stub; it should only ever
-describe behavior that's actually implemented and tested, never aspirational
-design from the requirements doc.
+what's implemented. There is deliberately no user manual (an early
+`docs/manual.md` stub was removed, 2026-11-27); don't start one.
 
 The phase order is deliberately **physics-first**: the expression parser
 and YAML front-end come after the physics model (Phase 7, not Phase 1),

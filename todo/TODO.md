@@ -6750,10 +6750,8 @@ load. Full `./gradlew test -q` suite green throughout.
 
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
-- [x] `docs/manual.md` stub created
-- [ ] Fill in real manual content once there's a runnable, visualizable
-      scenario (Phase 3 onward); grow it alongside real, tested examples
-      only
+- [ ] ~~Fill in real manual content~~ **[STRUCK, 2026-11-27]** — no user
+      manual will be written; the `docs/manual.md` stub was removed.
 
 ## Deferred `[stretch]` (see requirements.md for each)
 - [ ] Native viewer (JavaFX/LWJGL) — cut in favor of the web viewer as
