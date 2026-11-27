@@ -19,6 +19,7 @@ import particlesim.render.ConnectionShape
 import particlesim.render.Light
 import particlesim.render.Material
 import particlesim.render.NamedArrowSamples
+import particlesim.render.Puff
 import particlesim.physics.EditableFields
 import particlesim.physics.FieldValue
 import particlesim.physics.Wind
@@ -107,7 +108,8 @@ import kotlin.math.roundToInt
  *                                                            i32 memberCount, memberCount * i32 id }
  * i32  registryColliderCount;   registryColliderCount   * { i32 nameLen, nameLen UTF-8 bytes, u8 active }
  * i32  registryGroupEnabledCount; registryGroupEnabledCount * { i32 nameLen, nameLen UTF-8 bytes, u8 enabled }
- * i32  registryFieldCount;      registryFieldCount      * { u8 kind (0=force, 1=constraint, 2=light),
+ * i32  registryFieldCount;      registryFieldCount      * { u8 kind (0=force, 1=constraint, 2=light,
+ *                                                                     3=custom emitter),
  *                                                            i32 nameLen, nameLen UTF-8 bytes,
  *                                                            i32 fieldNameLen, fieldNameLen UTF-8 bytes,
  *                                                            u8 valueKind (0=scalar, 1=vector),
@@ -138,6 +140,9 @@ import kotlin.math.roundToInt
  *                                  not individually reachable here; its live color/intensity/
  *                                  position travel through the registryFieldCount section above
  *                                  like any other EditableFields entity, not duplicated here)
+ * i32  registryCustomEmitterCount; registryCustomEmitterCount * { i32 nameLen, nameLen UTF-8 bytes }
+ *                                  (CustomEmitters, which the outliner lists with the emitters
+ *                                  above; their editable values travel as kind=3 field entries)
  * i32  colliderCount
  * colliderCount * { u8 kind (0=plane, 1=sphere, 2=box), i32 nameLen, nameLen UTF-8 bytes,
  *                    f64 px, py, pz,
@@ -213,6 +218,9 @@ import kotlin.math.roundToInt
  *                f64 value, u8 hasCurrent, [f64 current] }
  *                (§9.6 scene controls: numbers the person sets with a slider or by typing,
  *                sending set_scene_control; current is where the thing driven has got to)
+ * i32  puffCount; puffCount * { i32 particleId, f32 radius, f32 opacity, u8 r, g, b }
+ *                (particles drawn as lit, translucent smoke puffs rather than dots - see
+ *                [particlesim.render.Puff]. f32 because they're only ever drawn)
  * ```
  *
  * The event section is §9.1's discrete-event channel ([SimEvent]) — everything above it in this
@@ -319,6 +327,7 @@ object BinaryFrame {
     private const val SPHERE_SIZE = 4 + 8 // id, radius
     private const val PARTICLE_COLOR_HEADER_SIZE = 4
     private const val PARTICLE_COLOR_SIZE = 4 + 1 + 1 + 1 // id, r, g, b (u8 channels)
+    private const val PUFF_SIZE = 4 + 4 + 4 + 3 // id, radius, opacity, r, g, b
     private const val MESH_HEADER_SIZE = 4
     private const val MESH_ENTRY_HEADER_SIZE = 1 + 1 + 4 // wireframe, pickable, triangleCount
     private const val TRIANGLE_SIZE = 4 + 4 + 4 // a, b, c
@@ -354,6 +363,7 @@ object BinaryFrame {
     private const val FORCE_KIND: Byte = 0
     private const val CONSTRAINT_KIND: Byte = 1
     private const val LIGHT_FIELD_KIND: Byte = 2
+    private const val EMITTER_FIELD_KIND: Byte = 3
     private const val SCALAR_KIND: Byte = 0
     private const val VECTOR_KIND: Byte = 1
 
@@ -397,6 +407,7 @@ object BinaryFrame {
         restPositions: Map<Int, Vector3> = emptyMap(),
         deformationScale: Double = 1.0,
         controls: List<SceneControl> = emptyList(),
+        puffs: Map<Int, Puff> = emptyMap(),
     ): ByteBuffer {
         val coloredArrowGroups = arrowGroups.withIndex().filter { (_, g) -> g.samples.any { it.color != null } }
         val styleTable = connectionStyles.values.distinct()
@@ -427,7 +438,7 @@ object BinaryFrame {
             emitterEntryListSize(emitterEntries) +
             windEntryListSize(windEntries) +
             particleExpressionEntryListSize(particleExpressionEntries) +
-            nameListSize(registry.lights.keys) +
+            nameListSize(registry.lights.keys) + nameListSize(registry.customEmitters.keys) +
             COLLIDER_HEADER_SIZE + colliders.sumOf { colliderEntrySize(it) } +
             EVENT_HEADER_SIZE + events.sumOf { eventEntrySize(it) } +
             nameListSize(availableScenes) + stringSize(activeScene) +
@@ -441,7 +452,8 @@ object BinaryFrame {
             stringSize(lineLegend?.label ?: "") +
             (if (lineLegend != null && lineLegend.label.isNotEmpty()) stringSize(lineLegend.unit) + 8 + 8 + 4 + lineLegend.stops.size * 3 else 0) +
             4 + restPositions.size * 16 + 8 +
-            4 + controls.sumOf { stringSize(it.name) + stringSize(it.unit) + 24 + 1 + (if (it.current != null) 8 else 0) }
+            4 + controls.sumOf { stringSize(it.name) + stringSize(it.unit) + 24 + 1 + (if (it.current != null) 8 else 0) } +
+            4 + puffs.size * PUFF_SIZE
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
         buffer.putDouble(t)
@@ -545,6 +557,7 @@ object BinaryFrame {
                 when (entry.kind) {
                     "force" -> FORCE_KIND
                     "constraint" -> CONSTRAINT_KIND
+                    "emitter" -> EMITTER_FIELD_KIND
                     else -> LIGHT_FIELD_KIND
                 },
             )
@@ -576,6 +589,7 @@ object BinaryFrame {
             putString(buffer, entry.source)
         }
         putNameList(buffer, registry.lights.keys)
+        putNameList(buffer, registry.customEmitters.keys)
         buffer.putInt(colliders.size)
         for (collider in colliders) {
             when (collider) {
@@ -682,6 +696,13 @@ object BinaryFrame {
             buffer.putDouble(control.min); buffer.putDouble(control.max); buffer.putDouble(control.value)
             buffer.put(if (control.current != null) 1 else 0)
             if (control.current != null) buffer.putDouble(control.current)
+        }
+        buffer.putInt(puffs.size)
+        for ((id, puff) in puffs) {
+            buffer.putInt(id)
+            buffer.putFloat(puff.radius.toFloat())
+            buffer.putFloat(puff.opacity.toFloat())
+            buffer.put(colorChannelToByte(puff.color.r)); buffer.put(colorChannelToByte(puff.color.g)); buffer.put(colorChannelToByte(puff.color.b))
         }
 
         buffer.flip()
@@ -797,6 +818,7 @@ object BinaryFrame {
             winds = getWindEntryList(buf),
             particleExpressions = getParticleExpressionEntryList(buf),
             lights = getNameList(buf),
+            customEmitters = getNameList(buf),
         )
         val colliderCount = buf.int
         val colliders = (0 until colliderCount).map {
@@ -891,10 +913,14 @@ object BinaryFrame {
             val min = buf.double; val max = buf.double; val value = buf.double
             SceneControl(name, unit, min, max, value, if (buf.get().toInt() != 0) buf.double else null)
         }
+        val puffs = (0 until buf.int).associate {
+            buf.int to Puff(buf.float.toDouble(), buf.float.toDouble(), Color(byteToColorChannel(buf.get()), byteToColorChannel(buf.get()), byteToColorChannel(buf.get())))
+        }
         return DecodedFrame(
             t, step, particles, connections, camera, spheres, particleColors, meshes, coloredArrowGroups, visibleIds, registry,
             colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
             skyColor, solidParticleColors, accelerations, trailSeconds, options, lineLegend, restPositions, deformationScale, controls,
+            puffs,
         )
     }
 
@@ -1015,6 +1041,9 @@ object BinaryFrame {
         // don't opt in.
         for ((name, light) in registry.lights) {
             for ((field, value) in light.editableFields()) entries += RegistryFieldEntry("light", name, field, value)
+        }
+        for ((name, emitter) in registry.customEmitters) {
+            for ((field, value) in emitter.editableFields()) entries += RegistryFieldEntry("emitter", name, field, value)
         }
         return entries
     }
@@ -1140,6 +1169,7 @@ object BinaryFrame {
                 FORCE_KIND -> "force"
                 CONSTRAINT_KIND -> "constraint"
                 LIGHT_FIELD_KIND -> "light"
+                EMITTER_FIELD_KIND -> "emitter"
                 else -> error("unknown field-entry kind byte: $kindByte")
             }
             val name = getString(buffer)
@@ -1304,6 +1334,7 @@ data class DecodedRegistry(
     val winds: List<DecodedWindEntry> = emptyList(),
     val particleExpressions: List<DecodedParticleExpressionEntry> = emptyList(),
     val lights: List<String> = emptyList(),
+    val customEmitters: List<String> = emptyList(),
 )
 
 data class DecodedFrame(
@@ -1337,4 +1368,5 @@ data class DecodedFrame(
     val restPositions: Map<Int, Vector3> = emptyMap(),
     val deformationScale: Double = 1.0,
     val controls: List<SceneControl> = emptyList(),
+    val puffs: Map<Int, Puff> = emptyMap(),
 )

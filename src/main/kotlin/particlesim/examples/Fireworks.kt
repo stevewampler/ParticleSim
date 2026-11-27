@@ -4,8 +4,11 @@ import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
+import particlesim.lifecycle.CustomEmitter
 import particlesim.lifecycle.DestructionSystem
+import particlesim.lifecycle.ReplayableRandom
 import particlesim.physics.Drag
+import particlesim.physics.FieldValue
 import particlesim.physics.Force
 import particlesim.physics.Integrator
 import particlesim.physics.UniformGravity
@@ -17,7 +20,6 @@ import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.sin
 import kotlin.math.sqrt
-import kotlin.random.Random
 
 /** A fireworks display's timestep - one viewer frame, so it runs in real time. Nothing here is
  * stiff: the fastest thing is a star's drag, which acts over tenths of a second. */
@@ -47,8 +49,24 @@ const val SHELL_DRAG = 0.0013
  *   a cross, square to the comet's path.
  * - [STROBE]: slow, long-burning white stars that blink on and off.
  * - [PALM]: a handful of heavy gold comets thrown up and out, each shedding a tail of sparks as
- *   it arcs over and droops - the fronds of a palm tree. */
-enum class BurstType { PEONY, TWO_TONE, WILLOW, RING, CRACKLE, SPLIT, CROSSETTE, STROBE, PALM }
+ *   it arcs over and droops - the fronds of a palm tree.
+ * - [KAMURO]: a dense crown of long-burning glittering stars, each shedding a trail of brief
+ *   glitter as it slows and hangs.
+ * - [HORSETAIL]: stars barely thrown out, so they fall away from the break together in a
+ *   long streaming column - a horse's tail.
+ * - [MULTI_BREAK]: a peony whose break also throws an inner shell further up, which breaks
+ *   again a moment later in another colour - two or three breaks in all, one above another. */
+enum class BurstType { PEONY, TWO_TONE, WILLOW, RING, CRACKLE, SPLIT, CROSSETTE, STROBE, PALM, KAMURO, HORSETAIL, MULTI_BREAK }
+
+/** A cloud of [puffs] smoke puffs, each thrown out at [minSpeed]-[maxSpeed] m/s and lasting
+ * [minLife]-[maxLife] s; [flatten] squashes their spread vertically (1 = round). Modelling
+ * choices, picked to look right, not measured. */
+data class SmokeCloud(val puffs: Int, val minSpeed: Double, val maxSpeed: Double, val minLife: Double, val maxLife: Double, val flatten: Double = 1.0)
+
+/** A burning star that sheds sparks behind it, with [chance] of one each step: a
+ * [BurstType.PALM] frond or a [BurstType.KAMURO] star. Each spark is a [recipe] star in [color],
+ * leaving with [carry] times the star's velocity plus [StarRecipe.speed] in a random direction. */
+data class SparkTail(val chance: Double, val recipe: StarRecipe, val color: Color, val carry: Double)
 
 /** What a star does as it burns out - see [FireworksShow]. */
 sealed interface BurnoutEffect {
@@ -80,6 +98,11 @@ data class Shell(
     /** When this shell starts whistling (it whistles until [whistleEnd]), or null if it doesn't. */
     val whistleStart: Double? = null,
     val whistleEnd: Double? = null,
+    /** A [BurstType.MULTI_BREAK] shell's breaks still to come after this one, each's colour. */
+    val laterBreaks: List<Color> = emptyList(),
+    /** Which break this is: 1 for a shell fired from a mortar, 2 and 3 for a multi-break
+     * shell's inner shells. */
+    val stage: Int = 1,
 )
 
 /** A shell bursting at [position] at [time], lighting the ground in [color] - the scene turns
@@ -127,8 +150,12 @@ data class FireworksStepResult(
  *   lifetime, §14.2) and is then destroyed. Some stars do something as they burn out: a
  *   [BurstType.CRACKLE] star pops into sparks, a [BurstType.SPLIT] sub-shell bursts again, and a
  *   [BurstType.CROSSETTE] comet splits in a cross ([BurnoutEffect]). A [BurstType.PALM] frond
- *   sheds tail sparks all the while it burns.
+ *   and a [BurstType.KAMURO] star shed tail sparks all the while they burn ([SparkTail]).
+ * - A [BurstType.MULTI_BREAK] shell's break also throws an inner shell further up, which
+ *   breaks again (and again, for a three-break shell) a moment later.
  * - Every shell's burst is also recorded as a [BurstFlash] for a moment ([recentFlashes]).
+ * - Every launch and burst leaves smoke ([SMOKE_GROUP], [smokeIds]): puffs thrown out a little
+ *   way, then carried on the breeze by [smokeDrift], gone after ~20 s.
  * - Each step reports the noises it made ([FireworkSound]): a launch, a boom per burst (quieter
  *   for split sub-shells and crossette breaks), a crackle per crackling star, and a whistle for
  *   the shells that whistle ([WHISTLE_CHANCE]). A whistle runs over the last ~1 s of the climb
@@ -138,39 +165,65 @@ data class FireworksStepResult(
  * burst type's star counts are modelling choices, picked to look right from the scene's
  * viewpoint, not sourced figures.
  *
- * Launching isn't an [particlesim.lifecycle.Emitter]: bursts appear where a shell happens to be
- * when its fuse runs out, which a rate-driven emitter at a fixed place can't express. So the
- * launcher doesn't show up under the viewer's EMITTERS, can't be edited live, and isn't part of a
- * §9.5 checkpoint. Its randomness comes from one seeded [Random], so a run repeats exactly (§11).
+ * Launching isn't a rate-driven [particlesim.lifecycle.Emitter]: bursts appear where a shell
+ * happens to be when its fuse runs out, which an emitter at a fixed place can't express. The show
+ * is a [CustomEmitter] instead, named `launcher`: the viewer lists it under EMITTERS with its
+ * launch interval, break heights and spread editable live ([editableFields]), and a §9.5
+ * checkpoint carries everything it has in flight ([captureState]) so a resumed run carries on
+ * exactly. Its randomness comes from two seeded streams - one for the display, one for the smoke,
+ * so smoke never shifts the display's draws - and a run repeats exactly (§11).
  */
 class FireworksShow(
-    seed: Long = 1L,
+    val seed: Long = 1L,
     /** Mortars sit at random points this far either side of the origin along x, m. */
-    val launchHalfWidth: Double = 50.0,
-    val minBreakHeight: Double = 90.0,
-    val maxBreakHeight: Double = 140.0,
+    launchHalfWidth: Double = 50.0,
+    minBreakHeight: Double = 90.0,
+    maxBreakHeight: Double = 140.0,
     /** Time between one launch (or salvo) and the next, s. */
-    val minLaunchInterval: Double = 0.6,
-    val maxLaunchInterval: Double = 1.6,
+    minLaunchInterval: Double = 0.6,
+    maxLaunchInterval: Double = 1.6,
     /** When the first launch goes up, s - [Double.POSITIVE_INFINITY] for none (only [launch]). */
     firstLaunchTime: Double = 0.5,
-) {
+    /** Whether launches and bursts leave smoke. */
+    val smoke: Boolean = true,
+) : CustomEmitter {
+    override val name = "launcher"
     val store = ParticleStore()
     val groups = Groups()
-    private val random = Random(seed)
+    private var random = ReplayableRandom(seed)
+    /** The smoke's own stream, so puffs never shift the display's draws. */
+    private var smokeRandom = ReplayableRandom(seed xor SMOKE_SEED_SALT)
+
+    var launchHalfWidth = launchHalfWidth
+        private set
+    var minBreakHeight = minBreakHeight
+        private set
+    var maxBreakHeight = maxBreakHeight
+        private set
+    var minLaunchInterval = minLaunchInterval
+        private set
+    var maxLaunchInterval = maxLaunchInterval
+        private set
     private val integrator = Integrator()
     private val destruction = DestructionSystem()
 
     val gravity = UniformGravity(ALL_GROUP, Vector3(0.0, -FIREWORKS_GRAVITY, 0.0), name = "gravity")
     val drag = Drag(STAR_GROUP, coefficient = STAR_DRAG, name = "star-drag")
     val shellDrag = Drag(SHELL_GROUP, coefficient = SHELL_DRAG, quadratic = true, name = "shell-drag")
-    val forces: List<Force> = listOf(gravity, drag, shellDrag)
+    /** Carries the smoke along with the breeze: drag toward a moving air, so each puff soon
+     * slows from its burst and then drifts with the wind (editable as `wind`). */
+    val smokeDrift = Drag(SMOKE_GROUP, coefficient = SMOKE_DRAG, name = "smoke-drift", air = Vector3(SMOKE_WIND_SPEED, 0.0, 0.0))
+    val forces: List<Force> = listOf(gravity, drag, shellDrag, smokeDrift)
 
     private val shells = mutableListOf<Shell>()
     private val starColors = HashMap<Int, Color>()
     private val glitter = HashSet<Int>()
     private val strobes = HashSet<Int>()
     private val palmFronds = HashSet<Int>()
+    /** Smoke puffed since the last step reported its spawns. */
+    private val pendingSmoke = mutableListOf<Int>()
+    /** Stars shedding sparks as they burn, by id. */
+    private val tails = HashMap<Int, SparkTail>()
     /** Stars that do something when they burn out, by id. */
     private val burnoutEffects = HashMap<Int, BurnoutEffect>()
     private val flashes = ArrayDeque<BurstFlash>()
@@ -190,6 +243,9 @@ class FireworksShow(
 
     /** The live [BurstType.PALM] fronds, which the scene draws larger. */
     val palmFrondIds: Set<Int> get() = palmFronds
+
+    /** The live smoke puffs - kept out of [ALL_GROUP], so gravity leaves them hanging. */
+    val smokeIds: Set<Int> get() = groups.membersOf(SMOKE_GROUP)
 
     /** Shell bursts in the last [FLASH_MEMORY] seconds, oldest first. */
     val recentFlashes: List<BurstFlash> get() = flashes.toList()
@@ -218,11 +274,14 @@ class FireworksShow(
             val start = shell.whistleStart!!
             sounds += FireworkSound(FireworkNoise.WHISTLE, store.position(shell.id), 1.0, start, duration = shell.whistleEnd!! - start)
         }
-        for (id in destroyed.destroyedIds) {
+        // In id order (the order they were made), not the store's slot order - which smoke
+        // shifts - so burn-out effects draw from the random stream the same way with or without it.
+        for (id in destroyed.destroyedIds.sorted()) {
             starColors.remove(id)
             glitter.remove(id)
             strobes.remove(id)
             palmFronds.remove(id)
+            tails.remove(id)
             val effect = burnoutEffects.remove(id) ?: continue
             val (position, velocity) = effectStates.getValue(id)
             spawned += when (effect) {
@@ -237,15 +296,18 @@ class FireworksShow(
             }
         }
 
-        // Burning palm fronds leave their tails behind them.
-        for (frond in palmFronds.sorted()) {
-            if (random.nextDouble() < PALM_TAIL_CHANCE) spawned += tailSpark(store.position(frond), store.velocity(frond), now)
+        // Burning palm fronds and kamuro stars leave their tails behind them.
+        for (id in tails.keys.sorted()) {
+            val tail = tails.getValue(id)
+            if (random.nextDouble() < tail.chance) spawned += tailSpark(tail, store.position(id), store.velocity(id), now)
         }
 
         for ((shell, position, velocity) in bursts) {
             spawned += burst(shell, position, velocity, now)
             flashes.addLast(BurstFlash(position, now, shell.colors.first()))
             sounds += FireworkSound(FireworkNoise.BOOM, position, 1.0, now)
+            puff(position, velocity * SMOKE_CARRY, BURST_SMOKE, now)
+            if (shell.laterBreaks.isNotEmpty()) spawned += innerShell(shell, position, velocity, now)
         }
         while (flashes.isNotEmpty() && now - flashes.first().time > FLASH_MEMORY) flashes.removeFirst()
 
@@ -262,7 +324,142 @@ class FireworksShow(
             }
             nextLaunchTime = now + random.nextDouble(minLaunchInterval, maxLaunchInterval)
         }
+        spawned += pendingSmoke
+        pendingSmoke.clear()
         return FireworksStepResult(spawned, destroyed.destroyedIds, sounds)
+    }
+
+    /** The launcher's live-editable settings (§10.4): break heights and launch interval as
+     * ranges, and how far either side of the middle the mortars spread. */
+    override fun editableFields(): Map<String, FieldValue> = linkedMapOf(
+        "minBreakHeight" to FieldValue.Scalar(minBreakHeight),
+        "maxBreakHeight" to FieldValue.Scalar(maxBreakHeight),
+        "minLaunchInterval" to FieldValue.Scalar(minLaunchInterval),
+        "maxLaunchInterval" to FieldValue.Scalar(maxLaunchInterval),
+        "launchHalfWidth" to FieldValue.Scalar(launchHalfWidth),
+    )
+
+    /** Refuses a value that isn't finite, a range turned inside out (a minimum above its
+     * maximum), break heights outside 10-400 m, an interval under 0.05 s, or a negative spread.
+     * A new interval takes effect from the next launch. */
+    override fun setField(field: String, value: FieldValue): Boolean {
+        val v = (value as? FieldValue.Scalar)?.value ?: return false
+        if (!v.isFinite()) return false
+        when (field) {
+            "minBreakHeight" -> if (v in 10.0..maxBreakHeight) minBreakHeight = v else return false
+            "maxBreakHeight" -> if (v in minBreakHeight..400.0) maxBreakHeight = v else return false
+            "minLaunchInterval" -> if (v in 0.05..maxLaunchInterval) minLaunchInterval = v else return false
+            "maxLaunchInterval" -> if (v >= minLaunchInterval) maxLaunchInterval = v else return false
+            "launchHalfWidth" -> if (v >= 0.0) launchHalfWidth = v else return false
+            else -> return false
+        }
+        return true
+    }
+
+    /** Everything the show keeps besides its particles and their groups (§9.5): where both
+     * random streams have got to, when the next launch goes up, the editable settings, every
+     * shell in flight, each star's colour and what it does as it burns, and the recent flashes. */
+    override fun captureState(): Map<String, Any?> = linkedMapOf(
+        "seed" to seed,
+        "random_steps" to random.steps,
+        "smoke_random_steps" to smokeRandom.steps,
+        "next_launch_time" to nextLaunchTime,
+        "settings" to editableFields().mapValues { (_, v) -> (v as FieldValue.Scalar).value },
+        "shells" to shells.map { shell ->
+            linkedMapOf(
+                "id" to shell.id,
+                "burst_time" to shell.burstTime,
+                "break_height" to shell.breakHeight,
+                "type" to shell.type.name,
+                "colors" to shell.colors.map(::colorList),
+                "whistle_start" to shell.whistleStart,
+                "whistle_end" to shell.whistleEnd,
+                "later_breaks" to shell.laterBreaks.map(::colorList),
+                "stage" to shell.stage,
+            )
+        },
+        "star_colors" to starColors.entries.sortedBy { it.key }.map { (id, c) -> listOf(id) + colorList(c) },
+        "glitter" to glitter.sorted(),
+        "strobes" to strobes.sorted(),
+        "palm_fronds" to palmFronds.sorted(),
+        "tails" to tails.entries.sortedBy { it.key }.map { (id, tail) -> listOf(id, tailName(tail)) },
+        "burnout_effects" to burnoutEffects.entries.sortedBy { it.key }.map { (id, effect) ->
+            when (effect) {
+                BurnoutEffect.Crackle -> listOf(id, "crackle", emptyList<List<Double>>())
+                is BurnoutEffect.Split -> listOf(id, "split", effect.colors.map(::colorList))
+                is BurnoutEffect.Crossette -> listOf(id, "crossette", listOf(colorList(effect.color)))
+            }
+        },
+        "flashes" to flashes.map { f -> linkedMapOf("position" to listOf(f.position.x, f.position.y, f.position.z), "time" to f.time, "color" to colorList(f.color)) },
+    )
+
+    /** Puts back what [captureState] took, into a show built with the same seed whose particles
+     * and groups the checkpoint has already restored. */
+    @Suppress("UNCHECKED_CAST")
+    override fun restoreState(state: Map<String, Any?>) {
+        require((state["seed"] as Number).toLong() == seed) { "checkpoint is of a show with seed ${state["seed"]}, not $seed" }
+        random = ReplayableRandom.restore(seed, (state["random_steps"] as Number).toLong())
+        smokeRandom = ReplayableRandom.restore(seed xor SMOKE_SEED_SALT, (state["smoke_random_steps"] as Number).toLong())
+        nextLaunchTime = (state["next_launch_time"] as Number).toDouble()
+        val settings = state["settings"] as Map<String, Number>
+        launchHalfWidth = settings.getValue("launchHalfWidth").toDouble()
+        minBreakHeight = settings.getValue("minBreakHeight").toDouble()
+        maxBreakHeight = settings.getValue("maxBreakHeight").toDouble()
+        minLaunchInterval = settings.getValue("minLaunchInterval").toDouble()
+        maxLaunchInterval = settings.getValue("maxLaunchInterval").toDouble()
+        fun num(x: Any?) = (x as Number).toDouble()
+        fun color(x: Any?) = (x as List<Any?>).let { Color(num(it[0]), num(it[1]), num(it[2])) }
+        shells.clear()
+        for (m in state["shells"] as List<Map<String, Any?>>) {
+            shells += Shell(
+                id = (m["id"] as Number).toInt(),
+                burstTime = num(m["burst_time"]),
+                breakHeight = num(m["break_height"]),
+                type = BurstType.valueOf(m["type"] as String),
+                colors = (m["colors"] as List<Any?>).map(::color),
+                whistleStart = (m["whistle_start"] as Number?)?.toDouble(),
+                whistleEnd = (m["whistle_end"] as Number?)?.toDouble(),
+                laterBreaks = (m["later_breaks"] as List<Any?>).map(::color),
+                stage = (m["stage"] as Number).toInt(),
+            )
+        }
+        starColors.clear()
+        for (row in state["star_colors"] as List<List<Any?>>) starColors[(row[0] as Number).toInt()] = color(row.drop(1))
+        fun ids(key: String) = (state[key] as List<Number>).map { it.toInt() }
+        glitter.clear(); glitter += ids("glitter")
+        strobes.clear(); strobes += ids("strobes")
+        palmFronds.clear(); palmFronds += ids("palm_fronds")
+        tails.clear()
+        for (row in state["tails"] as List<List<Any?>>) tails[(row[0] as Number).toInt()] = tailNamed(row[1] as String)
+        burnoutEffects.clear()
+        for (row in state["burnout_effects"] as List<List<Any?>>) {
+            val colors = (row[2] as List<Any?>).map(::color)
+            burnoutEffects[(row[0] as Number).toInt()] = when (row[1] as String) {
+                "crackle" -> BurnoutEffect.Crackle
+                "split" -> BurnoutEffect.Split(colors)
+                else -> BurnoutEffect.Crossette(colors.single())
+            }
+        }
+        flashes.clear()
+        for (m in state["flashes"] as List<Map<String, Any?>>) {
+            val p = m["position"] as List<Any?>
+            flashes.addLast(BurstFlash(Vector3(num(p[0]), num(p[1]), num(p[2])), num(m["time"]), color(m["color"])))
+        }
+        pendingSmoke.clear()
+    }
+
+    private fun colorList(c: Color) = listOf(c.r, c.g, c.b)
+
+    private fun tailName(tail: SparkTail) = when (tail) {
+        PALM_TAIL -> "palm"
+        KAMURO_TAIL -> "kamuro"
+        else -> error("unknown spark tail $tail")
+    }
+
+    private fun tailNamed(name: String) = when (name) {
+        "palm" -> PALM_TAIL
+        "kamuro" -> KAMURO_TAIL
+        else -> error("unknown spark tail $name")
     }
 
     /** Fires one shell from a random mortar, aimed to peak at a random break height. */
@@ -285,20 +482,36 @@ class FireworksShow(
             whistleEnd = burstTime - random.nextDouble(WHISTLE_MIN_GAP, WHISTLE_MAX_GAP)
             whistleStart = whistleEnd - random.nextDouble(WHISTLE_MIN_LENGTH, WHISTLE_MAX_LENGTH)
         }
-        shells += Shell(id, burstTime, breakHeight, type, colorsFor(type), whistleStart, whistleEnd)
+        puff(position, Vector3.ZERO, LAUNCH_SMOKE, now)
+        val colors = colorsFor(type)
+        val laterBreaks = if (type == BurstType.MULTI_BREAK) colors.drop(1) else emptyList()
+        shells += Shell(id, burstTime, breakHeight, type, if (laterBreaks.isEmpty()) colors else colors.take(1), whistleStart, whistleEnd, laterBreaks)
         return id
     }
 
-    private fun randomType(): BurstType = when (random.nextDouble()) {
-        in 0.0..0.22 -> BurstType.PEONY
-        in 0.22..0.36 -> BurstType.TWO_TONE
-        in 0.36..0.46 -> BurstType.WILLOW
-        in 0.46..0.56 -> BurstType.RING
-        in 0.56..0.66 -> BurstType.CRACKLE
-        in 0.66..0.76 -> BurstType.SPLIT
-        in 0.76..0.84 -> BurstType.CROSSETTE
-        in 0.84..0.92 -> BurstType.STROBE
-        else -> BurstType.PALM
+    private fun randomType(): BurstType {
+        var u = random.nextDouble()
+        for ((type, weight) in TYPE_WEIGHTS) {
+            if (u < weight) return type
+            u -= weight
+        }
+        return TYPE_WEIGHTS.last().first
+    }
+
+    /** A [BurstType.MULTI_BREAK] shell's next stage: an inner shell thrown on up from [shell]'s
+     * break, to break [MULTI_BREAK_MIN_DELAY]-[MULTI_BREAK_MAX_DELAY] s later in the next colour. */
+    private fun innerShell(shell: Shell, position: Vector3, velocity: Vector3, now: Double): Int {
+        val id = store.create(
+            position = position,
+            velocity = velocity + Vector3(0.0, MULTI_BREAK_KICK, 0.0),
+            mass = ScalarExpr.of(SHELL_MASS),
+            spawnTime = now,
+        )
+        groups.add(ALL_GROUP, id)
+        groups.add(SHELL_GROUP, id)
+        val delay = random.nextDouble(MULTI_BREAK_MIN_DELAY, MULTI_BREAK_MAX_DELAY)
+        shells += Shell(id, now + delay, position.y, BurstType.MULTI_BREAK, listOf(shell.laterBreaks.first()), laterBreaks = shell.laterBreaks.drop(1), stage = shell.stage + 1)
+        return id
     }
 
     private fun colorsFor(type: BurstType): List<Color> = when (type) {
@@ -312,6 +525,15 @@ class FireworksShow(
         BurstType.CRACKLE -> listOf(GLITTER_GOLD)
         BurstType.STROBE -> listOf(STROBE_WHITE)
         BurstType.PALM -> listOf(WILLOW_GOLD)
+        BurstType.KAMURO -> listOf(KAMURO_GOLD)
+        BurstType.HORSETAIL -> listOf(if (random.nextBoolean()) WILLOW_GOLD else HORSETAIL_SILVER)
+        // One colour per break, each different from the one before it.
+        BurstType.MULTI_BREAK -> {
+            val breaks = if (random.nextDouble() < 0.5) 2 else 3
+            val picks = mutableListOf(random.nextInt(PALETTE.size))
+            repeat(breaks - 1) { picks += (picks.last() + 1 + random.nextInt(PALETTE.size - 1)) % PALETTE.size }
+            picks.map { PALETTE[it] }
+        }
     }
 
     private fun burst(shell: Shell, position: Vector3, velocity: Vector3, now: Double): List<Int> {
@@ -331,10 +553,32 @@ class FireworksShow(
                 BurstType.SPLIT -> burnoutEffects[id] = BurnoutEffect.Split(shell.colors)
                 BurstType.CROSSETTE -> burnoutEffects[id] = BurnoutEffect.Crossette(color)
                 BurstType.STROBE -> strobes += id
-                BurstType.PALM -> palmFronds += id
+                BurstType.PALM -> { palmFronds += id; tails[id] = PALM_TAIL }
+                BurstType.KAMURO -> { glitter += id; tails[id] = KAMURO_TAIL }
                 else -> {}
             }
             id
+        }
+    }
+
+    /** [cloud]'s puffs of smoke, thrown out from [position] on top of [velocity], reported as
+     * spawned at the end of the step. */
+    private fun puff(position: Vector3, velocity: Vector3, cloud: SmokeCloud, now: Double) {
+        if (!smoke) return
+        for (k in 0 until cloud.puffs) {
+            val y = smokeRandom.nextDouble(-1.0, 1.0)
+            val a = smokeRandom.nextDouble(0.0, 2.0 * PI)
+            val r = sqrt(1.0 - y * y)
+            val direction = Vector3(r * cos(a), y * cloud.flatten, r * sin(a))
+            val id = store.create(
+                position = position,
+                velocity = velocity + direction * smokeRandom.nextDouble(cloud.minSpeed, cloud.maxSpeed),
+                mass = ScalarExpr.of(SMOKE_PUFF_MASS),
+                spawnTime = now,
+                lifetime = ScalarExpr.of(smokeRandom.nextDouble(cloud.minLife, cloud.maxLife)),
+            )
+            groups.add(SMOKE_GROUP, id)
+            pendingSmoke += id
         }
     }
 
@@ -382,10 +626,10 @@ class FireworksShow(
         }
     }
 
-    /** One spark dropped behind a palm frond: drifting at a fraction of the frond's speed, so
-     * it hangs back along the frond's path and droops away. */
-    private fun tailSpark(position: Vector3, velocity: Vector3, now: Double): Int =
-        star(position, velocity * PALM_TAIL_CARRY + randomDirection() * PALM_TAIL_RECIPE.speed, PALM_TAIL_RECIPE, WILLOW_GOLD, now)
+    /** One spark dropped behind a palm frond or kamuro star: drifting at a fraction of the
+     * star's speed, so it hangs back along the star's path and droops away. */
+    private fun tailSpark(tail: SparkTail, position: Vector3, velocity: Vector3, now: Double): Int =
+        star(position, velocity * tail.carry + randomDirection() * tail.recipe.speed, tail.recipe, tail.color, now)
 
     /** [n] palm fronds' directions: evenly round the vertical, each tipped out from it by
      * 35-70°, so they rise up and out and gravity bends them over within their burn. */
@@ -435,6 +679,20 @@ class FireworksShow(
         const val ALL_GROUP = "fireworks"
         const val SHELL_GROUP = "shells"
         const val STAR_GROUP = "stars"
+        const val SMOKE_GROUP = "smoke"
+        private const val SMOKE_SEED_SALT = 0x5307EL
+        /** A smoke puff's nominal mass, kg, and the drag on it, N·s/m: a 2 s time constant, so
+         * a puff thrown out at 8 m/s stops within ~16 m and then drifts with the air. */
+        const val SMOKE_PUFF_MASS = 1.0
+        const val SMOKE_DRAG = 0.5
+        /** The breeze carrying the smoke, m/s along +x - across the crowd's view. */
+        const val SMOKE_WIND_SPEED = 2.0
+        /** How much of a burst's own velocity its smoke keeps. */
+        const val SMOKE_CARRY = 0.3
+        /** The smoke from a shell's burst charge: a dozen puffs, lasting ~20 s. */
+        val BURST_SMOKE = SmokeCloud(puffs = 12, minSpeed = 3.0, maxSpeed = 8.0, minLife = 18.0, maxLife = 24.0)
+        /** The smoke left at a mortar by its lift charge: two low puffs, gone sooner. */
+        val LAUNCH_SMOKE = SmokeCloud(puffs = 2, minSpeed = 0.5, maxSpeed = 2.0, minLife = 6.0, maxLife = 9.0, flatten = 0.3)
         const val MORTAR_HEIGHT = 0.5
         const val SHELL_MASS = 0.2
         /** The share of shells that whistle on the way up. */
@@ -470,6 +728,25 @@ class FireworksShow(
         /** A split shell's sub-shells, before they burst: bright, near-white comets. */
         val SUBSHELL_COLOR = Color(1.0, 0.9, 0.7)
         val STROBE_WHITE = Color(0.95, 0.97, 1.0)
+        /** Kamuro's glitter: a paler, whiter gold than a willow's. */
+        val KAMURO_GOLD = Color(1.0, 0.85, 0.6)
+        val HORSETAIL_SILVER = Color(0.85, 0.88, 1.0)
+
+        /** How often each burst type is fired - peonies most, the showier types less. */
+        val TYPE_WEIGHTS: List<Pair<BurstType, Double>> = listOf(
+            BurstType.PEONY to 0.18,
+            BurstType.TWO_TONE to 0.12,
+            BurstType.WILLOW to 0.08,
+            BurstType.RING to 0.08,
+            BurstType.CRACKLE to 0.08,
+            BurstType.SPLIT to 0.08,
+            BurstType.CROSSETTE to 0.07,
+            BurstType.STROBE to 0.07,
+            BurstType.PALM to 0.07,
+            BurstType.KAMURO to 0.06,
+            BurstType.HORSETAIL to 0.05,
+            BurstType.MULTI_BREAK to 0.06,
+        )
 
         /** A crackling star's sparks, per star: fast, light (so drag stops them within a few
          * metres) and gone in about a tenth of a second. */
@@ -488,6 +765,16 @@ class FireworksShow(
         const val PALM_TAIL_CHANCE = 0.6
         /** How much of a frond's velocity its tail sparks start with. */
         const val PALM_TAIL_CARRY = 0.3
+        val PALM_TAIL = SparkTail(PALM_TAIL_CHANCE, PALM_TAIL_RECIPE, WILLOW_GOLD, PALM_TAIL_CARRY)
+        /** A kamuro star's glitter trail: brief, slow sparks, one every ~25 steps per star -
+         * with ~200 stars, several hundred glittering at once. */
+        val KAMURO_SPARK_RECIPE = StarRecipe(count = 1, speed = 1.0, starMass = 0.003, minBurn = 0.35, maxBurn = 0.7)
+        val KAMURO_TAIL = SparkTail(0.04, KAMURO_SPARK_RECIPE, KAMURO_GOLD, 0.2)
+        /** The upward speed a multi-break shell's break gives its inner shell, m/s, and how long
+         * that inner shell's fuse runs, s. */
+        const val MULTI_BREAK_KICK = 15.0
+        const val MULTI_BREAK_MIN_DELAY = 0.6
+        const val MULTI_BREAK_MAX_DELAY = 0.8
         val PALM_MIN_TILT = 35.0 * PI / 180.0
         val PALM_MAX_TILT = 70.0 * PI / 180.0
 
@@ -505,6 +792,13 @@ class FireworksShow(
             // Heavy, so drag hardly slows them (a 6 s drag time), and slow enough to top out
             // within 2 s and arc over before they burn out.
             BurstType.PALM -> StarRecipe(count = 7, speed = 20.0, starMass = 0.06, minBurn = 2.2, maxBurn = 2.8)
+            // Dense, light enough for drag to stop them within a second or so (a 0.6 s drag
+            // time), and long-burning, so the crown hangs.
+            BurstType.KAMURO -> StarRecipe(count = 200, speed = 32.0, starMass = 0.006, minBurn = 3.2, maxBurn = 4.0)
+            // Thrown out slowly; heavy enough (a 2.5 s drag time) to fall away together.
+            BurstType.HORSETAIL -> StarRecipe(count = 90, speed = 7.0, starMass = 0.025, minBurn = 3.5, maxBurn = 4.5)
+            // Each break: a smaller peony than a single-break shell's.
+            BurstType.MULTI_BREAK -> StarRecipe(count = 100, speed = 30.0, starMass = 0.01, minBurn = 1.6, maxBurn = 2.1)
         }
 
         /** Terminal speed of a falling shell, where drag balances its weight: √(m·g/k). */

@@ -97,6 +97,7 @@ object CheckpointReader {
             groupMembership = groupMembership,
             brokenConnections = brokenConnections,
             emitters = emitters,
+            customEmitters = (data["custom_emitters"] as? Map<String, Map<String, Any?>>).orEmpty(),
         )
     }
 }

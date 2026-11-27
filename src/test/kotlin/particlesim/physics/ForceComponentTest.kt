@@ -108,6 +108,41 @@ class ForceComponentTest {
     }
 
     @Test
+    fun `drag's coefficient is live-editable, and the force follows the edit`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val id = store.create(velocity = Vector3(3.0, 4.0, 0.0))
+        groups.add("g", id)
+        val drag = Drag("g", coefficient = 2.0, quadratic = true)
+        assertEquals(mapOf("coefficient" to FieldValue.Scalar(2.0)), drag.editableFields())
+        assertTrue(drag.setField("coefficient", FieldValue.Scalar(0.5)))
+        assertEquals(Vector3(-7.5, -10.0, 0.0), netForceOn(id, store, groups, drag))
+        assertFalse(drag.setField("quadratic", FieldValue.Scalar(1.0)), "only the coefficient is editable")
+        assertFalse(drag.setField("coefficient", FieldValue.Vector(Vector3.ZERO)))
+        assertEquals(mapOf("coefficient" to FieldValue.Scalar(0.5)), drag.editableFields())
+    }
+
+    @Test
+    fun `drag in moving air pulls toward the air's velocity, and that wind is editable`() {
+        val store = ParticleStore()
+        val groups = Groups()
+        val still = store.create(velocity = Vector3.ZERO)
+        val moving = store.create(velocity = Vector3(5.0, 0.0, 0.0))
+        groups.add("g", still); groups.add("g", moving)
+        val drag = Drag("g", coefficient = 2.0, air = Vector3(3.0, 0.0, 4.0))
+        // Relative to the air, the still particle moves at (-3, 0, -4): pushed along the wind.
+        assertEquals(Vector3(6.0, 0.0, 8.0), netForceOn(still, store, groups, drag))
+        assertEquals(Vector3(-4.0, 0.0, 8.0), netForceOn(moving, store, groups, drag))
+        assertEquals(FieldValue.Vector(Vector3(3.0, 0.0, 4.0)), drag.editableFields()["wind"])
+        assertTrue(drag.setField("wind", FieldValue.Vector(Vector3(5.0, 0.0, 0.0))))
+        assertEquals(Vector3.ZERO, netForceOn(moving, store, groups, drag), "moving with the air: no drag")
+        // In still air there's no wind field to edit.
+        val plain = Drag("g", coefficient = 2.0)
+        assertFalse("wind" in plain.editableFields())
+        assertFalse(plain.setField("wind", FieldValue.Vector(Vector3(1.0, 0.0, 0.0))))
+    }
+
+    @Test
     fun `uniform gravity's sampleAt returns the constant acceleration everywhere, for the arrow renderer`() {
         val gravity = UniformGravity("g", Vector3(0.0, -9.8, 0.0))
         assertEquals(Vector3(0.0, -9.8, 0.0), gravity.sampleAt(Vector3(50.0, 50.0, 50.0), t = 123.0))

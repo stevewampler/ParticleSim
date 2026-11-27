@@ -24,7 +24,7 @@ class FireworksTest {
         val launchTimes = mutableListOf<Double>()
         var known = emptySet<Int>()
         run(show, 30.0) { t ->
-            val ids = show.liveShells.map { it.id }.toSet()
+            val ids = show.liveShells.filter { it.stage == 1 }.map { it.id }.toSet()
             if ((ids - known).isNotEmpty()) launchTimes += t
             known = ids
         }
@@ -93,12 +93,18 @@ class FireworksTest {
     fun `the display stays bounded, and its colour bookkeeping matches the live stars`() {
         val show = FireworksShow()
         var peak = 0
+        var peakSmoke = 0
         run(show, 120.0) {
             val stars = show.groups.membersOf(FireworksShow.STAR_GROUP)
             assertEquals(stars.toSet(), show.starColorsById.keys)
-            peak = maxOf(peak, show.store.size)
+            val smoke = show.smokeIds.size
+            peak = maxOf(peak, show.store.size - smoke)
+            peakSmoke = maxOf(peakSmoke, smoke)
         }
-        assertTrue(peak < 1500, "peak live particles $peak")
+        assertTrue(peak < 1800, "peak live shells and stars $peak")
+        // ~1.3 bursts a second, a dozen puffs each lasting ~21 s: a few hundred puffs.
+        assertTrue(peakSmoke < 700, "peak smoke puffs $peakSmoke")
+        println("fireworks peaks: $peak shells and stars, $peakSmoke smoke puffs")
     }
 
     @Test
@@ -353,6 +359,156 @@ class FireworksTest {
     }
 
     @Test
+    fun `a horsetail's stars fall away from the break together, in a narrow column`() {
+        val show = quietShow()
+        val (t, burstAt) = burstOne(show, BurstType.HORSETAIL)
+        val stars = show.starColorsById.keys.toList()
+        assertEquals(FireworksShow.recipeFor(BurstType.HORSETAIL).count, stars.size)
+        val end = run(show, 3.0, start = t)
+        assertEquals(stars.size, stars.count { show.store.contains(it) }, "all still burning at 3 s")
+        val drop = stars.map { burstAt.y - show.store.position(it).y }
+        val centre = stars.map { show.store.position(it) }.reduce { a, b -> a + b } * (1.0 / stars.size)
+        val sideways = stars.map { val p = show.store.position(it); kotlin.math.hypot(p.x - centre.x, p.z - centre.z) }
+        // Fallen ~20 m (gravity against a 2.5 s drag time), every star below the break, and the
+        // column far taller than it is wide.
+        assertTrue(drop.min() > 5.0 && drop.average() in 12.0..30.0, "drops ${drop.min()}..${drop.max()}, mean ${drop.average()}")
+        assertTrue(sideways.max() < 0.5 * drop.average(), "widest ${sideways.max()} m against a ${drop.average()} m fall")
+        run(show, 1.6, start = end)
+        assertTrue(show.starColorsById.isEmpty())
+    }
+
+    @Test
+    fun `a kamuro's dense crown glitters, hangs, and trails brief glitter from its burning stars`() {
+        val show = quietShow()
+        val (t, burstAt) = burstOne(show, BurstType.KAMURO)
+        val stars = show.starColorsById.keys.toSet()
+        assertEquals(FireworksShow.recipeFor(BurstType.KAMURO).count, stars.size)
+        assertEquals(stars, show.glitterIds, "every kamuro star twinkles")
+        var sparks = 0
+        var sparkDeaths = 0
+        var known = stars
+        val sparkIds = HashSet<Int>()
+        val end = run(show, 3.1, start = t) {
+            val fresh = show.starColorsById.keys - known
+            known = show.starColorsById.keys.toSet()
+            for (spark in fresh) {
+                val p = show.store.position(spark)
+                assertTrue(stars.any { show.store.contains(it) && (show.store.position(it) - p).length() < 1e-9 }, "sparks start at a burning star")
+                assertEquals(FireworksShow.KAMURO_GOLD, show.starColorsById[spark])
+            }
+            sparks += fresh.size
+            sparkIds += fresh
+            sparkDeaths = sparkIds.count { !show.store.contains(it) }
+        }
+        assertTrue(stars.all { show.store.contains(it) }, "the crown still burning at 3.1 s")
+        // Drag has all but stopped the stars: they hang ~20 m out, drifting down.
+        val out = stars.map { (show.store.position(it) - burstAt).length() }.average()
+        assertTrue(out in 10.0..40.0, "stars average $out m from the break")
+        assertTrue(stars.all { show.store.velocity(it).length() < 12.0 })
+        // 0.04 a step from each of 200 stars over 186 steps: ~1500, each gone within 0.7 s.
+        assertTrue(sparks in 1250..1750, "glitter sparks: $sparks")
+        assertTrue(sparkDeaths > sparks / 2)
+        run(show, 1.7, start = end)
+        assertTrue(show.starColorsById.isEmpty() && show.glitterIds.isEmpty())
+    }
+
+    @Test
+    fun `a multi-break shell breaks two or three times, each break later, higher and in a new colour`() {
+        for (seed in 1L..6L) {
+            val show = FireworksShow(seed = seed, launchHalfWidth = 0.0, firstLaunchTime = Double.POSITIVE_INFINITY)
+            val first = show.launch(0.0, BurstType.MULTI_BREAK)
+            val shell = show.liveShells.single { it.id == first }
+            val breaks = 1 + shell.laterBreaks.size
+            assertTrue(breaks in 2..3)
+            val colors = shell.colors + shell.laterBreaks
+            assertTrue(colors.zipWithNext().all { (a, b) -> a != b }, "each break a new colour")
+            val booms = mutableListOf<FireworkSound>()
+            val starsPerBreak = mutableListOf<Int>()
+            var known = emptySet<Int>()
+            var t = 0.0
+            repeat((9.0 / FIREWORKS_DT).toInt()) {
+                booms += show.step(t, FIREWORKS_DT).sounds.filter { it.noise == FireworkNoise.BOOM }
+                t += FIREWORKS_DT
+                val fresh = show.starColorsById.keys - known
+                known = show.starColorsById.keys.toSet()
+                if (fresh.isNotEmpty()) {
+                    starsPerBreak += fresh.size
+                    assertTrue(fresh.all { show.starColorsById[it] == colors[starsPerBreak.size - 1] })
+                }
+            }
+            assertEquals(List(breaks) { FireworksShow.recipeFor(BurstType.MULTI_BREAK).count }, starsPerBreak)
+            assertEquals(breaks, booms.size)
+            assertTrue(booms.all { it.loudness == 1.0 })
+            for ((a, b) in booms.zipWithNext()) {
+                val gap = b.time - a.time
+                assertTrue(gap in FireworksShow.MULTI_BREAK_MIN_DELAY - 1e-9..FireworksShow.MULTI_BREAK_MAX_DELAY + FIREWORKS_DT, "gap $gap")
+                assertTrue(b.position.y - a.position.y in 3.0..20.0, "rose ${b.position.y - a.position.y} m")
+            }
+            assertTrue(show.liveShells.isEmpty())
+        }
+    }
+
+    @Test
+    fun `each break of a multi-break shell lights its own flash`() {
+        val show = quietShow()
+        val id = show.launch(0.0, BurstType.MULTI_BREAK)
+        val colors = show.liveShells.single { it.id == id }.let { it.colors + it.laterBreaks }
+        val flashes = mutableListOf<BurstFlash>()
+        var t = 0.0
+        repeat((8.0 / FIREWORKS_DT).toInt()) {
+            show.step(t, FIREWORKS_DT)
+            t += FIREWORKS_DT
+            for (f in show.recentFlashes) if (flashes.none { it.time == f.time }) flashes += f
+        }
+        assertEquals(colors, flashes.map { it.color })
+    }
+
+    @Test
+    fun `a burst leaves a cloud of smoke that hangs, drifts with the breeze, and clears`() {
+        val show = quietShow()
+        val (t, burstAt) = burstOne(show, BurstType.PEONY)
+        val launchSmoke = show.smokeIds.filter { show.store.position(it).y < 20.0 }
+        assertEquals(FireworksShow.LAUNCH_SMOKE.puffs, launchSmoke.size, "the launch left smoke at the mortar")
+        val cloud = show.smokeIds - launchSmoke.toSet()
+        assertEquals(FireworksShow.BURST_SMOKE.puffs, cloud.size)
+        assertTrue(cloud.all { (show.store.position(it) - burstAt).length() < 2.0 }, "the cloud starts at the burst")
+        assertTrue(cloud.none { it in show.groups.membersOf(FireworksShow.ALL_GROUP) }, "gravity doesn't act on smoke")
+        // Ten seconds on (five drag time constants), every puff has stopped spreading and drifts
+        // with the air, still near the height it burst at.
+        val end = run(show, 10.0, start = t)
+        for (id in cloud) {
+            val v = show.store.velocity(id)
+            assertEquals(FireworksShow.SMOKE_WIND_SPEED, v.x, 0.1)
+            assertTrue(kotlin.math.abs(v.y) < 0.1 && kotlin.math.abs(v.z) < 0.1)
+            assertTrue(kotlin.math.abs(show.store.position(id).y - burstAt.y) < 20.0)
+        }
+        val centre = cloud.map { show.store.position(it) }.reduce { a, b -> a + b } * (1.0 / cloud.size)
+        assertTrue(centre.x - burstAt.x in 12.0..24.0, "drifted ${centre.x - burstAt.x} m downwind")
+        // A stiffer breeze, set live, carries it faster.
+        assertTrue(show.smokeDrift.setField("wind", particlesim.physics.FieldValue.Vector(Vector3(0.0, 0.0, -5.0))))
+        run(show, 10.0, start = end)
+        val left = cloud.filter { show.store.contains(it) }
+        assertTrue(left.isNotEmpty() && left.all { show.store.velocity(it).z < -4.5 })
+        // Gone within its 24 s.
+        run(show, 5.0, start = end + 10.0)
+        assertTrue(show.smokeIds.isEmpty())
+    }
+
+    @Test
+    fun `smoke draws on its own random stream, so it never changes the display`() {
+        // The same seed with and without smoke: the same shells and stars, in the same places
+        // (ids differ, as the smoke takes some, but they're handed out in order).
+        val a = FireworksShow(seed = 3L)
+        run(a, 20.0)
+        assertTrue(a.smokeIds.isNotEmpty())
+        val b = FireworksShow(seed = 3L, smoke = false)
+        run(b, 20.0)
+        assertTrue(b.smokeIds.isEmpty())
+        fun display(show: FireworksShow) = show.store.liveIds().sorted().filter { it !in show.smokeIds }.map { show.store.position(it) }
+        assertEquals(display(a), display(b))
+    }
+
+    @Test
     fun `every shell burst is remembered briefly, for the ground flash`() {
         val show = quietShow()
         val (t, burstAt) = burstOne(show, BurstType.PEONY)
@@ -388,7 +544,8 @@ class FireworksTest {
             t += FIREWORKS_DT
             sounds += result.sounds
             val shells = show.liveShells.associate { it.id to show.store.position(it.id) }
-            launchedAt += (shells.keys - lastShells.keys).map { shells.getValue(it) }
+            val fromMortars = show.liveShells.filter { it.stage == 1 }.map { it.id }.toSet()
+            launchedAt += (shells.keys - lastShells.keys).filter { it in fromMortars }.map { shells.getValue(it) }
             // A shell gone this step burst from where it was a step ago, moved on by one step.
             burstAt += (lastShells.keys - shells.keys).map { lastShells.getValue(it) }
             lastShells = shells
@@ -436,7 +593,7 @@ class FireworksTest {
             for (s in show.liveShells) shells[s.id] = s
         }
         // Only shells that have burst, so every whistle has had its chance to sound.
-        val done = shells.values.filter { it.burstTime < t }
+        val done = shells.values.filter { it.burstTime < t && it.stage == 1 }
         val whistlers = done.filter { it.whistleStart != null }
         val share = whistlers.size.toDouble() / done.size
         assertTrue(share in 0.2..0.4, "whistling share $share of ${done.size}")

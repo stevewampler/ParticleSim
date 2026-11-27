@@ -124,6 +124,14 @@ data class SceneOption(val name: String, val choices: List<String>, val selected
 }
 
 /**
+ * How one particle draws as a puff of smoke (§10.2), not a dot: a soft, translucent ball of
+ * [radius] metres at [opacity] (0-1) at its middle, its colour [color] (the smoke's own,
+ * before lighting) lit by the frame's lights - so a burst's flash lights the smoke around it
+ * and moonlight barely shows it. E.g. [particlesim.debug.FireworksScene]'s burst smoke.
+ */
+data class Puff(val radius: Double, val opacity: Double, val color: Color)
+
+/**
  * A number the scene lets the person set (§9.6), shown in the viewer's "controls" section as a
  * slider from [min] to [max] beside a box for typing it - e.g. where a crane should slew to.
  * [value] is what it's set to; [current], if given, is where the thing it drives has actually got

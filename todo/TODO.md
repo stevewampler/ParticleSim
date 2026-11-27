@@ -6155,19 +6155,64 @@ load. Full `./gradlew test -q` suite green throughout.
       use" from connections in TIME_WAIT), leaving the page connected to
       nothing. Tested by restarting on the same port after a client connected
       (fails without the flag).
+- [x] **More burst types** (branch `fireworks-followups`):
+      - Kamuro: 200 long-burning (3.2-4 s) glittering pale-gold stars, light
+        enough that drag stops them, each shedding brief glitter sparks.
+      - Horsetail: 90 heavy stars thrown out at only 7 m/s, so they fall
+        away together in a column.
+      - Multi-break: a 100-star peony whose break also throws an inner shell
+        15 m/s further up, to break again 0.6-0.8 s later in a new colour -
+        two or three breaks, each with its own boom and flash.
+      - Burn-outs are now processed in id order, not the store's slot
+        order, so the random stream is drawn the same way however the
+        store's slots fall.
+      - Tested: each type's star count and defining shape (the horsetail's
+        fall far taller than wide; the kamuro hanging ~20 m out, its spark
+        count and spark origins; the multi-break's breaks later, 3-20 m
+        higher and in new colours, booms and flashes per break).
+- [x] **Smoke, lit by the flashes** (§10.2): every burst leaves 12 puffs
+      (and every launch 2 at its mortar) in their own `smoke` group, out of
+      gravity's group. They're slowed by `smoke-drift` - a `Drag` toward a
+      2 m/s breeze (§5.2's new air velocity, editable as `wind`) - and
+      destroyed by lifetime after ~20 s. Their randomness is a separate
+      stream, so the display is identical with smoke on or off (tested).
+      The scene draws them as `SceneFrame.puffs`: swelling from 2 m toward
+      11 m, fading in over 0.4 s and thinning away over the second half of
+      their life. The viewer lights them with the scene's own lights in a
+      shader (see requirements §10.2), so each burst's flash lights the smoke
+      around it in its colour, and unlit smoke barely shows against the
+      night sky. Wire round-trip, puff look, drift with the breeze, a live
+      wind edit and clearing within 24 s tested; the look was checked in
+      headless screenshots with and without a flash.
+- [x] **`Drag` is live-editable** (§10.4): its `coefficient`, and `wind`
+      when it has an air velocity. Component tested.
+- [x] **The launcher is a `CustomEmitter`** (§14.1, new): listed under the
+      viewer's EMITTERS as `launcher`, with its break heights, launch
+      interval and spread editable live (nonsense refused), and carried
+      through §9.5 checkpoints: `Checkpoint.customEmitters`, written to the
+      sidecar's `custom_emitters`. Its two random streams are
+      `ReplayableRandom`s, which count every generator step whatever was
+      drawn (`CountingRandom` counts only doubles). Tested: a show run 40 s,
+      checkpointed to disk, read back and restored into a fresh show runs on
+      for 20 s identical to the bit to one never stopped.
+      - Viewer fix found on the way: the outliner rebuilt (and the open
+        panel re-rendered) every frame in any scene whose groups change each
+        step, because group membership was part of its change check - rows
+        couldn't be clicked and panel edits were wiped. It now keys on group
+        names only; a group panel's counts already refresh every frame.
+- [x] **Ribbon trails** (§10.2): instanced screen-facing quads instead of
+      GL lines, as wide as the particle is drawn at the head, narrowing to
+      40% at the tail, never under 1 pixel.
 - [ ] Gaps / possible next steps:
-      - the launch thump and whoosh are still tuned by guesswork (the
-        recording has no clear launches to measure);
-      - the launcher isn't an `Emitter`, so it isn't in the outliner, can't
-        be edited live, and isn't in §9.5 checkpoints;
-      - `Drag` has no editable fields, so `star-drag` and `shell-drag`
-        can't be tuned live (unchecking the `stars` or `shells` group
-        switches each off);
-      - other burst types (multi-break shells, kamuro, horsetail);
-      - flash point lights light only the ground mesh, not the smoke a real
-        burst lights up (there is no smoke);
-      - WebGL draws lines 1 pixel wide whatever the setting, so trails
-        stay thin; thicker ones would need ribbon geometry.
+      - the launch thump and whoosh are still tuned by guesswork: a search
+        found no recording or spectrum of isolated mortar launches to
+        measure (only that launches are lower-pitched than bursts, which
+        the thump already is). Needs a recording with clear launches;
+      - stars leave no smoke trails of their own (only bursts and launches
+        smoke), and smoke doesn't rise or spread on its own;
+      - in headless Chromium the viewer falls a few seconds behind real
+        time (the server takes ~0.8 ms a step); not checked in a GPU browser
+        since the ribbons and smoke were added.
 
 ## Starling murmuration (§5.6/§9.6/§10.2, new requirement) — not yet phased
 - [x] **`Flocking` force** (`particlesim.physics`), with these terms:
@@ -6536,7 +6581,8 @@ load. Full `./gradlew test -q` suite green throughout.
         needs a viewer control type; a scripted lift cycle as a demo option;
       - picking up and setting down loads (ground contact, slack rope);
       - a load-chart readout and overload warning (moment limiter);
-      - wind on the jib and load, weathervaning with the slew brake off;
+      - weathervaning with the slew brake off (wind itself is done - see
+        "Wind on the cranes");
       - tipping over (the foundation is fixed; real cranes can also topple
         their base ballast).
 

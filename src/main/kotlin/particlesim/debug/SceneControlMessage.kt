@@ -54,7 +54,8 @@ sealed interface SceneControlMessage {
     /** §9.6: a scene control ([particlesim.render.SceneControl]) set to [value]. */
     data class SetSceneControl(val name: String, val value: Double) : SceneControlMessage
 
-    /** §10.4's numeric field editing write path — [kind] is `"force"` or `"constraint"`,
+    /** §10.4's numeric field editing write path — [kind] is `"force"`, `"constraint"`, `"light"`
+     * or `"emitter"` (a [particlesim.lifecycle.CustomEmitter]),
      * matching [particlesim.debug.DecodedFieldEntry.kind] on the read side. Two message types
      * (scalar vs. vector), not one carrying a variant payload, because SnakeYAML/JSON has no
      * cheap way to express "this field is either a bare number or an {x,y,z} object" other than

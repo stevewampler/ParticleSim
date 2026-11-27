@@ -368,7 +368,11 @@ targeted for visualization.
   before this change.
 - **Drag / air resistance**: force opposing velocity, proportional to speed
   (linear) or speed² (quadratic), useful for damping runaway simulations and
-  for realistic cloth/flag behavior.
+  for realistic cloth/flag behavior. Its coefficient is live-editable
+  (§10.4). It may be given an air velocity, in which case it opposes velocity
+  *relative to that air*, so light particles end up drifting with it (the
+  `fireworks` scene's smoke, §14); that air velocity is then live-editable
+  too, as `wind`.
 - **N-body gravity**: pairwise Newtonian gravity between particles in a
   group (`F = G·m1·m2/r²`). Distinct from uniform gravity. Expensive at
   scale — see §9.3 on spatial partitioning / performance.
@@ -837,8 +841,10 @@ a recorded point (§9.4, `[stretch]`).
   alone, since emitters mutate it at runtime), the set of already-broken
   spring/damper connections (§5.4 — a one-way runtime mutation not present
   in the original definition), each emitter's spawn-accumulator phase and
-  RNG sub-stream state (§14.1, §11), and the current sim time `t` /
-  physics step index.
+  RNG sub-stream state (§14.1, §11), each custom emitter's own state
+  (§14.1 - e.g. the fireworks launcher's random streams, shells in flight and
+  per-star bookkeeping, as plain values it captures and restores itself), and
+  the current sim time `t` / physics step index.
 - **What's deliberately *not* captured, because it's cheap to recompute**:
   mass — a pure function of `(t, particle state)` per §3, recomputed on
   resume rather than stored — and the particle store's internal slot/
@@ -1131,7 +1137,19 @@ external image onto a mesh's surface.
   viewer draws them from positions it has already been sent and prunes by
   simulation time, so they add nothing to the wire but the one number. The
   trails are additive, so overlapping ones brighten, and they're never
-  picked. Added for the `fireworks` scene (§14).
+  picked. They're ribbons, not GL lines (which WebGL draws 1 pixel wide):
+  as wide as the particle is drawn at its head, narrowing to 40% at the
+  tail, never under 1 pixel. Added for the `fireworks` scene (§14).
+- **Smoke puffs**: a scene may draw particles as smoke
+  (`SceneFrame.puffs`: a radius, an opacity and a colour per particle)
+  rather than dots - soft translucent balls lit by the scene's own lights,
+  as a scattering cloud: half of each point light's illuminance reaches a
+  puff (its distance floored at the puff's radius), plus ambient and
+  directional light, soft-clipped so a puff beside a bright light keeps its
+  colour. Smoke adds the light it scatters and dims what's behind it by a
+  quarter of its opacity, so unlit smoke at night barely shows. Hidden with
+  its groups' "show particles" toggles. Added for the `fireworks` scene's
+  burst smoke, lit by each burst's flash (§14).
 - **Sound**: a scene may send `SimEvent.Sound` events on §9.1's event
   channel: a kind (launch, boom, crackle, whistle), a position, a
   loudness, the sim time it happened and a duration (for a whistle). The viewer synthesizes each one with the Web Audio
@@ -1864,6 +1882,8 @@ Worked example: `FireworksShow` and the `fireworks` scene (§9.6), which
 spawn stars where each shell bursts and destroy them by lifetime (§14.2).
 Some stars spawn more as they burn out (crackling sparks, a split shell's
 second bursts), reading their state before §14.2's destruction removes them.
+Every burst and launch also leaves smoke, which drifts on a breeze and is
+destroyed by lifetime like the stars.
 
 ### 14.1 Creation: emitters
 
@@ -1887,6 +1907,16 @@ Each emitter draws from its own independent, deterministically-seeded RNG
 sub-stream (§11, §14.4) — not a single stream shared across emitters —
 so the same master seed reproduces the same spawn sequence for a given
 emitter regardless of how many other emitters or threads are running.
+
+A **custom emitter** spawns by its own rules rather than at a rate - the
+fireworks launcher, whose bursts appear wherever a shell happens to be when
+its fuse runs out. It still belongs with the emitters: the viewer lists it
+under EMITTERS, its settings are editable there like a force's fields
+(§10.4), and a checkpoint carries its state (§9.5) - which it captures and
+restores itself, as plain values, since only it knows what it has in flight.
+Its randomness must be exactly replayable for that: the launcher counts
+every step of its seeded generators, whatever was drawn, and a restore
+replays that many.
 
 `[stretch]` Explicit/event-triggered spawn — e.g. spawning fragment
 particles when a spring breaks (§5.4) — is a natural extension but more
@@ -2019,7 +2049,11 @@ force/collision geometry in isolation (spring force magnitude for known
 inputs, sphere–plane/sphere–box intersection correctness, §12.4; the
 deck flutter moment of §7.2 against its formula, as a zero-net-force
 couple, and with the sign of its power `M·α̇` flipping at the critical
-reduced velocity). These
+reduced velocity; drag in moving air pushing a still particle along the
+wind, and nothing on one moving with it, §5.2). A custom emitter's
+checkpoint (§9.5, §14.1) is tested end to end: run, capture, write and
+read back, restore into a fresh one, and both carry on identically to the
+bit. These
 don't need a running simulation at all, just JUnit 5 (already wired into
 the build) against individual functions.
 

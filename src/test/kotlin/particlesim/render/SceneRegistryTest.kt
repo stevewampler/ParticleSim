@@ -121,4 +121,29 @@ class SceneRegistryTest {
         assertTrue(registry.surfaces.isEmpty())
         assertTrue(registry.groups.isEmpty())
     }
+
+    @Test
+    fun `custom emitters are listed by name, unique among themselves and the emitters`() {
+        val launcher = TestCustomEmitter("launcher")
+        assertEquals(mapOf("launcher" to launcher), SceneRegistry.build(customEmitters = listOf(launcher)).customEmitters)
+        assertFailsWith<IllegalArgumentException> { SceneRegistry.build(customEmitters = listOf(launcher, TestCustomEmitter("launcher"))) }
+        val emitter = particlesim.lifecycle.Emitter(
+            "launcher", "g", particlesim.core.ScalarExpr.of(1.0),
+            particlesim.lifecycle.VectorDistribution.UniformSphere(Vector3.ZERO, 1.0), particlesim.lifecycle.VectorDistribution.UniformSphere(Vector3.ZERO, 1.0),
+            maxAlive = 10, masterSeed = 1L,
+        )
+        assertFailsWith<IllegalArgumentException> { SceneRegistry.build(emitters = listOf(emitter), customEmitters = listOf(launcher)) }
+    }
+}
+
+/** A minimal [particlesim.lifecycle.CustomEmitter] for tests: one editable number. */
+internal class TestCustomEmitter(override val name: String, var level: Double = 1.0) : particlesim.lifecycle.CustomEmitter {
+    override fun editableFields() = mapOf("level" to particlesim.physics.FieldValue.Scalar(level))
+    override fun setField(field: String, value: particlesim.physics.FieldValue): Boolean {
+        if (field != "level" || value !is particlesim.physics.FieldValue.Scalar) return false
+        level = value.value
+        return true
+    }
+    override fun captureState(): Map<String, Any?> = mapOf("level" to level)
+    override fun restoreState(state: Map<String, Any?>) { level = (state["level"] as Number).toDouble() }
 }

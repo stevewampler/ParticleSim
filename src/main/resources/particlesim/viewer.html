@@ -757,36 +757,84 @@ function updateMotionArrows(frame) {
 }
 
 // --- Particle trails (§10.2's SceneFrame.trailSeconds) --------------------------------------
-// A fading line behind each visible particle through the positions it has had over the last
+// A fading streak behind each visible particle through the positions it has had over the last
 // trailSeconds of simulation time - what a long exposure (or the eye) sees of a fast spark, and
 // what makes a firework burst read as streaks rather than dots. Built entirely here, from
 // positions already sent in earlier frames, so it adds nothing to the wire. Pruned by sim time,
 // not frame count, so the trail is the same length however fast this viewer keeps up (a slow
-// viewer just gets a coarser one). Additive, so overlapping trails brighten like light does;
-// one LineSegments for every trail, never raycast.
+// viewer just gets a coarser one). Additive, so overlapping trails brighten like light does.
+//
+// Drawn as ribbons, not GL lines (which WebGL draws 1 pixel wide whatever the line width): one
+// instanced quad per segment, turned to face the screen in the vertex shader. A trail is as wide
+// as its particle is drawn (its sphere radius, doubled) at the particle, narrowing to 40% at the
+// tail, and never under 1 pixel, so a distant streak still shows; brightest along its middle.
+// One mesh for every trail, never raycast.
 const trailHistory = new Map(); // particle id -> [{ t, x, y, z }], oldest first
 let trailLatestT = -Infinity;
 let trailCapacity = 0;
-let trailPositions = null;
-let trailColors = null;
-const trailLines = new THREE.LineSegments(
-  new THREE.BufferGeometry(),
-  new THREE.LineBasicMaterial({ vertexColors: true, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }),
-);
-trailLines.frustumCulled = false;
-trailLines.visible = false;
-scene.add(trailLines);
+const TRAIL_TAIL_WIDTH = 0.4; // a trail's width at its tail, as a share of its width at the particle
+const TRAIL_FLOATS = 14; // per segment: start xyz, end xyz, start/end width, start/end rgb
+const trailMaterial = new THREE.ShaderMaterial({
+  uniforms: { resolution: { value: new THREE.Vector2(1, 1) } },
+  side: THREE.DoubleSide, // which way a quad winds depends on which way its segment runs on screen
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  vertexShader: `
+    attribute vec3 segStart;
+    attribute vec3 segEnd;
+    attribute vec2 segWidth;
+    attribute vec3 startColor;
+    attribute vec3 endColor;
+    uniform vec2 resolution;
+    varying vec3 vColor;
+    varying float vSide;
+    void main() {
+      float along = position.x;
+      float side = position.y;
+      vec4 a = projectionMatrix * modelViewMatrix * vec4(segStart, 1.0);
+      vec4 b = projectionMatrix * modelViewMatrix * vec4(segEnd, 1.0);
+      vec4 clip = mix(a, b, along);
+      vec2 dir = (b.xy / b.w - a.xy / a.w) * resolution;
+      float len = length(dir);
+      dir = len > 1e-6 ? dir / len : vec2(1.0, 0.0);
+      float metres = mix(segWidth.x, segWidth.y, along);
+      float pixels = max(1.0, metres * projectionMatrix[1][1] * 0.5 * resolution.y / clip.w);
+      clip.xy += vec2(-dir.y, dir.x) * side * pixels / resolution * clip.w;
+      gl_Position = clip;
+      vColor = mix(startColor, endColor, along);
+      vSide = side;
+    }`,
+  fragmentShader: `
+    varying vec3 vColor;
+    varying float vSide;
+    void main() {
+      gl_FragColor = vec4(vColor * (1.0 - 0.6 * vSide * vSide), 1.0);
+      #include <colorspace_fragment>
+    }`,
+});
+let trailData = null;
+let trailBuffer = null;
+const trailGeometry = new THREE.InstancedBufferGeometry();
+// The quad: along the segment 0..1, across it -1..1.
+trailGeometry.setAttribute("position", new THREE.Float32BufferAttribute([0, -1, 0, 0, 1, 0, 1, -1, 0, 1, 1, 0], 3));
+trailGeometry.setIndex([0, 2, 1, 2, 3, 1]);
+const trailMesh = new THREE.Mesh(trailGeometry, trailMaterial);
+trailMesh.frustumCulled = false;
+trailMesh.visible = false;
+scene.add(trailMesh);
+const trailResolution = new THREE.Vector2();
 
 function clearTrails() {
   trailHistory.clear();
   trailLatestT = -Infinity;
 }
 
-function updateTrails(frame, visibleIds, particleColorMap) {
+function updateTrails(frame, visibleIds, particleColorMap, sphereRadii) {
   const seconds = frame.trailSeconds;
   if (!(seconds > 0)) {
     if (trailHistory.size > 0) clearTrails();
-    trailLines.visible = false;
+    trailMesh.visible = false;
     return;
   }
   if (frame.t < trailLatestT) clearTrails(); // a restart: the old positions belong to another run
@@ -810,36 +858,151 @@ function updateTrails(frame, visibleIds, particleColorMap) {
     segments += Math.max(0, points.length - 1);
   }
 
-  trailLines.visible = segments > 0;
+  trailMesh.visible = segments > 0;
   if (segments === 0) return;
   if (segments > trailCapacity) {
     trailCapacity = Math.max(segments, trailCapacity * 2, 1024);
-    trailPositions = new Float32Array(trailCapacity * 6);
-    trailColors = new Float32Array(trailCapacity * 6);
-    trailLines.geometry.dispose();
-    trailLines.geometry = new THREE.BufferGeometry();
-    trailLines.geometry.setAttribute("position", new THREE.BufferAttribute(trailPositions, 3));
-    trailLines.geometry.setAttribute("color", new THREE.BufferAttribute(trailColors, 3));
+    trailData = new Float32Array(trailCapacity * TRAIL_FLOATS);
+    trailBuffer = new THREE.InstancedInterleavedBuffer(trailData, TRAIL_FLOATS, 1);
+    trailBuffer.setUsage(THREE.DynamicDrawUsage);
+    trailGeometry.setAttribute("segStart", new THREE.InterleavedBufferAttribute(trailBuffer, 3, 0));
+    trailGeometry.setAttribute("segEnd", new THREE.InterleavedBufferAttribute(trailBuffer, 3, 3));
+    trailGeometry.setAttribute("segWidth", new THREE.InterleavedBufferAttribute(trailBuffer, 2, 6));
+    trailGeometry.setAttribute("startColor", new THREE.InterleavedBufferAttribute(trailBuffer, 3, 8));
+    trailGeometry.setAttribute("endColor", new THREE.InterleavedBufferAttribute(trailBuffer, 3, 11));
   }
   const defaultColor = new THREE.Color(DEFAULT_DOT_COLOR);
   let o = 0;
   for (const [id, points] of trailHistory) {
     if (points.length < 2) continue;
     const c = particleColorMap.get(id) ?? defaultColor;
+    const radius = sphereRadii.get(id) ?? latestById.get(id)?.radius;
+    const width = Number.isFinite(radius) ? 2 * radius : 0;
+    // Brightest and widest at the particle, fading to nothing trailSeconds back.
+    let prevFade = Math.max(0, 1 - (frame.t - points[0].t) / seconds);
     for (let i = 1; i < points.length; i++) {
-      for (const point of [points[i - 1], points[i]]) {
-        // Brightest at the particle, fading to nothing trailSeconds back.
-        const fade = Math.max(0, 1 - (frame.t - point.t) / seconds);
-        const k = fade * fade;
-        trailPositions[o] = point.x; trailPositions[o + 1] = point.y; trailPositions[o + 2] = point.z;
-        trailColors[o] = c.r * k; trailColors[o + 1] = c.g * k; trailColors[o + 2] = c.b * k;
-        o += 3;
-      }
+      const a = points[i - 1], b = points[i];
+      const fade = Math.max(0, 1 - (frame.t - b.t) / seconds);
+      const ka = prevFade * prevFade, kb = fade * fade;
+      trailData[o] = a.x; trailData[o + 1] = a.y; trailData[o + 2] = a.z;
+      trailData[o + 3] = b.x; trailData[o + 4] = b.y; trailData[o + 5] = b.z;
+      trailData[o + 6] = width * (TRAIL_TAIL_WIDTH + (1 - TRAIL_TAIL_WIDTH) * prevFade);
+      trailData[o + 7] = width * (TRAIL_TAIL_WIDTH + (1 - TRAIL_TAIL_WIDTH) * fade);
+      trailData[o + 8] = c.r * ka; trailData[o + 9] = c.g * ka; trailData[o + 10] = c.b * ka;
+      trailData[o + 11] = c.r * kb; trailData[o + 12] = c.g * kb; trailData[o + 13] = c.b * kb;
+      o += TRAIL_FLOATS;
+      prevFade = fade;
     }
   }
-  trailLines.geometry.attributes.position.needsUpdate = true;
-  trailLines.geometry.attributes.color.needsUpdate = true;
-  trailLines.geometry.setDrawRange(0, segments * 2);
+  trailBuffer.needsUpdate = true;
+  trailBuffer.updateRanges.length = 0;
+  trailBuffer.addUpdateRange(0, segments * TRAIL_FLOATS);
+  trailGeometry.instanceCount = segments;
+  renderer.getDrawingBufferSize(trailResolution);
+  trailMaterial.uniforms.resolution.value.copy(trailResolution);
+}
+
+// --- Smoke puffs (§10.2's SceneFrame.puffs) -------------------------------------------------
+// Each puff is a soft round sprite: a Gaussian falloff of its opacity from the middle, sized to
+// its radius in metres. It's lit by the scene's own three.js lights (lights: true hands the
+// shader the same light uniforms MeshStandardMaterial gets) as a scattering cloud with no
+// surface normal: half of each point light's illuminance I/d² reaches it, the distance floored
+// at the puff's own radius so a flash sitting inside a puff doesn't blow up, plus the ambient
+// and directional lights. The result is soft-clipped (1 - e^-x) rather than clamped, so a puff
+// right beside a flash glows in the flash's colour instead of flattening to white. It adds the
+// light it scatters and dims what's behind it by only a quarter of its opacity: at night the
+// sky behind a cloud is about as bright as what the cloud scatters from it, so unlit smoke
+// should barely show (dimming by its full opacity drew it as dark blots on the sky). No depth
+// writes. Hidden with its groups' "show particles" toggles, like dots.
+const smokeMaterial = new THREE.ShaderMaterial({
+  uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.lights, { viewportHalfHeight: { value: 1 } }]),
+  lights: true,
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.CustomBlending,
+  blendEquation: THREE.AddEquation,
+  blendSrc: THREE.OneFactor,
+  blendDst: THREE.OneMinusSrcAlphaFactor,
+  vertexShader: `
+    attribute float puffRadius;
+    attribute float puffOpacity;
+    attribute vec3 puffColor;
+    uniform float viewportHalfHeight;
+    varying vec3 vViewPosition;
+    varying float vRadius;
+    varying float vOpacity;
+    varying vec3 vColor;
+    void main() {
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      vViewPosition = mv.xyz;
+      vRadius = puffRadius;
+      vOpacity = puffOpacity;
+      vColor = puffColor;
+      gl_Position = projectionMatrix * mv;
+      gl_PointSize = 2.0 * puffRadius * projectionMatrix[1][1] * viewportHalfHeight / max(-mv.z, 0.001);
+    }`,
+  fragmentShader: `
+    #include <common>
+    #include <lights_pars_begin>
+    varying vec3 vViewPosition;
+    varying float vRadius;
+    varying float vOpacity;
+    varying vec3 vColor;
+    void main() {
+      vec2 c = gl_PointCoord * 2.0 - 1.0;
+      float r2 = dot(c, c);
+      if (r2 > 1.0) discard;
+      vec3 irradiance = ambientLightColor;
+      #if NUM_POINT_LIGHTS > 0
+      for (int i = 0; i < NUM_POINT_LIGHTS; i++) {
+        vec3 toLight = pointLights[i].position - vViewPosition;
+        irradiance += 0.5 * pointLights[i].color / max(dot(toLight, toLight), vRadius * vRadius);
+      }
+      #endif
+      #if NUM_DIR_LIGHTS > 0
+      for (int i = 0; i < NUM_DIR_LIGHTS; i++) irradiance += 0.5 * directionalLights[i].color;
+      #endif
+      vec3 lit = 1.0 - exp(-vColor * RECIPROCAL_PI * irradiance);
+      float alpha = vOpacity * exp(-3.0 * r2);
+      gl_FragColor = vec4(lit, 1.0);
+      #include <colorspace_fragment>
+      // Premultiplied: add the scattered light, dim the background by a quarter of the opacity.
+      gl_FragColor = vec4(gl_FragColor.rgb * alpha, 0.25 * alpha);
+    }`,
+});
+const smokePoints = new THREE.Points(new THREE.BufferGeometry(), smokeMaterial);
+smokePoints.frustumCulled = false; // its bounding sphere is never recomputed
+smokePoints.visible = false;
+scene.add(smokePoints);
+let smokeCapacity = 0;
+const smokeSize = new THREE.Vector2();
+
+function updateSmoke(frame, byId, hiddenParticleIds) {
+  const shown = frame.puffs.filter((puff) => byId.has(puff.id) && !hiddenParticleIds.has(puff.id) && puff.opacity > 0);
+  smokePoints.visible = shown.length > 0;
+  if (shown.length === 0) return;
+  if (shown.length > smokeCapacity) {
+    smokeCapacity = Math.max(shown.length, smokeCapacity * 2, 256);
+    smokePoints.geometry.dispose();
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(smokeCapacity * 3), 3));
+    geometry.setAttribute("puffRadius", new THREE.BufferAttribute(new Float32Array(smokeCapacity), 1));
+    geometry.setAttribute("puffOpacity", new THREE.BufferAttribute(new Float32Array(smokeCapacity), 1));
+    geometry.setAttribute("puffColor", new THREE.BufferAttribute(new Float32Array(smokeCapacity * 3), 3));
+    smokePoints.geometry = geometry;
+  }
+  const a = smokePoints.geometry.attributes;
+  shown.forEach((puff, i) => {
+    const p = byId.get(puff.id);
+    a.position.array.set([p.x, p.y, p.z], i * 3);
+    a.puffRadius.array[i] = puff.radius;
+    a.puffOpacity.array[i] = puff.opacity;
+    a.puffColor.array.set([puff.r, puff.g, puff.b], i * 3);
+  });
+  for (const name of ["position", "puffRadius", "puffOpacity", "puffColor"]) a[name].needsUpdate = true;
+  smokePoints.geometry.setDrawRange(0, shown.length);
+  renderer.getDrawingBufferSize(smokeSize);
+  smokeMaterial.uniforms.viewportHalfHeight.value = smokeSize.y / 2;
 }
 
 function drawMotionArrows(kind, arrows) {
@@ -1805,7 +1968,8 @@ function applyFrame(frame) {
   });
 
   updateMotionArrows(frame);
-  updateTrails(frame, visibleIdSet, particleColorMap);
+  updateTrails(frame, visibleIdSet, particleColorMap, sphereRadii);
+  updateSmoke(frame, byId, hiddenParticleIds);
   updateInspection(); // text-only refresh (info + live readout) - see each module's own updateLive
 }
 
@@ -1879,7 +2043,7 @@ function decodeFrame(buffer) {
     const entries = new Array(count);
     for (let i = 0; i < count; i++) {
       const kindByte = view.getUint8(offset); offset += 1;
-      const kind = kindByte === 0 ? "force" : kindByte === 1 ? "constraint" : "light";
+      const kind = kindByte === 0 ? "force" : kindByte === 1 ? "constraint" : kindByte === 3 ? "emitter" : "light";
       const name = readString();
       const field = readString();
       const valueKind = view.getUint8(offset); offset += 1;
@@ -2115,6 +2279,8 @@ function decodeFrame(buffer) {
     // forces/constraints/surfaces above; a light's live color/intensity/position travel through
     // `fields` above instead (kind "light"), not duplicated here.
     lights: readNameList(),
+    // CustomEmitters: listed with the emitters, their settings in fields as kind "emitter".
+    customEmitters: readNameList(),
   };
 
   // §10.2's "debug/--render-all mode... draws every collider as wireframe" - unconditional,
@@ -2281,11 +2447,22 @@ function decodeFrame(buffer) {
     if (hasCurrent) { current = view.getFloat64(offset, true); offset += 8; }
     controls.push({ name, unit, min, max, value, current });
   }
+  // Smoke puffs: particles drawn as lit, translucent balls rather than dots.
+  const puffCount = view.getInt32(offset, true); offset += 4;
+  const puffs = [];
+  for (let i = 0; i < puffCount; i++) {
+    const id = view.getInt32(offset, true);
+    const radius = view.getFloat32(offset + 4, true), opacity = view.getFloat32(offset + 8, true);
+    const r = view.getUint8(offset + 12) / 255, g = view.getUint8(offset + 13) / 255, b = view.getUint8(offset + 14) / 255;
+    offset += 15;
+    puffs.push({ id, radius, opacity, r, g, b });
+  }
 
   return {
     t, step, particles, connections, camera: cam, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
     colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
     skyColor, solidParticleColors, trailSeconds, options, lineLegend, rest, suggestedDeformation, controls,
+    puffs,
   };
 }
 
@@ -2620,7 +2797,7 @@ const objectPanelTitleEl = document.getElementById("objectPanelTitle");
 const objectPanelBodyEl = document.getElementById("objectPanelBody");
 
 let lastRegistrySignature = null;
-let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [], colliders: [], groupEnabled: {}, fields: [], emitters: [], winds: [], particleExpressions: [], lights: [] };
+let latestRegistry = { forces: [], constraints: [], surfaces: [], groups: [], colliders: [], groupEnabled: {}, fields: [], emitters: [], winds: [], particleExpressions: [], lights: [], customEmitters: [] };
 let selectedKind = null; // "groups" | "forces" | "constraints" | "surfaces" | "colliders"
 let selectedName = null;
 let latestVisibleIds = null; // this frame's server-side dot filter, updated every frame in applyFrame
@@ -2686,16 +2863,18 @@ const shownForces = new Set();
 // overrides it; absent means "use the server's own meshDecl.wireframe default" (see applyFrame).
 const surfaceWireframeOverride = new Map();
 
-// A plain JSON.stringify(registry) can't detect a group's membership changing, since Set doesn't
-// serialize meaningfully (every group would stringify to the same shape regardless of contents) -
-// so member ids are flattened into a sorted array first, specifically so this check stays
-// correct once something (a future emitter) actually changes group membership between frames.
+// Groups by name only, not membership. Membership used to be part of this, but in a scene whose
+// groups change every step (fireworks, sparks, fire) that rebuilt the outliner and re-rendered the
+// open panel every frame: an outliner row couldn't be clicked (detached mid-click) and an edit in
+// a panel was wiped before it could be made. What a group's panel shows that depends on its
+// members - its counts and live centroid - refreshes every frame through its updateLive instead;
+// only its list of contained springs/dampers is worked out when the panel opens.
 function registrySignature(registry) {
   return JSON.stringify({
     forces: registry.forces,
     constraints: registry.constraints,
     surfaces: registry.surfaces,
-    groups: registry.groups.map((g) => ({ name: g.name, memberIds: [...g.memberIds].sort((a, b) => a - b) })),
+    groups: registry.groups.map((g) => g.name),
     // §10.4: active is the one per-entry field that can flip without the collider *set*
     // changing, so it has to be part of the signature or a toggle would never repaint.
     colliders: registry.colliders.map((c) => [c.name, c.active]),
@@ -2704,6 +2883,7 @@ function registrySignature(registry) {
     // values that refresh via the emitters module's updateLive hook (skipping a focused input),
     // not signature-driven rebuilds; only the *set* of emitters belongs here.
     emitters: registry.emitters.map((e) => e.name),
+    customEmitters: registry.customEmitters,
     // Names only, same reasoning as emitters above - a light's color/intensity/position are live
     // values read through latestRegistry.fields (updateEditableFieldsLive), refreshed every
     // frame without a panel rebuild; putting them here would rebuild (and clobber an in-progress
@@ -3483,10 +3663,20 @@ registerEntityKind({
 // emitter has nothing else to fetch.
 let emitterFieldInputs = null; // { rateInput, maxAliveInput, evictOldestCheckbox } for the open panel, or null
 let emitterRateSourceRow = null; // its companion §10.4 expression-source row, or null
+// A CustomEmitter (e.g. the fireworks launcher) shares the emitters list but has no rate, cap or
+// policy - its panel is just its own editable fields, like a force's.
+let customEmitterFieldInputs = null;
 registerEntityKind({
   kind: "emitters",
-  getNames: (registry) => registry.emitters.map((e) => e.name),
+  getNames: (registry) => [...registry.emitters.map((e) => e.name), ...registry.customEmitters],
   renderPanel: () => {
+    if (latestRegistry.customEmitters.includes(selectedName)) {
+      emitterFieldInputs = null;
+      customEmitterFieldInputs = {};
+      renderEditableFields("emitter", selectedName, customEmitterFieldInputs);
+      return;
+    }
+    customEmitterFieldInputs = null;
     const entry = latestRegistry.emitters.find((e) => e.name === selectedName);
 
     // §10.4's expression-string editing, same convention as a particle's mass/radius: a plain
@@ -3536,6 +3726,7 @@ registerEntityKind({
     emitterFieldInputs = { rateInput, maxAliveInput, evictOldestCheckbox };
   },
   updateLive: () => {
+    if (customEmitterFieldInputs) { updateEditableFieldsLive("emitter", selectedName, customEmitterFieldInputs); return; }
     const entry = latestRegistry.emitters.find((e) => e.name === selectedName);
     if (!entry || !emitterFieldInputs) return;
     if (document.activeElement !== emitterFieldInputs.rateInput) emitterFieldInputs.rateInput.value = formatSigFigs(entry.rate);
@@ -3694,6 +3885,7 @@ function renderObjectPanel() {
   particleMassSourceRow = null;
   particleRadiusSourceRow = null;
   emitterFieldInputs = null;
+  customEmitterFieldInputs = null;
   emitterRateSourceRow = null;
   windVelocityInputs = null;
   windVelocityValueRow = null;

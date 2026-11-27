@@ -24,10 +24,30 @@ class FireworksSceneTest {
         val visible = assertNotNull(frame.visibleIds)
         assertTrue(visible.size > 50, "10 s in, there's a display going: ${visible.size}")
         assertTrue(visible.all { it in frame.particleColors && it in frame.sphereRadii })
-        assertEquals(scene.ids().toSet() - visible, scene.ids().filter { scene.store.position(it).y == 0.0 && it !in visible }.toSet())
+        // Everything else is the ground's corners or smoke, and the smoke is drawn as puffs, not dots.
+        assertEquals(scene.show.smokeIds, frame.puffs.keys)
+        assertTrue(frame.puffs.size > 50, "10 s in, smoke hangs about: ${frame.puffs.size} puffs")
+        assertTrue(frame.puffs.keys.none { it in visible })
+        val ground = scene.ids().filter { scene.store.position(it).y == 0.0 && it !in visible && it !in frame.puffs }.toSet()
+        assertEquals(4, ground.size)
+        assertEquals(scene.ids().toSet() - visible - frame.puffs.keys, ground)
         assertEquals(listOf("ground"), frame.meshes.map { it.surface.name })
         assertTrue(frame.meshes.none { it.pickable })
         assertTrue(frame.events.isNotEmpty(), "spawns and burn-outs reach the event channel")
+    }
+
+    @Test
+    fun `a smoke puff fades in, swells, and thins away over the second half of its life`() {
+        val start = FireworksScene.puffAt(0.0, 20.0)
+        assertEquals(0.0, start.opacity)
+        assertEquals(FireworksScene.PUFF_START_RADIUS, start.radius, 1e-12)
+        assertEquals(FireworksScene.PUFF_OPACITY, FireworksScene.puffAt(FireworksScene.PUFF_FADE_IN_SECONDS, 20.0).opacity, 1e-12)
+        assertEquals(FireworksScene.PUFF_OPACITY, FireworksScene.puffAt(10.0, 20.0).opacity, 1e-12)
+        assertEquals(FireworksScene.PUFF_OPACITY / 2, FireworksScene.puffAt(15.0, 20.0).opacity, 1e-12)
+        assertEquals(0.0, FireworksScene.puffAt(20.0, 20.0).opacity, 1e-12)
+        val radii = (0..20).map { FireworksScene.puffAt(it.toDouble(), 20.0).radius }
+        assertTrue(radii.zipWithNext().all { (a, b) -> b > a } && radii.last() < FireworksScene.PUFF_FULL_RADIUS)
+        assertEquals(FireworksScene.SMOKE_COLOR, start.color)
     }
 
     @Test
@@ -64,6 +84,20 @@ class FireworksSceneTest {
             if (lights.size > 1) sawFlash = true
         }
         assertTrue(sawFlash)
+    }
+
+    @Test
+    fun `the launcher is listed with the emitters, and edits to it and to the drags take effect`() {
+        val scene = FireworksScene()
+        val registry = scene.frame(0.0).registry
+        assertEquals(listOf("launcher"), registry.customEmitters.keys.toList())
+        assertTrue(registry.emitters.isEmpty())
+        scene.handleControl(SceneControlMessage.SetScalarField("emitter", "launcher", "maxBreakHeight", 160.0), 0.0)
+        assertEquals(160.0, scene.show.maxBreakHeight)
+        scene.handleControl(SceneControlMessage.SetScalarField("force", "star-drag", "coefficient", 0.02), 0.0)
+        assertEquals(particlesim.physics.FieldValue.Scalar(0.02), scene.show.drag.editableFields()["coefficient"])
+        scene.handleControl(SceneControlMessage.SetVectorField("force", "smoke-drift", "wind", Vector3(0.0, 0.0, 3.0)), 0.0)
+        assertEquals(particlesim.physics.FieldValue.Vector(Vector3(0.0, 0.0, 3.0)), scene.show.smokeDrift.editableFields()["wind"])
     }
 
     @Test

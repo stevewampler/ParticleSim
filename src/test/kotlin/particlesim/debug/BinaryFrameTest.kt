@@ -322,6 +322,50 @@ class BinaryFrameTest {
     }
 
     @Test
+    fun `custom emitters reach the outliner by name, with their settings as kind=emitter field entries`() {
+        val store = ParticleStore()
+        val launcher = particlesim.render.TestCustomEmitter("launcher", level = 2.5)
+        val light = Light.Ambient(color = Color(1.0, 1.0, 1.0), intensity = 0.5, name = "moon")
+        val registry = SceneRegistry.build(lights = listOf(light), customEmitters = listOf(launcher))
+        val decoded = BinaryFrame.decode(
+            BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), registry = registry),
+        ).registry
+        assertEquals(listOf("launcher"), decoded.customEmitters)
+        assertEquals(listOf("moon"), decoded.lights, "the name list before it still decodes")
+        assertEquals(
+            listOf(DecodedFieldEntry("emitter", "launcher", "level", particlesim.physics.FieldValue.Scalar(2.5))),
+            decoded.fields.filter { it.kind == "emitter" },
+        )
+    }
+
+    @Test
+    fun `smoke puffs round-trip after the controls, defaulting to none`() {
+        val store = ParticleStore()
+        val a = store.create(position = Vector3.ZERO)
+        val b = store.create(position = Vector3(1.0, 2.0, 3.0))
+        val control = particlesim.render.SceneControl("wind", "m/s", 0.0, 10.0, 2.0, current = 1.5)
+        assertEquals(emptyMap(), BinaryFrame.decode(BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(a, b), connections = emptyList())).puffs)
+        val puffs = mapOf(
+            a to particlesim.render.Puff(radius = 4.5, opacity = 0.25, color = Color(0.4, 0.4, 0.4)),
+            b to particlesim.render.Puff(radius = 12.0, opacity = 0.0, color = Color(1.0, 0.0, 0.2)),
+        )
+        val decoded = BinaryFrame.decode(
+            BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = listOf(a, b), connections = emptyList(), controls = listOf(control), puffs = puffs),
+        )
+        assertEquals(listOf(control), decoded.controls, "the controls before them still decode")
+        assertEquals(puffs.keys, decoded.puffs.keys)
+        for ((id, puff) in puffs) {
+            val got = decoded.puffs.getValue(id)
+            assertEquals(puff.radius, got.radius, 1e-6)
+            assertEquals(puff.opacity, got.opacity, 1e-6)
+            // Colours travel as bytes.
+            assertEquals(puff.color.r, got.color.r, 1.0 / 255)
+            assertEquals(puff.color.g, got.color.g, 1.0 / 255)
+            assertEquals(puff.color.b, got.color.b, 1.0 / 255)
+        }
+    }
+
+    @Test
     fun `accelerations round-trip in particle order, and are absent unless sent`() {
         val store = ParticleStore()
         val a = store.create(position = Vector3.ZERO)
@@ -737,7 +781,13 @@ class BinaryFrameTest {
     @Test
     fun `a force with no EditableFields contributes nothing to the field-entry list`() {
         val store = ParticleStore()
-        val registry = SceneRegistry.build(forces = listOf(particlesim.physics.Drag("g", coefficient = 1.0, name = "drag")))
+        val registry = SceneRegistry.build(forces = listOf(object : particlesim.physics.Force {
+            override val name = "plain"
+            override fun accumulate(
+                store: ParticleStore, groups: particlesim.core.Groups, t: Double,
+                chunk: particlesim.physics.ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
+            ) {}
+        }))
 
         val buffer = BinaryFrame.encode(
             t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), registry = registry,

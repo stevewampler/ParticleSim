@@ -91,6 +91,7 @@ object CheckpointWriter {
                     "rng_draw_count" to e.rngDrawCount,
                 )
             },
+            "custom_emitters" to checkpoint.customEmitters,
         )
         file.writeText(Yaml().dump(data))
     }

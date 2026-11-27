@@ -72,6 +72,7 @@ class DebugRenderer(
         restPositions: Map<Int, Vector3> = emptyMap(),
         deformationScale: Double = 1.0,
         controls: List<particlesim.render.SceneControl> = emptyList(),
+        puffs: Map<Int, particlesim.render.Puff> = emptyMap(),
     ) {
         // Fills in a default-region arrow group (§10.2) for any named UniformFieldForce the
         // registry carries that arrowGroups didn't already cover - this is the single call site
@@ -93,6 +94,7 @@ class DebugRenderer(
                 allArrowGroups, visibleIds, registry, colliders.filter { it.active }, events, availableScenes, activeScene, lights,
                 hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows, skyColor, solidParticleColors,
                 accelerations, trailSeconds, options, lineLegend, restPositions, deformationScale, controls,
+                puffs,
             ),
         )
     }

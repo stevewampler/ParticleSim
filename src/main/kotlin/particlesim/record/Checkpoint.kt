@@ -3,6 +3,7 @@ package particlesim.record
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
+import particlesim.lifecycle.CustomEmitter
 import particlesim.lifecycle.Emitter
 import particlesim.lifecycle.EmitterCheckpointState
 import particlesim.physics.Force
@@ -46,6 +47,8 @@ data class Checkpoint(
     val groupMembership: Map<String, List<Int>>,
     val brokenConnections: Set<Pair<Int, Int>>,
     val emitters: List<EmitterCheckpointState>,
+    /** Each [CustomEmitter]'s own state ([CustomEmitter.captureState]), by name. */
+    val customEmitters: Map<String, Map<String, Any?>> = emptyMap(),
 )
 
 /** Assembles a [Checkpoint] from live simulation state. [groupNames] and [emitters] are
@@ -59,6 +62,7 @@ fun captureCheckpoint(
     brokenConnections: Set<Pair<Int, Int>>,
     t: Double,
     step: Long,
+    customEmitters: List<CustomEmitter> = emptyList(),
 ): Checkpoint {
     val particles = store.liveIds().map { id ->
         CheckpointParticle(
@@ -80,6 +84,7 @@ fun captureCheckpoint(
         groupMembership = groupMembership,
         brokenConnections = brokenConnections,
         emitters = emitters.map { it.captureState() },
+        customEmitters = customEmitters.associate { it.name to it.captureState() },
     )
 }
 
@@ -95,6 +100,7 @@ fun applyCheckpoint(
     groups: Groups,
     emittersByName: Map<String, Emitter>,
     checkpoint: Checkpoint,
+    customEmittersByName: Map<String, CustomEmitter> = emptyMap(),
 ) {
     for (p in checkpoint.particles) {
         store.restoreParticle(p.id, p.position, p.velocity, p.mass, p.radius, p.spawnTime, p.lifetime)
@@ -105,6 +111,10 @@ fun applyCheckpoint(
     }
     for (state in checkpoint.emitters) {
         emittersByName.getValue(state.name).restoreState(state)
+    }
+    // Last: a custom emitter's state may refer to the particles and groups restored above.
+    for ((name, state) in checkpoint.customEmitters) {
+        customEmittersByName.getValue(name).restoreState(state)
     }
 }
 

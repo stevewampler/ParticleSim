@@ -81,6 +81,9 @@ data class SceneFrame(
     /** §9.6's scene controls: numbers the viewer offers as sliders under "controls" (e.g.
      * [TowerCraneScene]'s slew, radius, hook height and load). */
     val controls: List<particlesim.render.SceneControl> = emptyList(),
+    /** Particles drawn as lit, translucent smoke puffs ([particlesim.render.Puff]) rather than
+     * dots - leave them out of [visibleIds] so they don't also get a dot. */
+    val puffs: Map<Int, particlesim.render.Puff> = emptyMap(),
     val registry: SceneRegistry = SceneRegistry.build(),
     val colliders: List<Collider> = emptyList(),
     val events: List<SimEvent> = emptyList(),
@@ -144,11 +147,13 @@ fun applyEditableFieldMessage(
     store: ParticleStore,
     t: Double,
     lights: List<Light> = emptyList(),
+    customEmitters: List<particlesim.lifecycle.CustomEmitter> = emptyList(),
 ): Boolean {
     fun target(kind: String, name: String): EditableFields? = when (kind) {
         "force" -> forces.find { it.name == name } as? EditableFields
         "constraint" -> constraints.find { it.name == name } as? EditableFields
         "light" -> lights.find { it.name == name }
+        "emitter" -> customEmitters.find { it.name == name }
         else -> null
     }
     return when (message) {

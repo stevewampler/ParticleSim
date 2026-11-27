@@ -38,23 +38,46 @@ class UniformGravity(
     override fun sampleAt(position: Vector3, t: Double): Vector3 = acceleration
 }
 
-/** Drag/air resistance opposing velocity, linear or quadratic in speed (§5.2). */
+/** Drag/air resistance opposing velocity, linear or quadratic in speed (§5.2). Its
+ * `coefficient` is live-editable (§10.4) - N·s/m when linear, kg/m when quadratic.
+ *
+ * Given an [air] velocity, it drags each particle toward moving air rather than toward rest -
+ * the force goes with the particle's velocity relative to the air, so a light particle ends up
+ * drifting with it (e.g. fireworks smoke in a breeze). That air velocity is then live-editable
+ * too, as the vector field `wind`; without one, still air, and there's no such field. */
 class Drag(
     private val group: String,
-    private val coefficient: Double,
+    private var coefficient: Double,
     private val quadratic: Boolean = false,
     override val name: String? = null,
-) : Force {
+    private var air: Vector3? = null,
+) : Force, EditableFields {
+    override fun editableFields(): Map<String, FieldValue> {
+        val fields = linkedMapOf<String, FieldValue>("coefficient" to FieldValue.Scalar(coefficient))
+        air?.let { fields["wind"] = FieldValue.Vector(it) }
+        return fields
+    }
+
+    override fun setField(field: String, value: FieldValue): Boolean {
+        when {
+            field == "coefficient" && value is FieldValue.Scalar -> coefficient = value.value
+            field == "wind" && value is FieldValue.Vector && air != null -> air = value.value
+            else -> return false
+        }
+        return true
+    }
+
     override fun accumulate(
         store: ParticleStore, groups: Groups, t: Double,
         chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int,
     ) {
         if (!groups.isEnabled(group)) return
+        val still = air ?: Vector3.ZERO
         val members = groups.membersOf(group).toList()
         var i = chunkIndex
         while (i < members.size) {
             val id = members[i]
-            val v = store.velocity(id)
+            val v = store.velocity(id) - still
             val speed = v.length()
             if (speed > 0.0) {
                 val magnitude = if (quadratic) coefficient * speed * speed else coefficient * speed

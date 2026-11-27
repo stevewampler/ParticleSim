@@ -9,6 +9,7 @@ import particlesim.render.CameraPose
 import particlesim.render.Color
 import particlesim.render.Light
 import particlesim.render.Material
+import particlesim.render.Puff
 import particlesim.render.SceneRegistry
 import particlesim.render.SurfaceRenderer
 import particlesim.surface.Surface
@@ -32,10 +33,16 @@ import kotlin.math.exp
  * fading over about a tenth of a second. The rest of the time a faint `moonlight` (an ambient
  * light, live-editable from the outliner) is all that shows the ground.
  *
- * `gravity` is live-editable. Unchecking the `stars` group's "enabled" box takes drag off the
- * stars, and unchecking `shells` takes it off the rising shells (gravity acts on the `fireworks`
- * group, so it stays): stars fly far wider, and shells overshoot their break height and burst
- * still climbing.
+ * Every burst and launch leaves smoke, drawn as soft translucent puffs ([particlesim.render.Puff])
+ * that swell and thin out over their ~20 s and drift on the breeze (`smoke-drift`'s `wind`). The
+ * puffs are lit by the same lights as the ground, so a burst's flash lights up the smoke around
+ * it - and the smoke left by earlier bursts - while moonlight alone barely shows it.
+ *
+ * `gravity` and the drags (`star-drag`, `shell-drag`, `smoke-drift` and its `wind`) are
+ * live-editable, and so is the `launcher` under EMITTERS: break heights, launch interval and
+ * spread. Unchecking the `stars` group's "enabled" box takes drag off the stars, and unchecking
+ * `shells` takes it off the rising shells (gravity acts on the `fireworks` group, so it stays):
+ * stars fly far wider, and shells overshoot their break height and burst still climbing.
  */
 class FireworksScene(seed: Long = 1L) : DemoScene {
     internal val show = FireworksShow(seed)
@@ -59,7 +66,7 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
     override fun ids(): List<Int> = show.store.liveIds()
 
     override fun handleControl(message: SceneControlMessage, t: Double) {
-        if (applyEditableFieldMessage(message, show.forces, emptyList(), show.store, t, listOf(moonlight))) return
+        if (applyEditableFieldMessage(message, show.forces, emptyList(), show.store, t, listOf(moonlight), customEmitters = listOf(show))) return
         if (message is SceneControlMessage.SetGroupEnabled) show.groups.setEnabled(message.name, message.enabled)
     }
 
@@ -97,9 +104,12 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
             meshes = listOf(groundMesh),
             lights = listOf(moonlight) + show.recentFlashes.mapNotNull { flashLight(it, t) },
             visibleIds = fireworks.toSet(),
+            puffs = show.smokeIds.associateWith { id -> puffAt(t - show.store.spawnTime(id), show.store.lifetime(id) ?: 1.0) },
             skyColor = NIGHT_SKY,
             trailSeconds = TRAIL_SECONDS,
-            registry = SceneRegistry.build(forces = show.forces, groups = show.groups, surfaces = listOf(ground), lights = listOf(moonlight)),
+            registry = SceneRegistry.build(
+                forces = show.forces, groups = show.groups, surfaces = listOf(ground), lights = listOf(moonlight), customEmitters = listOf(show),
+            ),
             events = events.toList(),
         )
         events.clear()
@@ -131,6 +141,28 @@ class FireworksScene(seed: Long = 1L) : DemoScene {
          * tilted up about 27°, so with the viewer's 60° field of view a strip of ground shows along
          * the bottom (for the flashes to light) and the highest bursts still fit at the top. */
         val CAMERA = CameraPose(position = Vector3(0.0, 3.0, 140.0), lookAt = Vector3(0.0, 72.0, 0.0))
+
+        /** Smoke's reflectance: a neutral grey, so a flash shows in its own colour on it - dark
+         * enough that a flash 30,000 cd strong washes only the puffs within ~20 m of it to white
+         * (a paler grey lit whole clouds 100 m across nearly white). */
+        val SMOKE_COLOR = Color(0.25, 0.25, 0.26)
+        /** A puff's radius when it first appears and as it ends up, m, and how quickly it swells. */
+        const val PUFF_START_RADIUS = 2.0
+        const val PUFF_FULL_RADIUS = 11.0
+        const val PUFF_SWELL_SECONDS = 6.0
+        /** A puff's opacity at its middle: thin, since a burst's cloud is a dozen of them overlapping. */
+        const val PUFF_OPACITY = 0.3
+        const val PUFF_FADE_IN_SECONDS = 0.4
+
+        /** How a smoke puff [age] seconds into its [life] looks: swelling from
+         * [PUFF_START_RADIUS] toward [PUFF_FULL_RADIUS], fading in over [PUFF_FADE_IN_SECONDS] and
+         * thinning away over the second half of its life. */
+        fun puffAt(age: Double, life: Double): Puff {
+            val radius = PUFF_START_RADIUS + (PUFF_FULL_RADIUS - PUFF_START_RADIUS) * (1.0 - exp(-age.coerceAtLeast(0.0) / PUFF_SWELL_SECONDS))
+            val fadeIn = (age / PUFF_FADE_IN_SECONDS).coerceIn(0.0, 1.0)
+            val fadeOut = ((life - age) / (0.5 * life)).coerceIn(0.0, 1.0)
+            return Puff(radius, PUFF_OPACITY * fadeIn * fadeOut, SMOKE_COLOR)
+        }
 
         /** A star's colour [age] seconds into its [burn]: a white flash as it lights, its own
          * [base] colour, then dimming over the last third as it burns out. */

@@ -2,6 +2,7 @@ package particlesim.render
 
 import particlesim.collision.Collider
 import particlesim.core.Groups
+import particlesim.lifecycle.CustomEmitter
 import particlesim.lifecycle.Emitter
 import particlesim.physics.Constraint
 import particlesim.physics.Force
@@ -66,6 +67,9 @@ class SceneRegistry private constructor(
     val groupEnabled: Map<String, Boolean>,
     val emitters: Map<String, Emitter>,
     val lights: Map<String, Light>,
+    /** [CustomEmitter]s, listed with the emitters - unique by name among themselves and the
+     * [emitters], since the outliner shows them in one list. */
+    val customEmitters: Map<String, CustomEmitter> = emptyMap(),
 ) {
     companion object {
         fun build(
@@ -76,8 +80,13 @@ class SceneRegistry private constructor(
             colliders: List<Collider> = emptyList(),
             emitters: List<Emitter> = emptyList(),
             lights: List<Light> = emptyList(),
-        ): SceneRegistry =
-            SceneRegistry(
+            customEmitters: List<CustomEmitter> = emptyList(),
+        ): SceneRegistry {
+            val custom = uniqueByName(customEmitters) { it.name }
+            require(custom.keys.none { name -> emitters.any { it.name == name } }) {
+                "an emitter and a custom emitter share a name - names must be unique among the emitters"
+            }
+            return SceneRegistry(
                 forces = uniqueByName(forces.filter { it.name != null }) { it.name!! },
                 constraints = uniqueByName(constraints.filter { it.name != null }) { it.name!! },
                 surfaces = uniqueByName(surfaces.filter { it.name != null }) { it.name!! },
@@ -100,7 +109,9 @@ class SceneRegistry private constructor(
                 // BinaryFrame's per-frame render section), it's just not individually reachable
                 // in the outliner or editable via §10.4's field mechanism.
                 lights = uniqueByName(lights.filter { it.name != null }) { it.name!! },
+                customEmitters = custom,
             )
+        }
 
         private fun <T> uniqueByName(items: List<T>, nameOf: (T) -> String): Map<String, T> {
             val result = LinkedHashMap<String, T>()
