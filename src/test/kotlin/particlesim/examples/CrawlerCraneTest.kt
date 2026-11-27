@@ -98,7 +98,7 @@ class CrawlerCraneTest {
     private fun loaded(slew: Double, fraction: Double, seconds: Double = 20.0): CrawlerCrane {
         val crane = CrawlerCrane(slewDegrees = slew, boomAngle = 45.0, hookHeight = 5.0)
         val t = settled(crane)
-        crane.loadTonnes = fraction * crane.tippingLoadTonnes()
+        crane.loadTonnes = fraction * crane.tippingLoadTonnes(t)
         runUntil(crane, t, t + seconds)
         return crane
     }
@@ -114,8 +114,8 @@ class CrawlerCraneTest {
             assertTrue(tipped.tilt > 15.0, "slew $slew, 1.05 of the tipping load: over, tilted ${tipped.tilt} degrees")
         }
         // Over the side the pads' edge is nearer: it tips with less.
-        val end = CrawlerCrane(boomAngle = 45.0, hookHeight = 5.0).also { settled(it) }.tippingLoadTonnes()
-        val side = CrawlerCrane(slewDegrees = 90.0, boomAngle = 45.0, hookHeight = 5.0).also { settled(it) }.tippingLoadTonnes()
+        val end = CrawlerCrane(boomAngle = 45.0, hookHeight = 5.0).let { it.tippingLoadTonnes(settled(it)) }
+        val side = CrawlerCrane(slewDegrees = 90.0, boomAngle = 45.0, hookHeight = 5.0).let { it.tippingLoadTonnes(settled(it)) }
         assertTrue(side < 0.9 * end, "over the side $side t, over the end $end t")
     }
 
@@ -123,7 +123,7 @@ class CrawlerCraneTest {
     fun `a load it holds over the end tips it when it slews over the side`() {
         val crane = CrawlerCrane(boomAngle = 45.0, hookHeight = 5.0)
         var t = settled(crane)
-        val end = crane.tippingLoadTonnes()
+        val end = crane.tippingLoadTonnes(t)
         crane.loadTonnes = 0.85 * end
         t = runUntil(crane, t, t + 15.0)
         assertTrue(crane.tilt < 1.0, "over the end it stands: ${crane.tilt} degrees")
@@ -140,7 +140,7 @@ class CrawlerCraneTest {
         for ((slew, angle) in listOf(0.0 to 30.0, 90.0 to 30.0, 90.0 to 60.0, 90.0 to 75.0)) {
             val crane = CrawlerCrane(spec, slewDegrees = slew, boomAngle = angle, hookHeight = 5.0)
             val t = settled(crane)
-            val rated = crane.ratedLoadTonnes()
+            val rated = crane.ratedLoadTonnes(t)
             assertTrue(rated <= spec.maxLoadTonnes)
             crane.loadTonnes = rated
             runUntil(crane, t, t + 12.0)
@@ -204,7 +204,7 @@ class CrawlerCraneTest {
             val crane = CrawlerCrane(slewDegrees = slew, boomAngle = angle, hookHeight = 5.0)
             crane.failure = true
             val t = settled(crane)
-            crane.loadTonnes = crane.ratedLoadTonnes()
+            crane.loadTonnes = crane.ratedLoadTonnes(t)
             runUntil(crane, t, t + 15.0)
             assertTrue(!anythingFailed(crane), "slew $slew, boom $angle: nothing yields, buckles or tears")
         }

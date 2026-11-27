@@ -69,9 +69,9 @@ private val BOX_FACES = listOf(
 
 /**
  * The wind controls every crane scene has: `wind` (the mean speed at 10 m, m/s, showing the speed
- * blowing now - gusts included - beside it), `wind direction` (degrees: 0 blows along +x, toward
- * the jib or boom at slew zero; positive turns it the way the crane slews), and the `gusts`
- * checkbox.
+ * blowing now - gusts included - beside it), `wind direction` (degrees: 0 blows along +x, 90 toward
+ * -z - for a slewing crane, toward its jib or boom at slew zero and then the way it slews), and
+ * the `gusts` checkbox.
  */
 internal class WindControls(private val wind: CraneWind) {
     fun controls(t: Double): List<SceneControl> = listOf(

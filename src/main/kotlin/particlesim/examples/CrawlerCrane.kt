@@ -541,7 +541,7 @@ class CrawlerCrane(
      * everything else's - its weight and the wind on it - the least of them. Infinite if the hook
      * is inside the outline.
      */
-    fun tippingLoadTonnes(t: Double = 0.0): Double {
+    fun tippingLoadTonnes(t: Double): Double {
         val ps = pads.map { store.position(it) }
         val edges = listOf(
             Vector3(1.0, 0.0, 0.0) to ps.maxOf { it.x }, Vector3(-1.0, 0.0, 0.0) to -ps.minOf { it.x },
@@ -573,7 +573,7 @@ class CrawlerCrane(
     /** What it's rated to lift as it stands, in the wind blowing at [t]:
      * [CrawlerCraneSpec.ratingFraction] of the tipping load, and no more than
      * [CrawlerCraneSpec.maxLoadTonnes]. */
-    fun ratedLoadTonnes(t: Double = 0.0): Double = minOf(spec.maxLoadTonnes, spec.ratingFraction * tippingLoadTonnes(t))
+    fun ratedLoadTonnes(t: Double): Double = minOf(spec.maxLoadTonnes, spec.ratingFraction * tippingLoadTonnes(t))
 
     /** How far the carbody has tilted from level, degrees. */
     val tilt: Double get() {

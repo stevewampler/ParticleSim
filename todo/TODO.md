@@ -6697,9 +6697,10 @@ load. Full `./gradlew test -q` suite green throughout.
       direction` and a `gusts` checkbox (`WindControls`).
       - Tested: the hook blown out to `tan θ = (hook drag + ½ rope drag) /
         weight` (3%); every crane (the guy derrick too) at its load chart's limits in a 20 m/s
-        wind (a working limit chosen for the test, about where tower cranes
-        stop) from three directions with every member under 0.85 of its
-        capacity; the crawler's tipping load in wind (it now takes the
+        wind (a steady working limit chosen for the test, not from a standard;
+        gusts on top aren't tested) from three directions with every member under 0.85 of its
+        capacity (worst: the luffing jib's foot at 0.77 in a crosswind at
+        12 t) and no derrick guy below 5 kN (10 kN at worst); the crawler's tipping load in wind (it now takes the
         wind's moment about each edge) - 15 m/s from behind takes it from
         20.4 t to 18.0 t over the end, and 0.9/1.05 of that holds/tips.
       - The luffing jib was too light for a crosswind at 12 t (its foot

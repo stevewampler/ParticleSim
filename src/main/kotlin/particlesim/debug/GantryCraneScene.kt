@@ -29,7 +29,8 @@ import particlesim.render.srgbToLinear
  * weight, about 7 s after a (re)start.
  *
  * **Wind** (controls: `wind`, the mean speed at 10 m in m/s, the speed blowing now beside it;
- * `wind direction`, degrees, 0 blowing along +x and positive turning it the way the crane slews;
+ * `wind direction`, degrees: 0 blows along +x, across the span the way the trolley runs, and 90
+ * along the rails toward -z;
  * options: `gusts`, a checkbox): drag on every member, rope and block, blowing harder higher up
  * (see [particlesim.physics.TrussWind]). A new speed or direction comes on over a few seconds;
  * gusts swing the speed 35% either side of the mean. Still by default.

@@ -97,7 +97,7 @@ class CraneWindTest {
     }
 
     @Test
-    fun `in a 20 m per second working wind every crane holds its limits within its strength`() {
+    fun `in a 20 m per second working wind every crane holds its limits within its strength, and no derrick guy goes slack`() {
         val speed = WORKING_WIND
         val cases = ArrayList<Case>()
         for (direction in listOf(0.0, 90.0, 180.0)) {
@@ -124,8 +124,10 @@ class CraneWindTest {
             val d = GuyDerrick(ds, boomAngle = ds.minBoomAngle, hookHeight = 5.0, loadTonnes = ds.maxLoadTonnes)
             d.wind.set(0.0, direction); d.wind.speedTarget = speed
             var slackest = Double.POSITIVE_INFINITY
-            run(d::step, d.dt, 0.0, d.readyAt + d.easeSeconds + 12.0) { slackest = minOf(slackest, d.guyTensions.min()) }
+            val ready = run(d::step, d.dt, 0.0, d.readyAt + d.easeSeconds)
+            run(d::step, d.dt, ready, ready + 12.0) { slackest = minOf(slackest, d.guyTensions.min()) }
             cases += worstIn("derrick from $direction (slackest guy ${"%.0f".format(slackest / 1e3)} kN)", d.truss, d.parts) { d.truss.utilisation(d.store, it) }
+            assertTrue(slackest > 5e3, "derrick from $direction: a guy down to ${slackest / 1e3} kN")
         }
         for (c in cases) println("${c.name}: ${"%.2f".format(c.worst)}")
         for (c in cases) assertTrue(c.worst < 0.85, "${c.name}: a member at ${c.worst} of its capacity")
@@ -154,7 +156,7 @@ class CraneWindTest {
     }
 
     private companion object {
-        /** m/s at 10 m: a working limit chosen for these tests, about where tower cranes stop. */
+        /** m/s at 10 m: a working limit chosen for these tests (not taken from a standard), steady, no gusts. */
         const val WORKING_WIND = 20.0
     }
 }
