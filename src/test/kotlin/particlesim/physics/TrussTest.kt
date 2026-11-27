@@ -104,6 +104,8 @@ class TrussTest {
         assertTrue((f.getValue(p) - expectedOnParticle).length() < 1e-9)
         val net = f.values.fold(Vector3.ZERO) { s, v -> s + v }
         assertTrue(net.length() < 1e-9, "no net force: $net")
+        assertTrue((attachment.force(store) - expectedOnParticle).length() < 1e-9, "force() reads what it applies")
+        assertEquals(Vector3.ZERO, WeightedAttachment(p, stiffness = 1000.0).force(store), "no target, no force")
         // Without damping the force lies along target - x, so no net torque either.
         store.setVelocity(p, Vector3(0.0, 0.5, 0.0))
         val undamped = WeightedAttachment(p, stiffness = 1000.0).apply { setTarget(corners.zip(weights)) }

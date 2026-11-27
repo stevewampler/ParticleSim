@@ -272,6 +272,26 @@ class TowerCraneTest {
         assertEquals(sway, off.at(store.slotOf(swaying)))
     }
 
+    @Test
+    fun `structural damping with a frame velocity leaves the frame's travel alone and damps movement about it`() {
+        val store = particlesim.core.ParticleStore()
+        val frame = Vector3(0.0, 0.0, 0.6)
+        // Travelling with the frame...
+        val carried = store.create(position = Vector3(10.0, 16.0, 2.0), velocity = frame, mass = particlesim.core.ScalarExpr.of(5.0))
+        // ...and swaying about it.
+        val swaying = store.create(position = Vector3(-5.0, 16.0, 0.0), velocity = frame + Vector3(0.1, -0.2, 0.3), mass = particlesim.core.ScalarExpr.of(2.0))
+        val anchor = store.create(position = Vector3(0.0, 0.0, 45.0), velocity = Vector3(0.0, 0.0, 0.4), mass = particlesim.core.ScalarExpr.of(1.0))
+        val groups = particlesim.core.Groups()
+        groups.add("gantry", carried); groups.add("gantry", swaying); groups.add("rails", anchor)
+        val damping = SlewFrameDamping("gantry", "rails", groups, { 0.0 }, coefficient = 0.5, frameVelocity = { frame })
+        val chunk = particlesim.physics.ChunkAccumulator(store.capacity)
+        damping.accumulate(store, groups, 0.0, chunk, 0, 1)
+        assertTrue(chunk.at(store.slotOf(carried)).length() < 1e-12, "travelling with the frame isn't damped")
+        val sway = chunk.at(store.slotOf(swaying))
+        assertTrue((sway - Vector3(-0.5 * 2.0 * 0.1, 0.5 * 2.0 * 0.2, -0.5 * 2.0 * 0.3)).length() < 1e-12, "$sway")
+        assertEquals(Vector3(0.0, 0.0, -0.5 * 1.0 * 0.4), chunk.at(store.slotOf(anchor)), "the fixed group stays put: the frame doesn't carry it")
+    }
+
     private fun anythingFailed(crane: TowerCrane) =
         (0 until crane.truss.size).any { crane.truss.hasBuckled(it) || crane.truss.yieldStrain(it) > 0.0 || crane.truss.isTorn(it) }
 

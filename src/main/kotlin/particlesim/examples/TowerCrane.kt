@@ -214,6 +214,10 @@ class RampedGravity(
  * damps the crane's sway and the jib's whip, not the slew itself; the hook and trolley aren't in
  * it, so the load swings freely. [coefficient] (1/s) is `2 zeta omega` for the modes it's tuned
  * to. Each group is skipped while disabled; membership is read once, at construction.
+ *
+ * A crane that travels as a whole (a gantry on its rails) gives [frameVelocity]: the moving part
+ * is carried along at it too, so travelling isn't damped either - only the structure's movement
+ * about the travelling frame.
  */
 class SlewFrameDamping(
     private val slewingGroup: String,
@@ -222,6 +226,7 @@ class SlewFrameDamping(
     private val slewRate: () -> Double,
     coefficient: Double,
     override val name: String? = "structural damping",
+    private val frameVelocity: () -> Vector3 = { Vector3.ZERO },
 ) : Force {
     var coefficient: Double = coefficient
     private val slewing: List<Int> = groups.membersOf(slewingGroup).toList()
@@ -233,6 +238,7 @@ class SlewFrameDamping(
         val slewingOn = groups.isEnabled(slewingGroup)
         val fixedOn = groups.isEnabled(fixedGroup)
         val omega = slewRate()
+        val frame = frameVelocity()
         val total = slewing.size + fixed.size
         var i = chunkIndex
         while (i < total) {
@@ -241,10 +247,11 @@ class SlewFrameDamping(
             val id = if (rotating) slewing[i] else fixed[i - slewing.size]
             val s = store.slotOf(id)
             val m = store.mass(id)
-            // omega x r for a turn about the y axis.
-            val rx = if (rotating) omega * store.zAt(s) else 0.0
-            val rz = if (rotating) -omega * store.xAt(s) else 0.0
-            chunk.add(s, -c * m * (store.vxAt(s) - rx), -c * m * store.vyAt(s), -c * m * (store.vzAt(s) - rz))
+            // The frame's velocity plus omega x r for a turn about the y axis.
+            val rx = if (rotating) frame.x + omega * store.zAt(s) else 0.0
+            val ry = if (rotating) frame.y else 0.0
+            val rz = if (rotating) frame.z - omega * store.xAt(s) else 0.0
+            chunk.add(s, -c * m * (store.vxAt(s) - rx), -c * m * (store.vyAt(s) - ry), -c * m * (store.vzAt(s) - rz))
             i += chunkCount
         }
     }

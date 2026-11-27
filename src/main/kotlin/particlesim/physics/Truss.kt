@@ -2,6 +2,7 @@ package particlesim.physics
 
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
+import particlesim.core.Vector3
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -265,9 +266,10 @@ class WeightedAttachment(
         weights = DoubleArray(blend.size) { blend[it].second }
     }
 
-    override fun accumulate(store: ParticleStore, groups: Groups, t: Double, chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int) {
-        // One item: the first chunk owns it, so the result doesn't depend on the chunk count.
-        if (chunkIndex != 0 || targetIds.isEmpty()) return
+    /** The force it puts on [particle] right now (the targets take the opposite, by weight) - a
+     * support's reaction, when the targets are fixed. Zero before a target is set. */
+    fun force(store: ParticleStore): Vector3 {
+        if (targetIds.isEmpty()) return Vector3.ZERO
         var tx = 0.0; var ty = 0.0; var tz = 0.0
         var vx = 0.0; var vy = 0.0; var vz = 0.0
         for (j in targetIds.indices) {
@@ -276,9 +278,19 @@ class WeightedAttachment(
             vx += w * store.vxAt(s); vy += w * store.vyAt(s); vz += w * store.vzAt(s)
         }
         val p = store.slotOf(particle)
-        val fx = stiffness * (tx - store.xAt(p)) + damping * (vx - store.vxAt(p))
-        val fy = stiffness * (ty - store.yAt(p)) + damping * (vy - store.vyAt(p))
-        val fz = stiffness * (tz - store.zAt(p)) + damping * (vz - store.vzAt(p))
+        return Vector3(
+            stiffness * (tx - store.xAt(p)) + damping * (vx - store.vxAt(p)),
+            stiffness * (ty - store.yAt(p)) + damping * (vy - store.vyAt(p)),
+            stiffness * (tz - store.zAt(p)) + damping * (vz - store.vzAt(p)),
+        )
+    }
+
+    override fun accumulate(store: ParticleStore, groups: Groups, t: Double, chunk: ChunkAccumulator, chunkIndex: Int, chunkCount: Int) {
+        // One item: the first chunk owns it, so the result doesn't depend on the chunk count.
+        if (chunkIndex != 0 || targetIds.isEmpty()) return
+        val f = force(store)
+        val fx = f.x; val fy = f.y; val fz = f.z
+        val p = store.slotOf(particle)
         chunk.add(p, fx, fy, fz)
         for (j in targetIds.indices) {
             val w = weights[j]

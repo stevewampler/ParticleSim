@@ -6586,6 +6586,50 @@ load. Full `./gradlew test -q` suite green throughout.
       than one member apex to head), a load chart that limits luffing out
       with a heavy load.
 
+## Goliath (gantry) crane (`gantryCrane`, branch `gantry-crane`)
+- [x] **`GantryCrane` model** (`particlesim.examples`): 40 t over a 30 m span,
+      16 m clear under a 2 m x 2.5 m box lattice girder, travelling on a pair
+      of 90 m rails; a `Truss` at real stiffness and masses (about 75 t of
+      structure), sharing the other cranes' `Drive`, `RampedGravity`,
+      `SlewFrameDamping` and failure model.
+      - One rigid leg (a V of tubes from each foot to the girder a panel
+        either side of its centre line) and one flexible leg (straight up,
+        braced only in its own plane across the span), so the flexible leg
+        rocks along the span and the girder works as a simple beam: each
+        leg's share of a load follows the lever rule and the flexible leg
+        pushes no thrust along the span. Both legs pinned at their feet would
+        make the portal indeterminate.
+      - Rails: two fixed anchors each; each foot is a `WeightedAttachment`
+        blended between its rail's ends at the travel drive's position
+        (36 m/min), so the wheels drive the gantry and the load swings as it
+        starts and stops. The feet can't lift off.
+      - `SlewFrameDamping` got an optional frame velocity (the gantry's
+        travel), so structural damping doesn't brake the travel; without it
+        the legs carried ~3% extra at full speed. `WeightedAttachment.force`
+        reads back the reaction (`rigidLegReaction`, `flexibleLegReaction`,
+        and the thrusts along the span).
+      - Underhung trolley on the girder's bottom chords (30 m/min) carrying
+        the hoist (eight falls, 24 m/min); hook damped while settling.
+      - Peak member stress ~150 MPa with the rated load mid-span, utilisation
+        under 0.7 anywhere across the span. With failure on, 2.5 times the
+        rated load holds and 3 times buckles the top chords mid-span and
+        brings the girder down.
+      - Tested: geometry and couplings, reactions against the lever rule
+        (within 0.5% of the load - the flexible leg leans a few mm as the
+        girder bends) and the whole weight, no flexible-leg thrust, mid-span
+        chord forces against the moments at the panel's ends over the depth,
+        stress at the rated load, the trolley and hoist arriving, travel at
+        full speed leaving the legs' forces as standing (within 1.5%; fails
+        without the frame velocity) and the swing's period after a stop,
+        target clamping, failure holding the rated load and collapsing at
+        three times it. Component tests for the frame velocity and `force`.
+- [x] **`gantryCrane` scene**: steel coloured by stress or paint, failure
+      checkbox, trolley/cab/hook/load/bogie blocks, rails; controls travel,
+      trolley, hook height and load (to 120 t). Scene tested.
+- [ ] Possible next steps: wheels that can lift off the rails (a
+      compression-only support), skewing when one leg's drive runs ahead,
+      cantilevers past the legs (needs open leg portals the hook can pass).
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

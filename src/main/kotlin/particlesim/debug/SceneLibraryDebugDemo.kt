@@ -60,6 +60,7 @@ fun main(args: Array<String>) {
         "iBeam" to { IBeamScene() },
         "towerCrane" to { TowerCraneScene() },
         "luffingCrane" to { LuffingCraneScene() },
+        "gantryCrane" to { GantryCraneScene() },
     )
     val requestedScene = args.getOrNull(0)
     if (requestedScene != null && requestedScene !in factories) {
