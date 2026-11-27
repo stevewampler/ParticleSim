@@ -310,8 +310,8 @@ targeted for visualization.
   length), optionally tension-only (tie bars, wire rope), with a rest length
   that can change while running (a hoist paying out rope) and damping along
   the member proportional to its stiffness. Reads back each member's axial
-  force and stress for colouring. Added for the `towerCrane`, `luffingCrane`, `gantryCrane`
-  and `crawlerCrane` scenes (§9.6).
+  force and stress for colouring. Added for the `towerCrane`, `luffingCrane`, `gantryCrane`,
+  `crawlerCrane` and `guyDerrick` scenes (§9.6).
 - **Weighted attachment**: a stiff zero-length spring holding one particle
   at a weighted blend of others (weights summing to one), the reaction
   shared back by the same weights - so it couples without any net force or
@@ -328,6 +328,24 @@ targeted for visualization.
   which projects the particle back and scales its velocity, it reports a
   reaction and holds a sideways load - what lets the `crawlerCrane` scene
   (§9.6) stand on its pads, lift off one side and tip over.
+- **Bull wheel**: a slewing drive that only twists - a torque toward a
+  target angle (stiffness on the lag, damping on the rate) about a
+  vertical axis, shared out over a group as forces tangential to it, so
+  for particles spread round the axis it is a pure couple with no net
+  force. Lets the `guyDerrick` scene (§9.6) swing a mast that is pinned
+  at its foot and held at its top by guys, without its drive carrying any
+  of the mast's load.
+- **Truss wind**: wind on a truss's members and on bluff bodies hung on
+  it, as quasi-steady drag in the square of the relative wind - the way
+  codes load lattice steelwork and rope, unlike §7.2's pressure on a
+  surface, which is linear in it. Each member is a cylinder in cross-flow:
+  only the wind across it counts, `F = ½ρ(Cd·D)L|v⊥|v⊥`, half to each end;
+  each body (a group: a ballast stack, a cab, a load) feels
+  `½ρ·CdA·|v|v` at its mean position. The wind blows harder higher up by a
+  power law, and it reads its velocity from an expression (§4.1) - the
+  crane scenes (§9.6) drive it from their `wind`, `wind direction` and
+  `gusts` controls rather than §10.4's velocity editor, which stays
+  specific to §5.2's wind. In still air it does nothing.
 
 ### 5.2 Field forces (applied to a group of particles)
 - **Uniform gravity**: constant acceleration vector (e.g. `[0, -9.8, 0]`),
@@ -413,7 +431,7 @@ run. It does not reform.
   lets a collapse spread), and tears past a rupture strain; wire rope snaps
   at its breaking force. Torn members carry nothing and aren't drawn. Turning
   failure off stops new failure without undoing what has happened. The
-  `towerCrane`, `luffingCrane`, `gantryCrane` and `crawlerCrane` scenes' checkbox; the
+  `towerCrane`, `luffingCrane`, `gantryCrane`, `crawlerCrane` and `guyDerrick` scenes' checkbox; the
   elastic lattice (§7) has its own.
 - `[stretch]` Extending breakability to the custom forces in §5.3, or to
   constraints (§6) themselves (e.g. an anchor that gives way under enough
@@ -1961,10 +1979,14 @@ integrator's accuracy (§13.1).
   response.
 - **Truss statics**: a determinate truss (a loaded tripod, a crane jib on
   its hinge and tie, a luffing jib on its foot pins and luffing rope, a
-  gantry girder on a rigid and a flexible leg) settles to the member forces
-  and reactions the method of joints, method of sections or moments about
-  the hinge gives.
+  gantry girder on a rigid and a flexible leg, a guyed mast pinned at its
+  foot) settles to the member forces and reactions the method of joints,
+  method of sections or moments about the hinge gives - and a derrick's
+  boom takes a tip load's thrust by the triangle of forces at its tip.
 - **Pendulum**: a hook on a crane's rope swings with period `2π√(L/g)`.
+- **Wind on a hanging load**: a crane's hook in a steady wind hangs out at
+  `tan θ = F / W` - the wind's horizontal force on it (and the share of its
+  rope's that it carries) over its weight.
 - **Tipping**: a machine standing on ground contacts (§5.1) is held up
   with the reactions' centre under its centre of mass, and tips when its
   centre of mass passes over the support outline's edge - the load that

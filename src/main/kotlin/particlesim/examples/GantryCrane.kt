@@ -13,6 +13,7 @@ import particlesim.physics.FixedPosition
 import particlesim.physics.Force
 import particlesim.physics.Integrator
 import particlesim.physics.Truss
+import particlesim.physics.TrussWind
 import particlesim.physics.WeightedAttachment
 import kotlin.math.abs
 import kotlin.math.sign
@@ -65,6 +66,7 @@ data class GantryCraneSpec(
     val sillArea: Double = 100e-4,
     /** Eight falls of 20 mm rope's steel. */
     val hoistRopeArea: Double = 8 * 1.9e-4,
+    val hoistRopeFalls: Int = 8,
     /** The legs are big, thin-walled tubes. */
     val legDiameterOverThickness: Double = 60.0,
     // Failure (when it's on): S355 steel, members buckling by their slenderness as round tubes
@@ -202,7 +204,7 @@ class GantryCrane(
                 breakingForce = spec.hoistRopeBreakingForce,
             )
         } else {
-            val tube = if (part == Part.GIRDER_CHORD || part == Part.GIRDER_WEB) 20.0 else spec.legDiameterOverThickness
+            val tube = tubeProportion(part)
             Truss.Member(
                 a, b, area, STEEL_YOUNGS_MODULUS,
                 yieldStress = spec.yieldStress,
@@ -213,6 +215,9 @@ class GantryCrane(
         partList += part
         return memberList.size - 1
     }
+
+    /** The diameter over wall thickness of [part]'s members, taken as round tubes. */
+    private fun tubeProportion(part: Part) = if (part == Part.GIRDER_CHORD || part == Part.GIRDER_WEB) 20.0 else spec.legDiameterOverThickness
 
     /** The bottom and top chords of the panel either side of mid-span - the most bent. */
     val midspanBottomChords: List<Int>
@@ -305,7 +310,30 @@ class GantryCrane(
      * there's nothing to edit in it. */
     val hookSettling = SlewFrameDamping(HOOK_GROUP, RAILS_GROUP, groups, { 0.0 }, TowerCrane.SETTLING_DAMPING, name = null)
     val gravity = RampedGravity(listOf(GANTRY_GROUP, TROLLEY_GROUP, HOOK_GROUP), groups, rampSeconds)
-    val forces: List<Force> = listOf(truss, gravity, structuralDamping, hookSettling, trolleyCarriage) + wheels
+
+    /** The precast unit a load comes as - the scene draws it, the wind pushes on it. */
+    val loadCrate = LoadCrate(6.0, 2.0, 2.4)
+    /** The wind it works in: still until set. */
+    val wind = CraneWind()
+    /** The wind on every member, the trolley, the cab, and the hook and its load. */
+    val windForce: TrussWind = run {
+        groups.add(TowerCrane.CAB_GROUP, girder[spec.rigidLegPanel + 1][0])
+        TrussWind(
+            truss, store, groups,
+            DoubleArray(truss.size) { i ->
+                if (parts[i] == Part.HOIST_ROPE) CraneWind.ropeDragWidth(spec.hoistRopeArea, spec.hoistRopeFalls)
+                else CraneWind.tubeDragWidth(memberList[i].area, tubeProportion(parts[i]))
+            },
+            listOf(
+                TrussWind.Body(TROLLEY_GROUP) { TROLLEY_DRAG_AREA },
+                TrussWind.Body(TowerCrane.CAB_GROUP) { CAB_DRAG_AREA },
+                TrussWind.Body(HOOK_GROUP) { HOOK_BLOCK_DRAG_AREA + loadCrate.dragArea(loadTonnes) },
+            ),
+            VectorExpr.of { t -> wind.velocity(t) },
+            profileExponent = CraneWind.PROFILE_EXPONENT,
+        )
+    }
+    val forces: List<Force> = listOf(truss, gravity, structuralDamping, hookSettling, trolleyCarriage, windForce) + wheels
 
     /** Whether the steel can fail (see [Truss]): off, it stays elastic however it's loaded. */
     var failure: Boolean
@@ -374,6 +402,7 @@ class GantryCrane(
             val stepMass = TowerCrane.LOAD_RAMP_RATE * dt
             store.setMass(hookNode, ScalarExpr.of(if (abs(wanted - mass) <= stepMass) wanted else mass + sign(wanted - mass) * stepMass), t)
         }
+        wind.advance(dt)
         updateCouplings(t)
         structuralDamping.coefficient = dampingAt(t)
         hookSettling.coefficient = TowerCrane.SETTLING_DAMPING * (dampingAt(t) - TowerCrane.OPERATING_DAMPING) / (TowerCrane.SETTLING_DAMPING - TowerCrane.OPERATING_DAMPING)
@@ -410,6 +439,10 @@ class GantryCrane(
         const val TROLLEY_GROUP = "trolley"
         const val HOOK_GROUP = "hook"
         const val RAILS_GROUP = "rails"
+        // Cd·A of the blocks the scene draws (see CraneWind.blockDragArea), m².
+        val TROLLEY_DRAG_AREA = CraneWind.blockDragArea(3.2, 2.6, 1.25)
+        val CAB_DRAG_AREA = CraneWind.blockDragArea(2.0, 1.65, 2.3)
+        val HOOK_BLOCK_DRAG_AREA = CraneWind.blockDragArea(0.9, 0.6, 1.15)
         const val MIN_ROPE = 1.0
         /** N/m: each wheel bogie on its rail - a few millimetres under the gantry's weight. */
         const val WHEEL_STIFFNESS = 5e8

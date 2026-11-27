@@ -37,8 +37,8 @@ class CrawlerCraneSceneTest {
         assertEquals("member stress", frame.lineLegend!!.label)
         assertEquals(emptySet(), frame.visibleIds)
         assertEquals(listOf("track 1", "track 2", "counterweight", "cab", "hook block", "ground"), frame.meshes.map { it.surface.name })
-        assertEquals(listOf("failure" to "off", "colours" to "stress"), frame.options.map { it.name to it.selected })
-        assertEquals(listOf(true, false), frame.options.map { it.toggle }, "failure is a checkbox")
+        assertEquals(listOf("failure" to "off", "colours" to "stress", "gusts" to "off"), frame.options.map { it.name to it.selected })
+        assertEquals(listOf(true, false, true), frame.options.map { it.toggle }, "failure and gusts are checkboxes")
     }
 
     @Test
@@ -56,8 +56,8 @@ class CrawlerCraneSceneTest {
         val crane = scene.model
         val spec = crane.spec
         val before = scene.frame(0.0).controls
-        assertEquals(listOf("slew", "boom angle", "radius", "hook height", "load"), before.map { it.name })
-        assertEquals(listOf("°", "°", "m", "m", "t"), before.map { it.unit })
+        assertEquals(listOf("slew", "boom angle", "radius", "hook height", "load", "wind", "wind direction"), before.map { it.name })
+        assertEquals(listOf("°", "°", "m", "m", "t", "m/s", "°"), before.map { it.unit })
         assertEquals(spec.minBoomAngle to spec.maxBoomAngle, before[1].min to before[1].max)
         assertEquals(spec.minRadius to spec.maxRadius, before[2].min to before[2].max)
         scene.handleControl(SceneControlMessage.SetSceneControl("radius", 30.0), 0.0)

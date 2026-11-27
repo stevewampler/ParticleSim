@@ -221,11 +221,18 @@ class Truss(
         /** The radius of gyration of a round tube of [area] whose diameter is [diameterOverThickness]
          * times its wall - a consistent `r` for a member known only by its area. */
         fun tubeRadiusOfGyration(area: Double, diameterOverThickness: Double = 20.0): Double {
-            // A = pi t (D - t) with t = D / n; r = sqrt(D^2 + (D - 2t)^2) / 4.
-            val n = diameterOverThickness
-            val d = sqrt(area * n * n / (PI * (n - 1)))
-            val inner = d * (1 - 2 / n)
+            // r = sqrt(D^2 + (D - 2t)^2) / 4 with t = D / n.
+            val d = tubeDiameter(area, diameterOverThickness)
+            val inner = d * (1 - 2 / diameterOverThickness)
             return sqrt(d * d + inner * inner) / 4
+        }
+
+        /** The outside diameter of the same round tube [tubeRadiusOfGyration] takes a member of
+         * [area] to be - what it shows the wind. */
+        fun tubeDiameter(area: Double, diameterOverThickness: Double = 20.0): Double {
+            // A = pi t (D - t) with t = D / n.
+            val n = diameterOverThickness
+            return sqrt(area * n * n / (PI * (n - 1)))
         }
     }
 }

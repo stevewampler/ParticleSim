@@ -3,8 +3,11 @@ package particlesim.debug
 import particlesim.core.ParticleStore
 import particlesim.core.ScalarExpr
 import particlesim.core.Vector3
+import particlesim.examples.CraneWind
 import particlesim.render.Color
 import particlesim.render.Material
+import particlesim.render.SceneControl
+import particlesim.render.SceneOption
 import particlesim.render.SurfaceRenderer
 import particlesim.surface.Surface
 import particlesim.surface.Triangle
@@ -63,3 +66,40 @@ private val BOX_FACES = listOf(
     listOf(0, 1, 5, 4), listOf(2, 6, 7, 3),
     listOf(0, 2, 3, 1), listOf(4, 5, 7, 6),
 )
+
+/**
+ * The wind controls every crane scene has: `wind` (the mean speed at 10 m, m/s, showing the speed
+ * blowing now - gusts included - beside it), `wind direction` (degrees: 0 blows along +x, toward
+ * the jib or boom at slew zero; positive turns it the way the crane slews), and the `gusts`
+ * checkbox.
+ */
+internal class WindControls(private val wind: CraneWind) {
+    fun controls(t: Double): List<SceneControl> = listOf(
+        SceneControl(WIND, "m/s", 0.0, MAX_WIND, wind.speedTarget, wind.speedAt(t)),
+        SceneControl(WIND_DIRECTION, "°", 0.0, 360.0, wind.directionTarget, ((wind.direction % 360) + 360) % 360),
+    )
+
+    fun option(): SceneOption = SceneOption.toggle(GUSTS_OPTION, wind.gusts)
+
+    /** Sets the wind control [name] to [value]; false if it isn't one or [value] makes no sense
+     * (a negative speed). */
+    fun set(name: String, value: Double): Boolean {
+        if (!value.isFinite()) return false
+        when (name) {
+            WIND -> { if (value < 0.0) return false; wind.speedTarget = minOf(value, MAX_WIND) }
+            WIND_DIRECTION -> wind.directionTarget = value
+            else -> return false
+        }
+        return true
+    }
+
+    fun setGusts(choice: String) { if (choice in SceneOption.ON_OFF) wind.gusts = choice == "on" }
+
+    companion object {
+        const val WIND = "wind"
+        const val WIND_DIRECTION = "wind direction"
+        const val GUSTS_OPTION = "gusts"
+        /** m/s: well past any crane's working limit - storm force. */
+        const val MAX_WIND = 40.0
+    }
+}

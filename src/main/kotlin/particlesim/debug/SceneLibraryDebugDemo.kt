@@ -62,6 +62,7 @@ fun main(args: Array<String>) {
         "luffingCrane" to { LuffingCraneScene() },
         "gantryCrane" to { GantryCraneScene() },
         "crawlerCrane" to { CrawlerCraneScene() },
+        "guyDerrick" to { GuyDerrickScene() },
     )
     val requestedScene = args.getOrNull(0)
     if (requestedScene != null && requestedScene !in factories) {

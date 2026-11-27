@@ -37,8 +37,8 @@ class LuffingCraneSceneTest {
         assertEquals("member stress", frame.lineLegend!!.label)
         assertEquals(emptySet(), frame.visibleIds)
         assertEquals(listOf("ballast", "hoist winch", "luffing winch", "cab", "hook block", "foundation", "ground"), frame.meshes.map { it.surface.name })
-        assertEquals(listOf("failure" to "off", "colours" to "stress"), frame.options.map { it.name to it.selected })
-        assertEquals(listOf(true, false), frame.options.map { it.toggle }, "failure is a checkbox")
+        assertEquals(listOf("failure" to "off", "colours" to "stress", "gusts" to "off"), frame.options.map { it.name to it.selected })
+        assertEquals(listOf(true, false, true), frame.options.map { it.toggle }, "failure and gusts are checkboxes")
     }
 
     @Test
@@ -55,8 +55,8 @@ class LuffingCraneSceneTest {
         val scene = LuffingCraneScene()
         val crane = scene.model
         val before = scene.frame(0.0).controls
-        assertEquals(listOf("slew", "jib angle", "radius", "hook height", "load"), before.map { it.name })
-        assertEquals(listOf("°", "°", "m", "m", "t"), before.map { it.unit })
+        assertEquals(listOf("slew", "jib angle", "radius", "hook height", "load", "wind", "wind direction"), before.map { it.name })
+        assertEquals(listOf("°", "°", "m", "m", "t", "m/s", "°"), before.map { it.unit })
         assertEquals(crane.spec.minJibAngle to crane.spec.maxJibAngle, before[1].min to before[1].max)
         assertEquals(crane.spec.minRadius to crane.spec.maxRadius, before[2].min to before[2].max)
         scene.handleControl(SceneControlMessage.SetSceneControl("radius", 30.0), 0.0)

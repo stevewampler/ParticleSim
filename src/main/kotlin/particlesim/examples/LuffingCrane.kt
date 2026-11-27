@@ -13,6 +13,7 @@ import particlesim.physics.FixedPosition
 import particlesim.physics.Force
 import particlesim.physics.Integrator
 import particlesim.physics.Truss
+import particlesim.physics.TrussWind
 import particlesim.physics.WeightedAttachment
 import kotlin.math.PI
 import kotlin.math.abs
@@ -72,8 +73,8 @@ data class LuffingCraneSpec(
     val mastChordArea: Double = 80e-4,
     val mastWebArea: Double = 30e-4,
     val turntableArea: Double = 80e-4,
-    val jibChordArea: Double = 30e-4,
-    val jibWebArea: Double = 10e-4,
+    val jibChordArea: Double = 40e-4,
+    val jibWebArea: Double = 16e-4,
     val jibHeadArea: Double = 30e-4,
     val counterJibChordArea: Double = 60e-4,
     val counterJibWebArea: Double = 20e-4,
@@ -81,8 +82,10 @@ data class LuffingCraneSpec(
     val tieArea: Double = 60e-4,
     /** Six falls of 20 mm rope's steel between the A-frame and the jib head. */
     val luffingRopeArea: Double = 6 * 1.9e-4,
+    val luffingRopeFalls: Int = 6,
     /** Four falls of 16 mm rope's steel. */
     val hoistRopeArea: Double = 4 * 1.2e-4,
+    val hoistRopeFalls: Int = 4,
     // Failure (when it's on): S355 steel, members buckling by their slenderness as round tubes
     // (see Truss.tubeRadiusOfGyration); rope at about 250 kN (20 mm) and 160 kN (16 mm) minimum
     // breaking load a fall.
@@ -413,7 +416,34 @@ class LuffingCrane(
      * there's nothing to edit in it. */
     val hookSettling = SlewFrameDamping(HOOK_GROUP, FOUNDATION_GROUP, groups, { 0.0 }, TowerCrane.SETTLING_DAMPING, name = null)
     val gravity = RampedGravity(listOf(MAST_GROUP, SLEWING_GROUP, HOOK_GROUP), groups, rampSeconds)
-    val forces: List<Force> = listOf(truss, gravity, structuralDamping, hookSettling) + slewingRing
+
+    /** The crate a load comes in - the scene draws it, the wind pushes on it. */
+    val loadCrate = LoadCrate(3.0, 1.2, 2.0)
+    /** The wind it works in: still until set. */
+    val wind = CraneWind()
+    /** The wind on every member, the ballast, the cab, and the hook and its load. */
+    val windForce: TrussWind = run {
+        ballastNodes.forEach { groups.add(TowerCrane.BALLAST_GROUP, it) }
+        listOf(turntableLower[2], turntableUpper[2]).forEach { groups.add(TowerCrane.CAB_GROUP, it) }
+        TrussWind(
+            truss, store, groups,
+            DoubleArray(truss.size) { i ->
+                when (parts[i]) {
+                    Part.LUFFING_ROPE -> CraneWind.ropeDragWidth(spec.luffingRopeArea, spec.luffingRopeFalls)
+                    Part.HOIST_ROPE -> CraneWind.ropeDragWidth(spec.hoistRopeArea, spec.hoistRopeFalls)
+                    else -> CraneWind.tubeDragWidth(memberList[i].area)
+                }
+            },
+            listOf(
+                TrussWind.Body(TowerCrane.BALLAST_GROUP) { BALLAST_DRAG_AREA },
+                TrussWind.Body(TowerCrane.CAB_GROUP) { TowerCrane.CAB_DRAG_AREA },
+                TrussWind.Body(HOOK_GROUP) { HOOK_BLOCK_DRAG_AREA + loadCrate.dragArea(loadTonnes) },
+            ),
+            VectorExpr.of { t -> wind.velocity(t) },
+            profileExponent = CraneWind.PROFILE_EXPONENT,
+        )
+    }
+    val forces: List<Force> = listOf(truss, gravity, structuralDamping, hookSettling, windForce) + slewingRing
 
     /** Whether the steel can fail (see [Truss]): off, it stays elastic however it's loaded. */
     var failure: Boolean
@@ -478,6 +508,7 @@ class LuffingCrane(
             val stepMass = TowerCrane.LOAD_RAMP_RATE * dt
             store.setMass(hookNode, ScalarExpr.of(if (abs(wanted - mass) <= stepMass) wanted else mass + sign(wanted - mass) * stepMass), t)
         }
+        wind.advance(dt)
         updateCouplings(t)
         structuralDamping.coefficient = dampingAt(t)
         hookSettling.coefficient = TowerCrane.SETTLING_DAMPING * (dampingAt(t) - TowerCrane.OPERATING_DAMPING) / (TowerCrane.SETTLING_DAMPING - TowerCrane.OPERATING_DAMPING)
@@ -500,6 +531,9 @@ class LuffingCrane(
         const val SLEWING_GROUP = "slewing parts"
         const val HOOK_GROUP = "hook"
         const val FOUNDATION_GROUP = "foundation"
+        // Cd·A of the blocks the scene draws (see CraneWind.blockDragArea), m².
+        val BALLAST_DRAG_AREA = CraneWind.blockDragArea(4.4, 1.8, 2.55)
+        val HOOK_BLOCK_DRAG_AREA = CraneWind.blockDragArea(0.7, 0.4, 0.9)
         const val MIN_ROPE = 1.0
         /** s: how quickly the luffing rope's trim and the hoist's allowance for the head's
          * height catch up - well slower than the jib rocks on its rope (5-8 s), or they'd chase

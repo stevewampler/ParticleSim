@@ -1,6 +1,6 @@
 ---
 name: run-particlesim
-description: Build, run, and drive the ParticleSim viewer in a browser. Use when asked to start ParticleSim, launch the viewer, run a demo scene (flag, ballBounce, trampoline, sparks, fire, fluid, drag, particleCollision, spatialGrid, multiShape, poleRope, flagOnRope, iBeam, towerCrane, luffingCrane, gantryCrane, crawlerCrane), take a screenshot of it, or interact with its outliner/panels/toggles.
+description: Build, run, and drive the ParticleSim viewer in a browser. Use when asked to start ParticleSim, launch the viewer, run a demo scene (flag, ballBounce, trampoline, sparks, fire, fluid, drag, particleCollision, spatialGrid, multiShape, poleRope, flagOnRope, iBeam, towerCrane, luffingCrane, gantryCrane, crawlerCrane, guyDerrick), take a screenshot of it, or interact with its outliner/panels/toggles.
 ---
 
 ParticleSim is a Kotlin/Gradle JVM physics engine that serves a plain
@@ -74,7 +74,7 @@ port 8888/8887 listeners (same two `lsof` lines as above).
 |---|---|
 | `launch` | launch headless Chromium, open the viewer, wait for the "connected" badge |
 | `ss [name]` | screenshot -> `$SCREENSHOT_DIR/<name-or-timestamp>.png` |
-| `scene <name>` | switch the active demo via the SCENE dropdown - one of `flag`, `ballBounce`, `trampoline`, `sparks`, `fire`, `fluid`, `drag`, `particleCollision`, `spatialGrid`, `multiShape`, `poleRope`, `flagOnRope`, `iBeam`, `towerCrane`, `luffingCrane`, `gantryCrane`, `crawlerCrane` |
+| `scene <name>` | switch the active demo via the SCENE dropdown - one of `flag`, `ballBounce`, `trampoline`, `sparks`, `fire`, `fluid`, `drag`, `particleCollision`, `spatialGrid`, `multiShape`, `poleRope`, `flagOnRope`, `iBeam`, `towerCrane`, `luffingCrane`, `gantryCrane`, `crawlerCrane`, `guyDerrick` |
 | `click <exact text>` | click an outliner entry (group/force/constraint/surface/collider/emitter/light name) or any other exact-text element - opens its per-object panel |
 | `toggle <label text>` | click the checkbox next to that label, e.g. `toggle show arrows`, `toggle show mesh`, `toggle show polylines`, `toggle wireframe`, `toggle show particles`, `toggle show mesh edges` |
 | `orbit <dx> <dy>` | left-drag the 3D view by (dx, dy) pixels - most scenes start framed near the origin, so geometry offset from it (e.g. multiShape's flag) may need this to come into view |

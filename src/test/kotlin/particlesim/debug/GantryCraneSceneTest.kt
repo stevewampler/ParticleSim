@@ -38,8 +38,8 @@ class GantryCraneSceneTest {
             listOf("trolley", "cab", "hook block", "bogie 1", "bogie 2", "bogie 3", "bogie 4", "rail 1", "rail 2", "ground"),
             frame.meshes.map { it.surface.name },
         )
-        assertEquals(listOf("failure" to "off", "colours" to "stress"), frame.options.map { it.name to it.selected })
-        assertEquals(listOf(true, false), frame.options.map { it.toggle }, "failure is a checkbox")
+        assertEquals(listOf("failure" to "off", "colours" to "stress", "gusts" to "off"), frame.options.map { it.name to it.selected })
+        assertEquals(listOf(true, false, true), frame.options.map { it.toggle }, "failure and gusts are checkboxes")
     }
 
     @Test
@@ -57,8 +57,8 @@ class GantryCraneSceneTest {
         val crane = scene.model
         val spec = crane.spec
         val before = scene.frame(0.0).controls
-        assertEquals(listOf("travel", "trolley", "hook height", "load"), before.map { it.name })
-        assertEquals(listOf("m", "m", "m", "t"), before.map { it.unit })
+        assertEquals(listOf("travel", "trolley", "hook height", "load", "wind", "wind direction"), before.map { it.name })
+        assertEquals(listOf("m", "m", "m", "t", "m/s", "°"), before.map { it.unit })
         assertEquals(-spec.travelRange to spec.travelRange, before[0].min to before[0].max)
         assertEquals(spec.minTrolley to spec.maxTrolley, before[1].min to before[1].max)
         scene.handleControl(SceneControlMessage.SetSceneControl("travel", 12.0), 0.0)

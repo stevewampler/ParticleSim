@@ -6672,6 +6672,81 @@ load. Full `./gradlew test -q` suite green throughout.
       load and % of it), soft ground (pads that sink), travelling on the
       tracks, a luffing jib on the boom.
 
+## Wind on the cranes (branch `derrick-crane-and-wind`)
+- [x] **`TrussWind` force** (`particlesim.physics`, §5.1): quasi-steady drag
+      on a truss's members by the cross-flow principle (`½ρ(Cd·D)L|v⊥|v⊥`,
+      half to each end, wind relative to the member) and on bluff bodies
+      (groups, `½ρ·CdA·|v|v`, area read live), with a power-law height
+      profile; torn members feel nothing; in still air it does nothing at
+      all. Lattice shielding isn't modelled (every member sees the full
+      wind, which errs high). Component/analytic-tested: perpendicular
+      member exact, edge-on zero, `sin²θ` along the normal, relative
+      velocity (zero moving with it, 4x against), bodies and disabled
+      groups, the profile, chunk independence, torn members, force
+      positions.
+- [x] **`CraneWind`** (`particlesim.examples`): mean speed at 10 m and
+      direction, both reached gradually (2 m/s per second, 15°/s the short
+      way); gusts a pure function of time (±35% speed, a few degrees'
+      wander). Member widths from the same tubes the buckling assumes
+      (`Truss.tubeDiameter`), rope from its falls, blocks `Cd 1.1` on the
+      mean of two sides; `LoadCrate` shared by the scene that draws the
+      load and the crane that feels it.
+- [x] **All four cranes** carry a `windForce`: every member, the hook block
+      and load, and the ballast/counterweight, cab and trolley as each has.
+      Scenes get `wind` (m/s at 10 m, showing the speed now), `wind
+      direction` and a `gusts` checkbox (`WindControls`).
+      - Tested: the hook blown out to `tan θ = (hook drag + ½ rope drag) /
+        weight` (3%); every crane (the guy derrick too) at its load chart's limits in a 20 m/s
+        wind (a working limit chosen for the test, about where tower cranes
+        stop) from three directions with every member under 0.85 of its
+        capacity; the crawler's tipping load in wind (it now takes the
+        wind's moment about each edge) - 15 m/s from behind takes it from
+        20.4 t to 18.0 t over the end, and 0.9/1.05 of that holds/tips.
+      - The luffing jib was too light for a crosswind at 12 t (its foot
+        diagonals buckling at 1.27 of capacity): chords 30 -> 40 cm², webs
+        10 -> 16 cm².
+- [ ] Possible next steps: lattice shielding, weathervaning (a tower crane
+      out of service with its slew brake off), wind arrows in the viewer.
+
+## Guy derrick (`guyDerrick`, branch `derrick-crane-and-wind`)
+- [x] **`BullWheel` force** (`particlesim.physics`, §5.1): turns a group
+      about a vertical axis toward a target angle with a torque
+      (`k·lag + c·(ω_target - ω)`) shared as tangential forces - a pure
+      couple for particles spread round the axis. Lag wrapped against the
+      target, so it can wind round any number of turns. Component-tested:
+      torque and pure couple, chunk-independent, winding past 360°,
+      disabled group, start angle and rate damping, swinging a free square
+      round to its target.
+- [x] **`GuyDerrick` model** (`particlesim.examples`): a 20 t guy derrick,
+      22 t of steel - a 40 m square lattice mast tapered to pins at both
+      ends, its foot pinned on a base and its top held by eight 28 mm guys
+      to anchors 90 m out, pretensioned to 60 kN (brought on with gravity);
+      a 30 m box boom pinned to the mast's lowest square, luffed (20-78°) by
+      a topping lift from the top pin, trimmed as the luffing crane's; the
+      bull wheel swings mast and boom together, all the way round under the
+      guys. Rated 20 t at any radius. The constructor swings it to its
+      starting slew.
+      - Tested: geometry and a slewed start; the boom clearing every guy
+        (> 2 m) over its whole luff at every slew; moments about the foot
+        pin (the guys' pull at the top balancing the weights', 1%) and
+        forces (foot, guys, weights, 0.5%); a 20 t tip load's extra boom
+        thrust and topping-lift pull matching the triangle of forces at the
+        tip (3%), the thrust per tonne the same at 25° and 70° (5%) while
+        the topping lift's more than doubles; at 20 t no guy below 5 kN
+        (13 kN at worst, boom right down) and nothing over 0.6 of its
+        strength, boom down/mid/up and swung several ways; swinging 90°;
+        luffing with the hook level; clamps; failure holding 20 t and three
+        times it bringing the boom down.
+- [x] **`guyDerrick` scene**: steel and rope coloured by stress or paint,
+      failure checkbox, a bull wheel that swings with the mast, hook and
+      load, a base, eight anchor blocks, a winch house; controls slew, boom
+      angle, radius, hook height, load (to 60 t) and the wind. Scene tested,
+      including 20 t swung 90° easing the guys in front and loading those
+      behind.
+- [ ] Possible next steps: a stiff-leg derrick (two stiff legs instead of
+      guys, a 270° swing), the hoist and topping-lift ropes reeved down the
+      mast to winches (adding their pull to the mast and boom), guy sag.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created

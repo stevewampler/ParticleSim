@@ -13,6 +13,7 @@ import particlesim.physics.Force
 import particlesim.physics.GroundContact
 import particlesim.physics.Integrator
 import particlesim.physics.Truss
+import particlesim.physics.TrussWind
 import particlesim.physics.WeightedAttachment
 import kotlin.math.PI
 import kotlin.math.abs
@@ -90,8 +91,10 @@ data class CrawlerCraneSpec(
     val pendantArea: Double = 2 * 30e-4,
     /** Eight falls of 20 mm rope's steel between the gantry and the bail. */
     val boomHoistRopeArea: Double = 8 * 1.9e-4,
+    val boomHoistRopeFalls: Int = 8,
     /** Eight falls of 20 mm rope's steel. */
     val hoistRopeArea: Double = 8 * 1.9e-4,
+    val hoistRopeFalls: Int = 8,
     // Failure (when it's on): S355 steel, members buckling by their slenderness as round tubes
     // (see Truss.tubeRadiusOfGyration); rope at about 250 kN minimum breaking load a fall.
     val yieldStress: Double = 355e6,
@@ -435,7 +438,35 @@ class CrawlerCrane(
      * nothing to edit in it. */
     val hookSettling = SlewFrameDamping(HOOK_GROUP, PADS_GROUP, groups, { 0.0 }, TowerCrane.SETTLING_DAMPING, name = null)
     val gravity = RampedGravity(listOf(CARBODY_GROUP, UPPER_GROUP, HOOK_GROUP), groups, rampSeconds)
-    val forces: List<Force> = listOf(truss, gravity, ground, structuralDamping, hookSettling) + slewingRing
+
+    /** The crate a load comes in - the scene draws it, the wind pushes on it. */
+    val loadCrate = LoadCrate(3.0, 1.5, 2.0)
+    /** The wind it works in: still until set. */
+    val wind = CraneWind()
+    /** The wind on every member, the counterweight, the cab, and the hook and its load. */
+    val windForce: TrussWind = run {
+        tail.forEach { groups.add(COUNTERWEIGHT_GROUP, it) }
+        groups.add(TowerCrane.CAB_GROUP, deckLower[2])
+        TrussWind(
+            truss, store, groups,
+            DoubleArray(truss.size) { i ->
+                when (parts[i]) {
+                    Part.PENDANT -> 2 * CraneWind.tubeDragWidth(spec.pendantArea / 2)
+                    Part.BOOM_HOIST_ROPE -> CraneWind.ropeDragWidth(spec.boomHoistRopeArea, spec.boomHoistRopeFalls)
+                    Part.HOIST_ROPE -> CraneWind.ropeDragWidth(spec.hoistRopeArea, spec.hoistRopeFalls)
+                    else -> CraneWind.tubeDragWidth(memberList[i].area)
+                }
+            },
+            listOf(
+                TrussWind.Body(COUNTERWEIGHT_GROUP) { COUNTERWEIGHT_DRAG_AREA },
+                TrussWind.Body(TowerCrane.CAB_GROUP) { CAB_DRAG_AREA },
+                TrussWind.Body(HOOK_GROUP) { GantryCrane.HOOK_BLOCK_DRAG_AREA + loadCrate.dragArea(loadTonnes) },
+            ),
+            VectorExpr.of { t -> wind.velocity(t) },
+            profileExponent = CraneWind.PROFILE_EXPONENT,
+        )
+    }
+    val forces: List<Force> = listOf(truss, gravity, ground, structuralDamping, hookSettling, windForce) + slewingRing
 
     /** Whether the steel can fail (see [Truss]): off, it stays elastic however it's loaded. */
     var failure: Boolean
@@ -505,11 +536,12 @@ class CrawlerCrane(
     }
 
     /**
-     * The load, tonnes, that would tip the crane as it stands: for each edge of the pads' outline
-     * the hook is beyond, the load whose moment about it balances everything else's, the least
-     * of them. Infinite if the hook is inside the outline.
+     * The load, tonnes, that would tip the crane as it stands, in the wind blowing at [t]: for
+     * each edge of the pads' outline the hook is beyond, the load whose moment about it balances
+     * everything else's - its weight and the wind on it - the least of them. Infinite if the hook
+     * is inside the outline.
      */
-    fun tippingLoadTonnes(): Double {
+    fun tippingLoadTonnes(t: Double = 0.0): Double {
         val ps = pads.map { store.position(it) }
         val edges = listOf(
             Vector3(1.0, 0.0, 0.0) to ps.maxOf { it.x }, Vector3(-1.0, 0.0, 0.0) to -ps.minOf { it.x },
@@ -522,14 +554,26 @@ class CrawlerCrane(
         for ((n, offset) in edges) {
             val beyond = n.x * hook.x + n.z * hook.z - offset
             val inside = offset - (n.x * cx + n.z * cz)
-            if (beyond > 0.0) least = minOf(least, m * inside / beyond)
+            if (beyond > 0.0) least = minOf(least, (m * inside + windMoment(n, offset, t) / STANDARD_GRAVITY) / beyond)
         }
         return loadTonnes + least / 1000
     }
 
-    /** What it's rated to lift as it stands: [CrawlerCraneSpec.ratingFraction] of the tipping
-     * load, and no more than [CrawlerCraneSpec.maxLoadTonnes]. */
-    fun ratedLoadTonnes(): Double = minOf(spec.maxLoadTonnes, spec.ratingFraction * tippingLoadTonnes())
+    /** The wind's moment about the edge of the pads' outline whose outward normal is [n], [offset]
+     * from the slewing axis, at ground level: positive holds the crane down, negative tips it over
+     * that edge. */
+    fun windMoment(n: Vector3, offset: Double, t: Double): Double {
+        val edge = n * offset
+        val axis = n.cross(Vector3(0.0, 1.0, 0.0))
+        var moment = 0.0
+        windForce.forEachForce(store, groups, t) { at, force -> moment += (at - edge).cross(force).dot(axis) }
+        return moment
+    }
+
+    /** What it's rated to lift as it stands, in the wind blowing at [t]:
+     * [CrawlerCraneSpec.ratingFraction] of the tipping load, and no more than
+     * [CrawlerCraneSpec.maxLoadTonnes]. */
+    fun ratedLoadTonnes(t: Double = 0.0): Double = minOf(spec.maxLoadTonnes, spec.ratingFraction * tippingLoadTonnes(t))
 
     /** How far the carbody has tilted from level, degrees. */
     val tilt: Double get() {
@@ -564,6 +608,7 @@ class CrawlerCrane(
             val stepMass = TowerCrane.LOAD_RAMP_RATE * dt
             store.setMass(hookNode, ScalarExpr.of(if (abs(wanted - mass) <= stepMass) wanted else mass + sign(wanted - mass) * stepMass), t)
         }
+        wind.advance(dt)
         updateCouplings(t)
         structuralDamping.coefficient = dampingAt(t)
         hookSettling.coefficient = TowerCrane.SETTLING_DAMPING * (dampingAt(t) - TowerCrane.OPERATING_DAMPING) / (TowerCrane.SETTLING_DAMPING - TowerCrane.OPERATING_DAMPING)
@@ -585,6 +630,10 @@ class CrawlerCrane(
         const val CARBODY_GROUP = "carbody"
         const val PADS_GROUP = "pads"
         const val UPPER_GROUP = "upperworks"
+        const val COUNTERWEIGHT_GROUP = "counterweight"
+        // Cd·A of the blocks the scene draws (see CraneWind.blockDragArea), m².
+        val COUNTERWEIGHT_DRAG_AREA = CraneWind.blockDragArea(1.7, 3.8, 2.9)
+        val CAB_DRAG_AREA = CraneWind.blockDragArea(2.2, 1.3, 2.2)
         const val HOOK_GROUP = "hook"
         const val MIN_ROPE = 1.0
         /** The carbody box's bottom, above the ground. */

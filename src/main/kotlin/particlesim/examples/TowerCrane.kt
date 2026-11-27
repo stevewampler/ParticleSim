@@ -14,6 +14,7 @@ import particlesim.physics.FixedPosition
 import particlesim.physics.Force
 import particlesim.physics.Integrator
 import particlesim.physics.Truss
+import particlesim.physics.TrussWind
 import particlesim.physics.WeightedAttachment
 import kotlin.math.PI
 import kotlin.math.abs
@@ -86,6 +87,7 @@ data class TowerCraneSpec(
     val tieArea: Double = 40e-4,
     /** Four falls of 16 mm rope's steel. */
     val ropeArea: Double = 4 * 1.2e-4,
+    val ropeFalls: Int = 4,
     // Failure (when it's on): S355 crane steel; members buckle by their slenderness, each taken
     // as a round tube of its area (diameter 20 times its wall); four falls of 16 mm rope at
     // about 160 kN minimum breaking load each.
@@ -491,7 +493,31 @@ class TowerCrane(
 
     val structuralDamping = SlewFrameDamping(SLEWING_GROUP, MAST_GROUP, groups, { slewRate }, SETTLING_DAMPING)
     val gravity = RampedGravity(listOf(MAST_GROUP, SLEWING_GROUP, TROLLEY_GROUP, HOOK_GROUP), groups, rampSeconds)
-    val forces: List<Force> = listOf(truss, gravity, structuralDamping, trolleyCarriage) + slewingRing
+
+    /** The crate a load comes in - the scene draws it, the wind pushes on it. */
+    val loadCrate = LoadCrate(3.0, 1.2, 2.0, maxDepth = 2.0)
+    /** The wind it works in: still until set. */
+    val wind = CraneWind()
+    /** The wind on every member, the ballast, the cab, the trolley, and the hook and its load. */
+    val windForce: TrussWind = run {
+        ballastNodes.forEach { groups.add(BALLAST_GROUP, it) }
+        listOf(turntableLower[2], turntableUpper[2]).forEach { groups.add(CAB_GROUP, it) }
+        TrussWind(
+            truss, store, groups,
+            DoubleArray(truss.size) { i ->
+                if (parts[i] == Part.ROPE) CraneWind.ropeDragWidth(spec.ropeArea, spec.ropeFalls) else CraneWind.tubeDragWidth(memberList[i].area)
+            },
+            listOf(
+                TrussWind.Body(BALLAST_GROUP) { BALLAST_DRAG_AREA },
+                TrussWind.Body(CAB_GROUP) { CAB_DRAG_AREA },
+                TrussWind.Body(TROLLEY_GROUP) { TROLLEY_DRAG_AREA },
+                TrussWind.Body(HOOK_GROUP) { HOOK_BLOCK_DRAG_AREA + loadCrate.dragArea(loadTonnes) },
+            ),
+            VectorExpr.of { t -> wind.velocity(t) },
+            profileExponent = CraneWind.PROFILE_EXPONENT,
+        )
+    }
+    val forces: List<Force> = listOf(truss, gravity, structuralDamping, trolleyCarriage, windForce) + slewingRing
 
     /** Whether the steel can fail (see [Truss]): off, it stays elastic however it's loaded. */
     var failure: Boolean
@@ -551,6 +577,7 @@ class TowerCrane(
             val stepMass = LOAD_RAMP_RATE * dt
             store.setMass(hookNode, ScalarExpr.of(if (abs(wanted - mass) <= stepMass) wanted else mass + sign(wanted - mass) * stepMass), t)
         }
+        wind.advance(dt)
         updateCouplings(t)
         structuralDamping.coefficient = dampingAt(t)
         integrator.step(store, groups, forces, constraints, t, dt)
@@ -580,6 +607,13 @@ class TowerCrane(
         const val TROLLEY_GROUP = "trolley"
         const val HOOK_GROUP = "hook"
         const val FOUNDATION_GROUP = "foundation"
+        const val BALLAST_GROUP = "ballast"
+        const val CAB_GROUP = "cab"
+        // Cd·A of the blocks the scene draws (see CraneWind.blockDragArea), m².
+        val BALLAST_DRAG_AREA = CraneWind.blockDragArea(5.2, 1.5, 2.35)
+        val CAB_DRAG_AREA = CraneWind.blockDragArea(2.0, 1.55, 2.2)
+        val TROLLEY_DRAG_AREA = CraneWind.blockDragArea(1.4, 1.9, 0.5)
+        val HOOK_BLOCK_DRAG_AREA = CraneWind.blockDragArea(0.6, 0.36, 0.8)
         const val RING_STIFFNESS = 5e8
         const val TROLLEY_STIFFNESS = 1e8
         const val MIN_ROPE = 1.0

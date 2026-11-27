@@ -38,8 +38,8 @@ class TowerCraneSceneTest {
         assertEquals(emptySet(), frame.visibleIds)
         assertTrue(frame.meshes.none { it.pickable })
         assertEquals(listOf("ballast", "winch", "cab", "trolley", "hook block", "foundation", "ground"), frame.meshes.map { it.surface.name })
-        assertEquals(listOf("failure" to "off", "colours" to "stress"), frame.options.map { it.name to it.selected })
-        assertEquals(listOf(true, false), frame.options.map { it.toggle }, "failure is a checkbox")
+        assertEquals(listOf("failure" to "off", "colours" to "stress", "gusts" to "off"), frame.options.map { it.name to it.selected })
+        assertEquals(listOf(true, false, true), frame.options.map { it.toggle }, "failure and gusts are checkboxes")
         assertTrue(scene.model.forces.none { it.name == "controls" }, "the controls aren't a force any more")
     }
 
@@ -59,8 +59,8 @@ class TowerCraneSceneTest {
         val scene = TowerCraneScene()
         val crane = scene.model
         val before = scene.frame(0.0).controls
-        assertEquals(listOf("slew", "radius", "hook height", "load"), before.map { it.name })
-        assertEquals(listOf("°", "m", "m", "t"), before.map { it.unit })
+        assertEquals(listOf("slew", "radius", "hook height", "load", "wind", "wind direction"), before.map { it.name })
+        assertEquals(listOf("°", "m", "m", "t", "m/s", "°"), before.map { it.unit })
         assertEquals(crane.spec.minRadius to crane.spec.maxRadius, before[1].min to before[1].max)
         scene.handleControl(SceneControlMessage.SetSceneControl("load", 3.0), 0.0)
         scene.handleControl(SceneControlMessage.SetSceneControl("slew", 45.0), 0.0)

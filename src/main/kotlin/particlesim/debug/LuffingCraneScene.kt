@@ -29,6 +29,12 @@ import particlesim.render.srgbToLinear
  * The drives answer once the crane has settled under its own weight, about 7 s after a
  * (re)start.
  *
+ * **Wind** (controls: `wind`, the mean speed at 10 m in m/s, the speed blowing now beside it;
+ * `wind direction`, degrees, 0 blowing along +x and positive turning it the way the crane slews;
+ * options: `gusts`, a checkbox): drag on every member, rope and block, blowing harder higher up
+ * (see [particlesim.physics.TrussWind]). A new speed or direction comes on over a few seconds;
+ * gusts swing the speed 35% either side of the mean. Still by default.
+ *
  * **Colours** (options: `colours`): `stress` colours each member by its axial stress -
  * compression blue, tension red, white unloaded, full colour at ±160 MPa - with a legend;
  * `paint` shows the crane's yellow. The load chart's limits are 12 t out to 20 m and 3 t with the
@@ -47,6 +53,7 @@ class LuffingCraneScene : DemoScene {
 
     private var colours = COLOUR_MODES.first()
     private var failure = false
+    private val windControls = WindControls(crane.wind)
 
     private val members: List<Pair<Int, Int>> = crane.truss.members.map { it.a to it.b }
 
@@ -104,11 +111,12 @@ class LuffingCraneScene : DemoScene {
     }
 
     private fun sizeLoad() {
-        // A crate of steel, 3 m by 1.2 m, as deep as its tonnes need at a steel crate's ~2 t/m^3.
-        val depth = (crane.loadTonnes / (2.0 * 3.0 * 1.2)).coerceIn(0.25, 3.0)
+        // The crane's crate (the wind pushes on the same one), as deep as its tonnes need.
+        val crate = crane.loadCrate
+        val depth = crate.depth(crane.loadTonnes)
         val top = -SLING_DROP
-        loadBlock.min = Vector3(-1.5, top - depth, -0.6)
-        loadBlock.max = Vector3(1.5, top, 0.6)
+        loadBlock.min = Vector3(-crate.length / 2, top - depth, -crate.width / 2)
+        loadBlock.max = Vector3(crate.length / 2, top, crate.width / 2)
     }
 
     private val blocks = listOf(ballast, hoistWinch, luffingWinch, cab, hookBlock, loadBlock)
@@ -150,6 +158,7 @@ class LuffingCraneScene : DemoScene {
             is SceneControlMessage.SetSceneOption -> when (message.name) {
                 COLOURS_OPTION -> if (message.choice in COLOUR_MODES) colours = message.choice
                 FAILURE_OPTION -> if (message.choice in SceneOption.ON_OFF) { failure = message.choice == "on"; crane.failure = failure }
+                WindControls.GUSTS_OPTION -> windControls.setGusts(message.choice)
             }
             is SceneControlMessage.SetSceneControl -> setControl(message.name, message.value)
             else -> {}
@@ -166,19 +175,19 @@ class LuffingCraneScene : DemoScene {
             RADIUS -> crane.radiusTarget = value
             HOOK_HEIGHT -> crane.hookHeightTarget = value
             LOAD -> { if (value < 0.0) return false; crane.loadTonnes = value }
-            else -> return false
+            else -> return windControls.set(name, value)
         }
         return true
     }
 
     /** The operator's controls: each target, with where the crane has got to. */
-    internal fun controls(): List<SceneControl> = listOf(
+    internal fun controls(t: Double = 0.0): List<SceneControl> = listOf(
         SceneControl(SLEW, "°", -360.0, 360.0, crane.slew.target, crane.slewDegrees),
         SceneControl(JIB_ANGLE, "°", spec.minJibAngle, spec.maxJibAngle, crane.luff.target, crane.jibAngle),
         SceneControl(RADIUS, "m", spec.minRadius, spec.maxRadius, crane.radiusTarget, crane.radius),
         SceneControl(HOOK_HEIGHT, "m", spec.minHookHeight, spec.headHeight(spec.maxJibAngle) - LuffingCrane.MIN_ROPE, crane.hookHeightTarget, store.position(crane.hookNode).y),
         SceneControl(LOAD, "t", 0.0, MAX_LOAD_CONTROL, crane.loadTonnes, (store.mass(crane.hookNode) - spec.hookBlockMass) / 1000),
-    )
+    ) + windControls.controls(t)
 
     /** The members still standing: torn ones aren't drawn. */
     private fun standing(): List<Int> = members.indices.filter { !crane.truss.isTorn(it) }
@@ -206,8 +215,8 @@ class LuffingCraneScene : DemoScene {
             visibleIds = emptySet(),
             lights = lights,
             skyColor = TowerCraneScene.SKY,
-            options = listOf(SceneOption.toggle(FAILURE_OPTION, failure), SceneOption(COLOURS_OPTION, COLOUR_MODES, colours)),
-            controls = controls(),
+            options = listOf(SceneOption.toggle(FAILURE_OPTION, failure), SceneOption(COLOURS_OPTION, COLOUR_MODES, colours), windControls.option()),
+            controls = controls(t),
             registry = SceneRegistry.build(forces = crane.forces, constraints = crane.constraints, groups = crane.groups, lights = lights),
         )
     }
