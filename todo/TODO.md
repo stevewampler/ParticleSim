@@ -6630,6 +6630,48 @@ load. Full `./gradlew test -q` suite green throughout.
       compression-only support), skewing when one leg's drive runs ahead,
       cantilevers past the legs (needs open leg portals the hook can pass).
 
+## Crawler crane (`crawlerCrane`, branch `crawler-crane`)
+- [x] **`GroundContact` force** (`particlesim.physics`): a group's particles
+      on level ground as a compression-only spring-damper with stick-slip
+      Coulomb friction, reading back each one's reaction. Component-tested:
+      `k pen - c v` never pulling, nothing above ground or while disabled,
+      chunk-independent, friction holding below μN (creeping F/k) and
+      sliding above it at `(F - μmg)/m`.
+- [x] **`CrawlerCrane` model** (`particlesim.examples`): a ~100 t-class
+      crawler on a 50 m lattice boom (30-82°), 136 t in all, standing on the
+      ground through 20 track pads - not fixed to anything, so it tips.
+      - Two 9 m box-lattice tracks (6 m gauge) braced to a carbody; the
+        upperworks on a slewing ring as the tower crane's, 50 t of
+        counterweight 5.5 m behind the axis, a gantry. Boom held by steel
+        pendants to a floating bail, the boom hoist rope bail to gantry,
+        trimmed as the luffing crane's; level luffing.
+      - Sized for backward stability first: empty with the boom right up,
+        slewed over the side, the centre of mass stays 1.5 m inside the pads.
+      - `tippingLoadTonnes`: per edge of the pads' outline the hook is beyond,
+        the load balancing everything's moment about it, the least; rated
+        load 75% of that (a chosen margin, not a standard's) capped at 60 t:
+        about 8 t at 44 m over the side to 60 t close in. Over the side the
+        edge is nearer: at 36 m, 20.4 t over the end against 15.4 t.
+      - Steel and rope under 0.6 of their strength at the rated loads.
+      - The constructor turns the upperworks to its starting slew (the tower
+        crane's `slewDegrees` doesn't - its nodes stay at zero).
+      - Tested: geometry and a slewed start; the pads holding the weight with
+        the centre of pressure under the centre of mass (2 cm) at several
+        slews and loads; backward stability; 0.9 of the tipping load holding
+        and 1.05 tipping over the end and the side (the load coming on over
+        a few seconds - its bounce is why not closer); a load held over the
+        end tipping it when slewed over the side; rated-load utilisation;
+        luffing with the hook level; slewing; clamps; failure holding rated
+        loads.
+- [x] **`crawlerCrane` scene**: steel coloured by stress or paint, failure
+      checkbox, track/counterweight/cab/hook/load blocks that slew and tilt
+      with it; controls slew, boom angle, radius, hook height, load (to
+      80 t). Scene tested, including 17 t at 36 m tipping it when slewed
+      from over the end to over the side.
+- [ ] Possible next steps: a load moment indicator in the viewer (rated
+      load and % of it), soft ground (pads that sink), travelling on the
+      tracks, a luffing jib on the boom.
+
 ## Docs (ongoing, not a phase)
 - [ ] Keep `todo/requirements.md` current as design decisions change
 - [x] `docs/manual.md` stub created
