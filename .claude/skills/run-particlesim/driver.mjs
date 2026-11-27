@@ -63,13 +63,16 @@ const COMMANDS = {
     console.log('screenshot:', f);
   },
 
-  // Switches the active demo scene via the SCENE <select> (bottom-left panel). Scene names
-  // match SceneLibraryDebugDemo.kt's factories map: flag, ballBounce, trampoline, sparks,
-  // fire, fluid, drag, particleCollision, spatialGrid, multiShape, poleRope, flagOnRope.
+  // Switches the active demo scene via the SCENE dropdown (#sceneSelect, bottom-left panel) -
+  // by id, since the page has other <select>s (the surface colouring one comes first). Scene
+  // names are SceneLibraryDebugDemo.kt's factories map's keys. Waits for the status bar to show
+  // the new scene, then a moment for its first frames.
   async scene(name) {
     if (!page) return console.log('ERROR: launch first');
-    await page.selectOption('select', name);
-    await page.waitForTimeout(1500); // let the new scene's first frames arrive
+    await page.selectOption('#sceneSelect', name);
+    await page.waitForFunction((n) => document.body.innerText.includes(`Scene: ${n} `), name, { timeout: 30000 })
+      .catch(() => console.log(`WARNING: status bar never showed scene ${name}`));
+    await page.waitForTimeout(1500);
     console.log('scene ->', name);
   },
 
