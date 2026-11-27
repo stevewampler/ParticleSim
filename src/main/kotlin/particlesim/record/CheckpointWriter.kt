@@ -93,6 +93,15 @@ object CheckpointWriter {
             },
             "custom_emitters" to checkpoint.customEmitters,
         )
-        file.writeText(Yaml().dump(data))
+        file.writeText(Yaml().dump(unshared(data)))
+    }
+
+    /** [value] with every list and map copied afresh, so no two places share one object -
+     * SnakeYAML writes a shared object once and aliases it after, and its reader limits aliases. */
+    private fun unshared(value: Any?): Any? = when (value) {
+        is Map<*, *> -> value.entries.associateTo(LinkedHashMap()) { (k, v) -> k to unshared(v) }
+        is List<*> -> value.map { unshared(it) }
+        is Set<*> -> value.map { unshared(it) }
+        else -> value
     }
 }

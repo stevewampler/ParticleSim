@@ -6194,7 +6194,14 @@ load. Full `./gradlew test -q` suite green throughout.
       `ReplayableRandom`s, which count every generator step whatever was
       drawn (`CountingRandom` counts only doubles). Tested: a show run 40 s,
       checkpointed to disk, read back and restored into a fresh show runs on
-      for 20 s identical to the bit to one never stopped.
+      for 20 s identical to the bit to one never stopped; and again with every
+      kind of state in flight at the capture (palm and kamuro tails, crackle,
+      split and crossette burn-outs, a multi-break's inner shell, a whistling
+      shell, a flash, smoke, no launch scheduled).
+      - That second test caught a sidecar bug: SnakeYAML wrote a list shared
+        in many places once and aliased it after, and refused to read back
+        more than 50 aliases. `CheckpointWriter` now copies every list and
+        map before writing.
       - Viewer fix found on the way: the outliner rebuilt (and the open
         panel re-rendered) every frame in any scene whose groups change each
         step, because group membership was part of its change check - rows

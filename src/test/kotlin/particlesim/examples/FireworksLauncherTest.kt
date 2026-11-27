@@ -13,6 +13,7 @@ import kotlin.test.assertTrue
 
 /** [FireworksShow] as a [particlesim.lifecycle.CustomEmitter]: its launcher's settings edited
  * live, and its whole state carried through a §9.5 checkpoint. */
+@Suppress("UNCHECKED_CAST")
 class FireworksLauncherTest {
     private fun run(show: FireworksShow, steps: Int, start: Double): Double {
         var t = start
@@ -91,6 +92,68 @@ class FireworksLauncherTest {
                 assertEquals(original.store.velocity(id), resumed.store.velocity(id), "particle $id")
             }
             assertEquals(original.starColorsById, resumed.starColorsById)
+            assertEquals(original.captureState(), resumed.captureState())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a checkpoint taken with every kind of thing in flight resumes exactly`() {
+        // A quiet show (no scheduled launches, so the next launch time is infinite) kept busy by
+        // hand: comets, split sub-shells, multi-break shells and peonies every half second, and
+        // palms, kamuros and crackles at the start and a second in - then captured at the first
+        // step where every kind of state the launcher keeps is in flight at once.
+        val groupNames = listOf(FireworksShow.ALL_GROUP, FireworksShow.SHELL_GROUP, FireworksShow.STAR_GROUP, FireworksShow.SMOKE_GROUP)
+        fun quiet() = FireworksShow(seed = 5L, firstLaunchTime = Double.POSITIVE_INFINITY)
+        val original = quiet()
+        var t = 0.0
+        var step = 0
+        fun everythingInFlight(): Boolean {
+            val state = original.captureState()
+            val tails = (state["tails"] as List<List<Any?>>).map { it[1] }.toSet()
+            val effects = (state["burnout_effects"] as List<List<Any?>>).map { it[1] }.toSet()
+            val shells = state["shells"] as List<Map<String, Any?>>
+            return tails == setOf("palm", "kamuro") &&
+                effects == setOf("crackle", "split", "crossette") &&
+                (state["glitter"] as List<*>).isNotEmpty() &&
+                shells.any { (it["later_breaks"] as List<*>).isNotEmpty() } &&
+                shells.any { it["stage"] as Int > 1 } &&
+                shells.any { it["whistle_start"] != null } &&
+                (state["flashes"] as List<*>).isNotEmpty() &&
+                original.smokeIds.isNotEmpty()
+        }
+        while (!everythingInFlight()) {
+            assertTrue(t < 20.0, "never had everything in flight at once")
+            if (step % 30 == 0) for (type in listOf(BurstType.CROSSETTE, BurstType.SPLIT, BurstType.MULTI_BREAK, BurstType.PEONY)) original.launch(t, type)
+            if (step == 0 || step == 60) for (type in listOf(BurstType.PALM, BurstType.KAMURO, BurstType.CRACKLE)) original.launch(t, type)
+            original.step(t, FIREWORKS_DT)
+            t += FIREWORKS_DT
+            step++
+        }
+        assertEquals(Double.POSITIVE_INFINITY, original.captureState()["next_launch_time"])
+
+        val dir = File.createTempFile("fireworks-checkpoint", "").also { it.delete(); it.mkdirs() }
+        try {
+            val checkpoint = captureCheckpoint(
+                original.store, original.groups, groupNames, emptyList(), emptySet(), t, step.toLong(), customEmitters = listOf(original),
+            )
+            val base = File(dir, "cp")
+            CheckpointWriter.write(checkpoint, base)
+            val resumed = quiet()
+            applyCheckpoint(resumed.store, resumed.groups, emptyMap(), CheckpointReader.read(base), customEmittersByName = mapOf(resumed.name to resumed))
+            assertEquals(original.captureState(), resumed.captureState())
+            // Both run on with no more launches until everything has burnt out: identical throughout.
+            repeat((12.0 / FIREWORKS_DT).toInt()) {
+                original.step(t, FIREWORKS_DT)
+                resumed.step(t, FIREWORKS_DT)
+                t += FIREWORKS_DT
+            }
+            assertEquals(original.store.liveIds().sorted(), resumed.store.liveIds().sorted())
+            for (id in original.store.liveIds()) {
+                assertEquals(original.store.position(id), resumed.store.position(id), "particle $id")
+                assertEquals(original.store.velocity(id), resumed.store.velocity(id), "particle $id")
+            }
             assertEquals(original.captureState(), resumed.captureState())
         } finally {
             dir.deleteRecursively()
