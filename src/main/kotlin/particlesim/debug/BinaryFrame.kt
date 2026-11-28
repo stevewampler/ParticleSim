@@ -190,8 +190,10 @@ import kotlin.math.roundToInt
  * i32  shownByDefaultArrowCount; shownByDefaultArrowCount * { i32 nameLen, nameLen UTF-8 bytes }
  *                (forces whose "show arrows" toggle starts checked when this scene loads - the
  *                arrow counterpart of hiddenByDefaultGroups; arrows otherwise start hidden)
- * u8   hasSky; if hasSky: f64 r, g, b
- *                (the background color the scene asks for; absent, the viewer keeps its own)
+ * u8   sky; if sky >= 1: f64 r, g, b; if sky == 2: f64 r, g, b again
+ *                (the background the scene asks for: 0 = none, the viewer keeps its own;
+ *                1 = one flat color; 2 = a gradient, the first color overhead and the second
+ *                at the horizon)
  * u8   solidParticleColors
  *                (1: the per-particle colors above draw as opaque dots, not additive glow)
  * f64  trailSeconds
@@ -408,6 +410,8 @@ object BinaryFrame {
         deformationScale: Double = 1.0,
         controls: List<SceneControl> = emptyList(),
         puffs: Map<Int, Puff> = emptyMap(),
+        /** With [skyColor], makes the sky a gradient: [skyColor] overhead, this at the horizon. */
+        skyHorizonColor: Color? = null,
     ): ByteBuffer {
         val coloredArrowGroups = arrowGroups.withIndex().filter { (_, g) -> g.samples.any { it.color != null } }
         val styleTable = connectionStyles.values.distinct()
@@ -446,7 +450,7 @@ object BinaryFrame {
             nameListSize(hiddenByDefaultGroups) +
             4 + coloredArrowGroups.sumOf { 4 + it.value.samples.size * 3 } +
             nameListSize(shownByDefaultArrows) +
-            1 + (if (skyColor != null) 24 else 0) + 1 + 8 +
+            1 + (if (skyColor != null) 24 else 0) + (if (skyColor != null && skyHorizonColor != null) 24 else 0) + 1 + 8 +
             1 + (if (accelerations != null) ids.size * 12 else 0) +
             4 + options.sumOf { stringSize(it.name) + 4 + it.choices.sumOf { c -> stringSize(c) } + 4 + 1 } +
             stringSize(lineLegend?.label ?: "") +
@@ -658,8 +662,10 @@ object BinaryFrame {
             }
         }
         putNameList(buffer, shownByDefaultArrows)
-        buffer.put(if (skyColor != null) 1 else 0)
+        val horizon = skyHorizonColor.takeIf { skyColor != null }
+        buffer.put(if (skyColor == null) 0 else if (horizon == null) 1 else 2)
         if (skyColor != null) { buffer.putDouble(skyColor.r); buffer.putDouble(skyColor.g); buffer.putDouble(skyColor.b) }
+        if (horizon != null) { buffer.putDouble(horizon.r); buffer.putDouble(horizon.g); buffer.putDouble(horizon.b) }
         buffer.put(if (solidParticleColors) 1 else 0)
         buffer.putDouble(trailSeconds)
         buffer.put(if (accelerations != null) 1 else 0)
@@ -886,7 +892,9 @@ object BinaryFrame {
             group.copy(samples = group.samples.mapIndexed { j, sample -> sample.copy(color = colors[j]) })
         }
         val shownByDefaultArrows = getNameList(buf).toSet()
-        val skyColor = if (buf.get().toInt() != 0) Color(buf.double, buf.double, buf.double) else null
+        val skyKind = buf.get().toInt()
+        val skyColor = if (skyKind >= 1) Color(buf.double, buf.double, buf.double) else null
+        val skyHorizonColor = if (skyKind == 2) Color(buf.double, buf.double, buf.double) else null
         val solidParticleColors = buf.get().toInt() != 0
         val trailSeconds = buf.double
         val accelerations = if (buf.get().toInt() != 0) {
@@ -920,7 +928,7 @@ object BinaryFrame {
             t, step, particles, connections, camera, spheres, particleColors, meshes, coloredArrowGroups, visibleIds, registry,
             colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
             skyColor, solidParticleColors, accelerations, trailSeconds, options, lineLegend, restPositions, deformationScale, controls,
-            puffs,
+            puffs, skyHorizonColor,
         )
     }
 
@@ -1369,4 +1377,5 @@ data class DecodedFrame(
     val deformationScale: Double = 1.0,
     val controls: List<SceneControl> = emptyList(),
     val puffs: Map<Int, Puff> = emptyMap(),
+    val skyHorizonColor: Color? = null,
 )

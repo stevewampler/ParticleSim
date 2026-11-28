@@ -86,7 +86,8 @@ class MurmurationScene(withFalcon: Boolean = true) : DemoScene {
         particleColors = particleColors,
         meshes = listOf(groundMesh),
         visibleIds = birdIds.toSet(),
-        skyColor = DUSK_SKY,
+        skyColor = DUSK_ZENITH,
+        skyHorizonColor = DUSK_HORIZON,
         solidParticleColors = true,
         registry = registry(),
     )
@@ -96,7 +97,9 @@ class MurmurationScene(withFalcon: Boolean = true) : DemoScene {
         const val FALCON_DRAW_RADIUS = 0.9
         const val GROUND_HALF_SIZE = 250.0
         const val CAMERA_DISTANCE = 130.0
-        val DUSK_SKY = Color(0.58, 0.28, 0.20)
+        // Dusk after sunset: a warm glow along the horizon under a deepening blue overhead.
+        val DUSK_ZENITH = Color(0.20, 0.22, 0.40)
+        val DUSK_HORIZON = Color(0.88, 0.48, 0.26)
         val STARLING_COLOR = Color(0.0, 0.0, 0.01)
         val FALCON_COLOR = Color(0.22, 0.20, 0.22)
     }

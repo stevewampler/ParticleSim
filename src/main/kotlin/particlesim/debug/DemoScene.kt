@@ -57,6 +57,9 @@ data class SceneFrame(
     /** The sky the viewer draws behind everything (§10.2) - null keeps the viewer's own dark
      * default. E.g. [MurmurationScene]'s dusk. */
     val skyColor: Color? = null,
+    /** With [skyColor], makes the sky a gradient (§10.2): [skyColor] overhead, fading to this
+     * at the horizon - e.g. [MurmurationScene]'s dusk, glowing low and darkening overhead. */
+    val skyHorizonColor: Color? = null,
     /** Draw [particleColors] as plain opaque dots instead of the additive glow fire and sparks
      * use - for something solid seen against a bright sky, like [MurmurationScene]'s starlings. */
     val solidParticleColors: Boolean = false,

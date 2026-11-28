@@ -6261,9 +6261,9 @@ load. Full `./gradlew test -q` suite green throughout.
       - a dark field for scale;
       - `MURMURATION_DT` = 1/60 s, exactly one step per viewer frame.
 
-      A step takes about 7 ms. In the headless browser it ran about 17
-      steps/s, limited by drawing 1,500 dot meshes in software; not checked
-      in a GPU browser yet.
+      A step takes about 7 ms (9 ms with the blind angle and banking below).
+      In the headless browser it runs about 16 frames/s; see the instanced
+      dots item below for why.
 
       Scenario tests: cohesion, polarization, speed, spacing and staying
       over the roost; the falcon scatters the flock and it re-forms; the
@@ -6292,16 +6292,52 @@ load. Full `./gradlew test -q` suite green throughout.
         grow past 3×.
       - Tested: measurement, pause, scene switch, off, message parse, and
         the wire round-trip.
-- [ ] Possible next steps:
-      - instanced dot rendering, for flocks of 10k+;
-      - `SpatialGrid.nearest` scans each whole (2r+1)³ cube and skips the
-        interior, rather than visiting only the shell. A lone straggler can
-        cost about 90k cell checks (perception 25 m, cells 2 m). That's
-        within budget today (107-170 steps/s with the falcon); visit only
-        the shell if flocks grow;
-      - banking turns and a limited field of view, both in Hemelrijk's
-        model;
-      - a gradient dusk sky.
+- [x] **Instanced dots** (§10.2): every dot is an instance in one of two
+      `InstancedMesh`es (opaque, and additive glow), grown by doubling;
+      `userData.dotIds` maps an instance back to its particle for picking,
+      drag and right-click. Two draw calls instead of one per particle.
+      Checked in the headless viewer: murmuration, fire's glow, and dragging
+      a paused bird (it picks the right instance and turns red at once).
+      Also fixed: styled-connection instanced meshes kept their first
+      frame's bounding sphere, so raycasts tested stale bounds.
+
+      The headless browser still draws murmuration at about 16 frames/s;
+      hiding the dots brings it to 57. In software rendering the cost is
+      the dots' triangles (1,500 × 8×6-segment spheres), not draw calls.
+      Not checked in a GPU browser.
+- [x] **`SpatialGrid.nearest` visits only each ring's shell** (the cube's
+      six faces), not the whole cube. It also takes an `accept` filter
+      (id, position), still exact. `SpatialGrid.within` returns the ids in
+      the cells within a radius. Tested against brute force, filtered and
+      not, at three cell sizes, plus a lone straggler far from its flock.
+- [x] **Field of view and banked turns in `Flocking`** (§5.6):
+      - `blindAngle`: a rear blind cone; alignment and cohesion use the k
+        nearest *visible* birds. The murmuration uses 90° (2 × 45°, Hemelrijk
+        & Hildenbrandt, PLOS ONE 2011, table 1). Separation stays all round
+        (every bird within `separationDistance`, via `within`): blind
+        separation left only the bird behind braking, and the flock flew
+        about 0.4 m/s slow.
+      - `maxBankAngle`: sideways steering capped at
+        `(g cos pitch + upward steering) × tan(maxBankAngle)`. The murmuration
+        uses 60°, a modelling choice. It hardly shows: in a 40 s run with
+        the falcon, 60° and 45° shrink the flock's widest spread by 1-1.5 m.
+        This flock rarely turns hard enough to reach the cap.
+      - Both are editable and validated; component tests for each.
+- [x] **Gradient dusk sky** (§10.2): `SceneFrame.skyHorizonColor`. The
+      wire's sky byte is now 0 none / 1 flat / 2 gradient (overhead color,
+      then horizon color). The viewer draws a camera-centred dome at the far
+      plane. Round-trip tested; checked in the viewer.
+- [ ] Still open:
+      - the roll takes no time (Hildenbrandt et al. let the bank build up,
+        which needs per-bird state, so it would have to be checkpointed),
+        and lift doesn't depend on speed, so banking birds don't lose
+        height in turns;
+      - fewer triangles per dot (or point sprites), if the software-
+        rendered frame rate matters; check a GPU browser first;
+      - switching scenes while frames are still queued (headless lag) lets
+        the old scene's scripted camera land after the reset, so a scene
+        with no scripted camera (e.g. `fire` after `murmuration`) can open
+        framed from 130 m away.
 
 ## Steel I-beam stress visualization (§5.1/§6/§7/§10.2, new requirement) — not yet phased
 - [x] **`ElasticLattice`** (`particlesim.physics`): a solid built from filled

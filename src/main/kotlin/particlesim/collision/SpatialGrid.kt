@@ -74,6 +74,21 @@ class SpatialGrid(private val cellSize: Double) {
     }
 
     /**
+     * Every id in the cells within [radius] of [position] (a cube of them) - a superset of the
+     * ids within [radius]; the caller checks the distances. Order is bucket order, so a caller
+     * whose result depends on order must impose one itself (§11).
+     */
+    fun within(position: Vector3, radius: Double): List<Int> {
+        val center = cellOf(position)
+        val reach = ceil(radius / cellSize).toLong()
+        val result = ArrayList<Int>()
+        for (dx in -reach..reach) for (dy in -reach..reach) for (dz in -reach..reach) {
+            buckets[Cell(center.x + dx, center.y + dy, center.z + dz)]?.let { result.addAll(it) }
+        }
+        return result
+    }
+
+    /**
      * The (up to) [k] ids nearest [position] within [maxDistance] of it, nearest first, leaving
      * out [exclude] - a topological neighbourhood (a fixed *count* of neighbours, however far
      * apart they are, as starlings use: see [particlesim.physics.Flocking]) rather than
@@ -85,9 +100,18 @@ class SpatialGrid(private val cellSize: Double) {
      * anything an unsearched ring could hold - every point beyond ring `r` is at least
      * `r * cellSize` away, wherever in its cell [position] sits. So [cellSize] only affects speed:
      * about the typical neighbour spacing is best. Ties in distance go to the lower id, so the
-     * result doesn't depend on insertion order (§11).
+     * result doesn't depend on insertion order (§11). Each ring visits only its own shell of
+     * cells (its six faces), not the whole cube it bounds, so a lone straggler far from the rest
+     * costs about the number of cells within [maxDistance], not that times the number of rings.
+     *
+     * [accept], when given (an id and its position), leaves out any id it rejects, as if it weren't there (a bird's blind
+     * angle, say): the result is then the [k] nearest *accepted* ids. Rejecting candidates never
+     * breaks the stopping rule above, which only needs the k-th kept candidate to be close enough.
      */
-    fun nearest(position: Vector3, k: Int, maxDistance: Double, exclude: Int, positionOf: (Int) -> Vector3): List<Int> {
+    fun nearest(
+        position: Vector3, k: Int, maxDistance: Double, exclude: Int,
+        accept: ((Int, Vector3) -> Boolean)? = null, positionOf: (Int) -> Vector3,
+    ): List<Int> {
         if (k <= 0) return emptyList()
         val center = cellOf(position)
         val maxSq = maxDistance * maxDistance
@@ -97,23 +121,33 @@ class SpatialGrid(private val cellSize: Double) {
         val maxRing = ceil(maxDistance / cellSize).toLong() + 1
         var ring = 0L
         while (ring <= maxRing) {
-            for (dx in -ring..ring) for (dy in -ring..ring) for (dz in -ring..ring) {
-                if (maxOf(abs(dx), abs(dy), abs(dz)) != ring) continue
-                val bucket = buckets[Cell(center.x + dx, center.y + dy, center.z + dz)] ?: continue
-                for (id in bucket) {
-                    if (id == exclude) continue
-                    val d = (positionOf(id) - position).lengthSquared()
-                    if (d > maxSq) continue
-                    if (count == k && (d > distSq[k - 1] || (d == distSq[k - 1] && id > ids[k - 1]))) continue
-                    // Insertion into the sorted (distance, id) list, dropping the farthest if full.
-                    var i = if (count < k) count++ else k - 1
-                    while (i > 0 && (distSq[i - 1] > d || (distSq[i - 1] == d && ids[i - 1] > id))) {
-                        distSq[i] = distSq[i - 1]
-                        ids[i] = ids[i - 1]
-                        i--
+            for (dx in -ring..ring) for (dy in -ring..ring) {
+                // On an x or y face, the whole z column belongs to this ring's shell; inside
+                // them, only its two z faces do.
+                val onSide = abs(dx) == ring || abs(dy) == ring
+                val dzStep = if (onSide) 1L else 2 * ring
+                var dz = -ring
+                while (dz <= ring) {
+                    val bucket = buckets[Cell(center.x + dx, center.y + dy, center.z + dz)]
+                    dz += dzStep
+                    if (bucket == null) continue
+                    for (id in bucket) {
+                        if (id == exclude) continue
+                        val p = positionOf(id)
+                        val d = (p - position).lengthSquared()
+                        if (d > maxSq) continue
+                        if (count == k && (d > distSq[k - 1] || (d == distSq[k - 1] && id > ids[k - 1]))) continue
+                        if (accept != null && !accept(id, p)) continue
+                        // Insertion into the sorted (distance, id) list, dropping the farthest if full.
+                        var i = if (count < k) count++ else k - 1
+                        while (i > 0 && (distSq[i - 1] > d || (distSq[i - 1] == d && ids[i - 1] > id))) {
+                            distSq[i] = distSq[i - 1]
+                            ids[i] = ids[i - 1]
+                            i--
+                        }
+                        distSq[i] = d
+                        ids[i] = id
                     }
-                    distSq[i] = d
-                    ids[i] = id
                 }
             }
             val reach = ring * cellSize

@@ -5,13 +5,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-/** [MurmurationScene]: dark birds drawn solid against a dusk sky, the field hidden. */
+/** [MurmurationScene]: dark birds drawn solid against a dusk gradient sky, the field hidden. */
 class MurmurationSceneTest {
     @Test
     fun `the birds are drawn as solid silhouettes against the sky, and the ground's particles aren't drawn`() {
         val scene = MurmurationScene()
         val frame = scene.frame(0.0)
         assertNotNull(frame.skyColor)
+        assertNotNull(frame.skyHorizonColor, "a dusk gradient, not a flat sky")
         assertTrue(frame.solidParticleColors)
         val visible = assertNotNull(frame.visibleIds)
         assertEquals(1501, visible.size, "1500 starlings and the falcon")

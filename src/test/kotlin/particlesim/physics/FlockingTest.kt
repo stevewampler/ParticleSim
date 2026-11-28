@@ -75,7 +75,7 @@ class FlockingTest {
         val a = w.bird(Vector3.ZERO)
         w.bird(Vector3(4.0, 2.0, 0.0))
         w.bird(Vector3(6.0, -2.0, 0.0))
-        assertClose(Vector3(5.0, 0.0, 0.0) * (0.5 * mass), w.forceOn(only("cohesionStrength" to 0.5), a))
+        assertClose(Vector3(5.0, 0.0, 0.0) * (0.5 * mass), w.forceOn(only("cohesionStrength" to 0.5, "perceptionRadius" to 200.0), a))
     }
 
     @Test
@@ -239,5 +239,89 @@ class FlockingTest {
         val chunk2 = ChunkAccumulator(w.store.capacity)
         coasting.accumulate(w.store, w.groups, 1.0, chunk2, 0, 1)
         assertClose(Vector3.ZERO, chunk2.at(w.store.slotOf(falcon)))
+    }
+
+    @Test
+    fun `a bird ignores neighbours in its blind cone behind it`() {
+        val w = World()
+        val a = w.bird(Vector3.ZERO) // flying +x
+        w.bird(Vector3(-4.0, 1.0, 0.0)) // 14° off straight behind: hidden by a 90° blind cone
+        w.bird(Vector3(0.0, 0.0, 6.0)) // square to the side: seen
+        val f = only("cohesionStrength" to 0.5, "blindAngle" to 90.0)
+        assertClose(Vector3(0.0, 0.0, 6.0) * (0.5 * mass), w.forceOn(f, a))
+        // With all-round vision both count.
+        assertClose(Vector3(-2.0, 0.5, 3.0) * (0.5 * mass), w.forceOn(only("cohesionStrength" to 0.5, "perceptionRadius" to 200.0), a))
+    }
+
+    @Test
+    fun `a blind bird looks past the hidden ones for its nearest visible neighbours`() {
+        val w = World()
+        val a = w.bird(Vector3.ZERO)
+        w.bird(Vector3(-1.0, 0.0, 0.0)) // nearest, but straight behind
+        w.bird(Vector3(5.0, 0.0, 0.0))
+        val f = only("cohesionStrength" to 1.0, "blindAngle" to 90.0, neighbours = 1)
+        assertClose(Vector3(5.0, 0.0, 0.0) * mass, w.forceOn(f, a))
+    }
+
+    @Test
+    fun `separation still works on a bird in the blind cone`() {
+        val w = World()
+        val a = w.bird(Vector3.ZERO)
+        w.bird(Vector3(-0.5, 0.0, 0.0)) // straight behind, too close
+        val f = only("separationStrength" to 30.0, "separationDistance" to 2.0, "blindAngle" to 90.0)
+        assertClose(Vector3(0.75 * 30.0 * mass, 0.0, 0.0), w.forceOn(f, a))
+    }
+
+    @Test
+    fun `a banked turn is capped by the lift tilted to the steepest bank`() {
+        val w = World()
+        val a = w.bird(Vector3.ZERO) // level, flying +x
+        // Cohesion toward a neighbour 100 m off to the side asks for 50 m/s² sideways.
+        w.bird(Vector3(0.0, 0.0, 100.0))
+        val g = 9.80665
+        val f = only("cohesionStrength" to 0.5, "maxBankAngle" to 45.0, "perceptionRadius" to 200.0)
+        // Level flight makes lift g, so at 45° it can turn at g sideways.
+        assertClose(Vector3(0.0, 0.0, g * mass), w.forceOn(f, a), 1e-9)
+        // No limit at 90°.
+        assertClose(Vector3(0.0, 0.0, 50.0 * mass), w.forceOn(only("cohesionStrength" to 0.5, "perceptionRadius" to 200.0), a))
+    }
+
+    @Test
+    fun `a bird pulling up turns harder and one diving can't turn`() {
+        val g = 9.80665
+        val up = World()
+        val a = up.bird(Vector3.ZERO)
+        up.bird(Vector3(0.0, 10.0, 100.0)) // 5 m/s² up as well as 50 sideways
+        val f = only("cohesionStrength" to 0.5, "maxBankAngle" to 45.0, "perceptionRadius" to 200.0)
+        assertClose(Vector3(0.0, 5.0, g + 5.0) * mass, up.forceOn(f, a), 1e-9)
+
+        val down = World()
+        val b = down.bird(Vector3.ZERO)
+        down.bird(Vector3(0.0, -30.0, 100.0)) // 15 m/s² down: more than gravity, so no lift
+        assertClose(Vector3(0.0, -15.0, 0.0) * mass, down.forceOn(f, b), 1e-9)
+    }
+
+    @Test
+    fun `banking leaves forward steering alone, and measures sideways square to a climbing heading`() {
+        val w = World()
+        // Climbing at 30°: lift holding off gravity is g cos 30°.
+        val heading = Vector3(kotlin.math.cos(Math.PI / 6), kotlin.math.sin(Math.PI / 6), 0.0)
+        val a = w.bird(Vector3.ZERO, heading * 10.0)
+        w.bird(heading * 20.0 + Vector3(0.0, 0.0, 100.0)) // 10 m/s² forward along the heading, 50 sideways
+        val g = 9.80665
+        val f = only("cohesionStrength" to 0.5, "maxBankAngle" to 45.0, "perceptionRadius" to 200.0)
+        val expected = heading * 10.0 + Vector3(0.0, 0.0, g * kotlin.math.cos(Math.PI / 6))
+        assertClose(expected * mass, w.forceOn(f, a), 1e-9)
+    }
+
+    @Test
+    fun `blind angle and bank are editable and validated`() {
+        val f = only()
+        assertTrue(f.setField("blindAngle", FieldValue.Scalar(90.0)))
+        assertTrue(f.setField("maxBankAngle", FieldValue.Scalar(60.0)))
+        assertFalse(f.setField("blindAngle", FieldValue.Scalar(400.0)))
+        assertFalse(f.setField("maxBankAngle", FieldValue.Scalar(-1.0)))
+        assertEquals(FieldValue.Scalar(90.0), f.editableFields()["blindAngle"])
+        assertEquals(FieldValue.Scalar(60.0), f.editableFields()["maxBankAngle"])
     }
 }

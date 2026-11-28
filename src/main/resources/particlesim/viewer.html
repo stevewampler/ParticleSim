@@ -611,6 +611,38 @@ meshEdgesCheckboxEl.addEventListener("change", () => {
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x111111);
 
+// A gradient sky (§10.2), when a scene sends a horizon color as well as its sky color: a unit
+// sphere drawn behind everything, at the far plane, centred on the camera wherever it is (the
+// vertex shader drops the view's translation), shaded by how far above the horizon each
+// direction points. Below the horizon it keeps the horizon color.
+const skyDomeMaterial = new THREE.ShaderMaterial({
+  uniforms: { zenith: { value: new THREE.Color() }, horizon: { value: new THREE.Color() } },
+  side: THREE.BackSide,
+  depthWrite: false,
+  vertexShader: `
+    varying vec3 vDirection;
+    void main() {
+      vDirection = position;
+      vec4 clip = projectionMatrix * vec4(mat3(viewMatrix) * position, 1.0);
+      gl_Position = clip.xyww;
+    }`,
+  fragmentShader: `
+    uniform vec3 zenith;
+    uniform vec3 horizon;
+    varying vec3 vDirection;
+    void main() {
+      float up = clamp(normalize(vDirection).y, 0.0, 1.0);
+      // Most of the change happens low in the sky, as at dusk: a glow along the horizon.
+      gl_FragColor = vec4(mix(horizon, zenith, pow(up, 0.45)), 1.0);
+      #include <colorspace_fragment>
+    }`,
+});
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), skyDomeMaterial);
+skyDome.frustumCulled = false;
+skyDome.renderOrder = -1000;
+skyDome.visible = false;
+scene.add(skyDome);
+
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 1000);
 camera.position.set(6, 4, 8);
 camera.lookAt(0, 0, 0);
@@ -1189,60 +1221,108 @@ bookmarkNameInputEl.addEventListener("keydown", (event) => {
 });
 
 // Every particle as a dot by default (§10.2 --render-all); a particle with a declared sphere
-// radius is the *same* dot mesh just scaled up (spheres are what dots already are, geometrically),
+// radius is the *same* dot just scaled up (spheres are what dots already are, geometrically),
 // and a particle listed in a frame's visibleIds-exclusion is skipped entirely — see applyFrame.
+//
+// Drawn instanced, so a flock of 10,000 birds is two draw calls rather than 10,000: one
+// InstancedMesh of opaque dots and one of additive glow dots, each instance carrying its own
+// position, scale and color. userData.dotIds maps an instance index back to its particle id,
+// for picking (see particleIdOfHit).
 const BASE_DOT_RADIUS = 0.06;
 const dotGeometry = new THREE.SphereGeometry(BASE_DOT_RADIUS, 8, 6);
-// Template only - every pooled dot below clones its own material instance rather than sharing
-// this one, so a per-particle color override (§10.2, e.g. FireScene's yellow-to-red-by-age)
-// can recolor one dot without recoloring every dot.
-const dotMaterial = new THREE.MeshBasicMaterial({ color: 0xffcc33 });
 const DEFAULT_DOT_COLOR = 0xffcc33;
 const DRAGGED_DOT_COLOR = 0xff4444;
+// White base color: each instance's color is the whole color.
+const solidDotMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+// A custom-colored dot glows (additive), suited to something emissive like fire. Additive
+// blending sums every overlapping dot's contribution, and a dense cluster of full-opacity
+// near-white dots (e.g. a campfire's base) clips to flat white within just a few overlaps,
+// losing all internal shading. A lower opacity means more overlapping dots are needed to reach
+// that same clip point, so the same dense cluster keeps a visible gradient instead of blowing
+// out - a deliberate dimming, not a mistake.
+const glowDotMaterial = new THREE.MeshBasicMaterial({
+  color: 0xffffff, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0.16,
+});
 let dots = new THREE.Group();
 scene.add(dots);
+const dotLayers = { solid: null, glow: null };
+const dotMatrix = new THREE.Matrix4();
+const dotScale = new THREE.Vector3();
+const dotPosition = new THREE.Vector3();
+const dotQuaternion = new THREE.Quaternion();
+const dotColor = new THREE.Color();
+// The last updateDots arguments, so a drag can restyle its dot at once rather than next frame.
+let lastDotArgs = null;
 
-// Styles one pooled dot for this frame: [customColor] is this particle's wire-color entry (or
-// undefined for the vast majority of demos that don't send one), [dragged] whether it's the
-// one particle currently being dragged (wins over a custom color - you're moving it, you should
-// see that clearly). Additive blending on a custom-colored dot reads as a glow, appropriate for
-// something emissive like fire; applied only there so every other demo's plain dots are
-// visually unchanged. Called every frame for every visible dot, not just newly-created ones -
-// the pool is index-keyed (dots.children[i] is a different particle each frame), so a slot
-// last styled for a fire particle must be explicitly reset when it's reused for a plain one.
-function styleDot(dot, customColor, dragged, solid = false) {
-  const mat = dot.material;
-  if (dragged) {
-    mat.color.setHex(DRAGGED_DOT_COLOR);
-    mat.blending = THREE.NormalBlending;
-    mat.transparent = false;
-    mat.depthWrite = true;
-    mat.opacity = 1;
-  } else if (customColor && solid) {
-    // A scene's solid particle colors (e.g. dark birds against a sky): opaque, no glow.
-    mat.color.setRGB(customColor.r, customColor.g, customColor.b);
-    mat.blending = THREE.NormalBlending;
-    mat.transparent = false;
-    mat.depthWrite = true;
-    mat.opacity = 1;
-  } else if (customColor) {
-    mat.color.setRGB(customColor.r, customColor.g, customColor.b);
-    mat.blending = THREE.AdditiveBlending;
-    mat.transparent = true;
-    mat.depthWrite = false;
-    // Additive blending sums every overlapping dot's contribution, and a dense cluster of
-    // full-opacity near-white dots (e.g. a campfire's base) clips to flat white within just a
-    // few overlaps, losing all internal shading. A lower opacity means more overlapping dots
-    // are needed to reach that same clip point, so the same dense cluster keeps a visible
-    // gradient instead of blowing out - a deliberate dimming, not a mistake.
-    mat.opacity = 0.16;
-  } else {
-    mat.color.setHex(DEFAULT_DOT_COLOR);
-    mat.blending = THREE.NormalBlending;
-    mat.transparent = false;
-    mat.depthWrite = true;
-    mat.opacity = 1;
+// The InstancedMesh for one layer, grown (by doubling) when a frame needs more instances.
+function dotLayer(key, material, needed) {
+  const existing = dotLayers[key];
+  if (existing && existing.instanceMatrix.count >= needed) return existing;
+  if (existing) {
+    dots.remove(existing);
+    existing.dispose();
   }
+  const mesh = new THREE.InstancedMesh(dotGeometry, material, Math.max(64, needed * 2));
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.frustumCulled = false; // instances move every frame; the base bounds would be stale
+  mesh.userData.dotIds = [];
+  mesh.count = 0;
+  dots.add(mesh);
+  dotLayers[key] = mesh;
+  return mesh;
+}
+
+// Fills one layer with [items] ({ p, radius, color: THREE color source as [r, g, b] or hex }).
+function fillDotLayer(key, material, items) {
+  const mesh = dotLayer(key, material, items.length);
+  const ids = mesh.userData.dotIds;
+  ids.length = items.length;
+  items.forEach((item, i) => {
+    const scale = item.radius ? item.radius / BASE_DOT_RADIUS : 1;
+    dotPosition.set(item.p.x, item.p.y, item.p.z);
+    dotScale.setScalar(scale);
+    dotMatrix.compose(dotPosition, dotQuaternion, dotScale);
+    mesh.setMatrixAt(i, dotMatrix);
+    if (typeof item.color === "number") dotColor.setHex(item.color);
+    else dotColor.setRGB(item.color.r, item.color.g, item.color.b);
+    mesh.setColorAt(i, dotColor);
+    ids[i] = item.p.id;
+  });
+  mesh.count = items.length;
+  mesh.visible = items.length > 0;
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.boundingSphere = null; // recomputed from the new positions at the next raycast
+}
+
+// Every visible particle's dot for this frame. A dot is red while dragged (wins over a custom
+// color - you're moving it, you should see that clearly), else its wire color (opaque if the
+// scene asked for solid colors, glowing otherwise), else the default yellow.
+function updateDots(visible, sphereRadii, particleColorMap, solid) {
+  lastDotArgs = [visible, sphereRadii, particleColorMap, solid];
+  const solidItems = [];
+  const glowItems = [];
+  for (const p of visible) {
+    // A demo's own explicit sphereRadii entry (a cosmetic render-size declaration, §10.2) wins
+    // when present - e.g. TrampolineDebugDemo's rim anchors, which have no physics radius of
+    // their own at all and would otherwise render at the plain default size. Otherwise the dot
+    // tracks the particle's own live physics radius (ParticleStore.radius, always fresh on the
+    // wire), which is why a live radius edit (§10.4) visibly changes dot size.
+    const radius = sphereRadii.get(p.id) ?? (Number.isNaN(p.radius) ? null : p.radius);
+    const custom = particleColorMap.get(p.id);
+    if (p.id === draggedParticleId) solidItems.push({ p, radius, color: DRAGGED_DOT_COLOR });
+    else if (custom && solid) solidItems.push({ p, radius, color: custom });
+    else if (custom) glowItems.push({ p, radius, color: custom });
+    else solidItems.push({ p, radius, color: DEFAULT_DOT_COLOR });
+  }
+  fillDotLayer("solid", solidDotMaterial, solidItems);
+  fillDotLayer("glow", glowDotMaterial, glowItems);
+}
+
+// The particle a raycast hit on a dot belongs to, or undefined for anything else.
+function particleIdOfHit(hit) {
+  const ids = hit.object.userData.dotIds;
+  return ids && hit.instanceId !== undefined ? ids[hit.instanceId] : undefined;
 }
 
 // vertexColors so each connection can carry its own §10.2 breakProximity-mapped color
@@ -1340,6 +1420,7 @@ function updateConnectionStyleMeshes(buckets) {
     });
     entry.cylinders.count = items.length;
     entry.cylinders.instanceMatrix.needsUpdate = true;
+    entry.cylinders.boundingSphere = null; // else a raycast keeps testing the first frame's bounds
     if (entry.cylinders.instanceColor) entry.cylinders.instanceColor.needsUpdate = true;
     entry.cylinders.userData.connectionStyleName = name;
 
@@ -1363,6 +1444,7 @@ function updateConnectionStyleMeshes(buckets) {
     }
     entry.joints.count = jointStates.size;
     entry.joints.instanceMatrix.needsUpdate = true;
+    entry.joints.boundingSphere = null; // else a raycast keeps testing the first frame's bounds
     if (entry.joints.instanceColor) entry.joints.instanceColor.needsUpdate = true;
     entry.joints.userData.connectionStyleName = name;
   }
@@ -1622,6 +1704,11 @@ function applyFrame(frame) {
   // The scene's sky, or the viewer's own dark background.
   if (frame.skyColor) scene.background.setRGB(frame.skyColor.r, frame.skyColor.g, frame.skyColor.b);
   else scene.background.setHex(0x111111);
+  skyDome.visible = !!(frame.skyColor && frame.skyHorizonColor);
+  if (skyDome.visible) {
+    skyDomeMaterial.uniforms.zenith.value.setRGB(frame.skyColor.r, frame.skyColor.g, frame.skyColor.b);
+    skyDomeMaterial.uniforms.horizon.value.setRGB(frame.skyHorizonColor.r, frame.skyHorizonColor.g, frame.skyHorizonColor.b);
+  }
   latestStep = frame.step;
 
   // First frame ever received: pick the starting cameraMode from which scene is actually active,
@@ -1700,27 +1787,7 @@ function applyFrame(frame) {
   for (const id of revealedIds) visibleIdSet.add(id);
   const visible = [...visibleIdSet].map((id) => byId.get(id)).filter(Boolean);
 
-  while (dots.children.length < visible.length) {
-    dots.add(new THREE.Mesh(dotGeometry, dotMaterial.clone()));
-  }
-  while (dots.children.length > visible.length) {
-    dots.remove(dots.children[dots.children.length - 1]);
-  }
-  visible.forEach((p, i) => {
-    const dot = dots.children[i];
-    dot.position.set(p.x, p.y, p.z);
-    dot.userData.particleId = p.id;
-    styleDot(dot, particleColorMap.get(p.id), p.id === draggedParticleId, frame.solidParticleColors);
-    // A demo's own explicit sphereRadii entry (a cosmetic render-size declaration, §10.2) wins
-    // when present - e.g. TrampolineDebugDemo's rim anchors, which have no physics radius of
-    // their own at all and would otherwise render at the plain default size. Otherwise the dot
-    // now tracks the particle's own live physics radius (ParticleStore.radius, always fresh on
-    // the wire) - unifying what used to be two independent concepts, and the reason a live
-    // radius edit (§10.4) now visibly changes dot size for a particle with no such override.
-    const radius = sphereRadii.get(p.id) ?? (Number.isNaN(p.radius) ? null : p.radius);
-    const scale = radius ? radius / BASE_DOT_RADIUS : 1;
-    dot.scale.setScalar(scale);
-  });
+  updateDots(visible, sphereRadii, particleColorMap, frame.solidParticleColors);
 
   // §10.3's per-surface polyline toggle: a connection whose endpoints are both vertices of a
   // mesh's own triangulation, adjacent within one of that triangle's three edges, *is* one of
@@ -2385,9 +2452,16 @@ function decodeFrame(buffer) {
 
   // The scene's sky color (or null for the viewer's own), and whether its particle colors are
   // solid dots rather than glow.
+  // 0: no sky; 1: one flat color; 2: a gradient, overhead color then horizon color.
   let skyColor = null;
-  if (view.getUint8(offset++) !== 0) {
+  let skyHorizonColor = null;
+  const skyKind = view.getUint8(offset++);
+  if (skyKind >= 1) {
     skyColor = { r: view.getFloat64(offset, true), g: view.getFloat64(offset + 8, true), b: view.getFloat64(offset + 16, true) };
+    offset += 24;
+  }
+  if (skyKind === 2) {
+    skyHorizonColor = { r: view.getFloat64(offset, true), g: view.getFloat64(offset + 8, true), b: view.getFloat64(offset + 16, true) };
     offset += 24;
   }
   const solidParticleColors = view.getUint8(offset++) !== 0;
@@ -2462,7 +2536,7 @@ function decodeFrame(buffer) {
     t, step, particles, connections, camera: cam, spheres, particleColors, meshes, arrowGroups, visibleIds, registry,
     colliders, events, availableScenes, activeScene, lights, hiddenByDefaultGroups, connectionStyles, shownByDefaultArrows,
     skyColor, solidParticleColors, trailSeconds, options, lineLegend, rest, suggestedDeformation, controls,
-    puffs,
+    puffs, skyHorizonColor,
   };
 }
 
@@ -4039,9 +4113,8 @@ function pickParticle() {
   const hit = hits[0];
   const connectionHit = resolveConnectionHit(hit);
   if (connectionHit) return { particleId: connectionHit.particleId, point: hit.point };
-  if (hit.object.userData.particleId !== undefined) {
-    return { particleId: hit.object.userData.particleId, point: hit.point };
-  }
+  const dotId = particleIdOfHit(hit);
+  if (dotId !== undefined) return { particleId: dotId, point: hit.point };
   const vertexIds = hit.object.userData.triangleVertexIds?.[hit.faceIndex];
   if (!vertexIds || !hit.face) return null;
   const posAttr = hit.object.geometry.attributes.position;
@@ -4067,8 +4140,7 @@ renderer.domElement.addEventListener("pointerdown", (event) => {
   event.stopPropagation();
 
   draggedParticleId = picked.particleId;
-  const draggedDot = dots.children.find((d) => d.userData.particleId === draggedParticleId);
-  if (draggedDot) styleDot(draggedDot, null, true);
+  if (lastDotArgs) updateDots(...lastDotArgs);
 
   // Drag plane: through the picked point, facing the camera — the standard way to turn a 2D
   // mouse position into a 3D target without the user having to separately control depth.
@@ -4092,6 +4164,7 @@ function endDrag(event) {
   if (draggedParticleId === null) return;
   send({ type: "drag_end", step: latestStep });
   draggedParticleId = null;
+  if (lastDotArgs) updateDots(...lastDotArgs);
   renderer.domElement.releasePointerCapture(event.pointerId);
 }
 renderer.domElement.addEventListener("pointerup", endDrag);
@@ -4158,8 +4231,9 @@ renderer.domElement.addEventListener("contextmenu", (event) => {
       else selectObject("connections", connectionHit.styleName);
       return;
     }
-    if (hit.object.userData.particleId !== undefined) {
-      selectObject("particles", String(hit.object.userData.particleId));
+    const dotId = particleIdOfHit(hit);
+    if (dotId !== undefined) {
+      selectObject("particles", String(dotId));
       return;
     }
     const surfaceName = hit.object.userData.surfaceName;

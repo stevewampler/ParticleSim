@@ -120,6 +120,7 @@ fun main(args: Array<String>) {
                 connectionStyles = frame.connectionStyles,
                 shownByDefaultArrows = frame.shownByDefaultArrows,
                 skyColor = frame.skyColor,
+                skyHorizonColor = frame.skyHorizonColor,
                 solidParticleColors = frame.solidParticleColors,
                 accelerations = library.accelerations,
                 trailSeconds = frame.trailSeconds,

@@ -4,7 +4,9 @@ import particlesim.collision.SpatialGrid
 import particlesim.core.Groups
 import particlesim.core.ParticleStore
 import particlesim.core.Vector3
+import kotlin.math.cos
 import kotlin.math.sqrt
+import kotlin.math.tan
 
 /**
  * Self-propelled flocking (§5.6) - the steering a bird in a starling murmuration applies to
@@ -39,9 +41,22 @@ import kotlin.math.sqrt
  * Gravity is deliberately not part of this - a flying bird's lift balances it - and a scene
  * shouldn't add [UniformGravity] to its birds.
  *
- * Not modelled: banking turns, wing-flap aerodynamics, a bird's limited field of view (Ballerini's
- * data show neighbours ahead and to the side count more than ones behind) and the pressure of
- * real roost entry at dusk.
+ * - **Limited field of view.** A bird can't see a cone [blindAngle] wide straight behind it, and
+ *   its [neighbours] are the nearest birds it *can* see. Hemelrijk & Hildenbrandt (PLOS ONE 6(8),
+ *   2011, table 1, after the 2010 model) give starlings a rear blind angle of 2 × 45° for alignment
+ *   and cohesion; separation still works all round, from every bird within
+ *   [separationDistance]. (Blind separation would leave only the bird behind braking, and the
+ *   whole flock would fly slower than [cruiseSpeed].)
+ * - **Banked turns.** A bird turns by rolling and tilting its lift into the turn, as in
+ *   Hildenbrandt et al.'s model, so how hard it can turn sideways depends on how much lift it is
+ *   making: the sideways steering is capped at `(g cos(pitch) + upward steering) × tan(`
+ *   [maxBankAngle]`)`. A bird pulling up can turn harder; a bird diving (asking for less lift
+ *   than gravity) can't turn at all. Forward and up-and-down steering are untouched. 90° (the
+ *   default) turns the limit off.
+ *
+ * Not modelled: the roll itself takes no time here (Hildenbrandt et al. let a bird's bank build up
+ * over time, which would need per-bird state), lift doesn't depend on speed, wing-flap
+ * aerodynamics, and the pressure of real roost entry at dusk.
  *
  * Each bird reads only the state at the start of the step, so - unlike [SphFluid] - the work
  * strides across chunks: every chunk rebuilds its own [SpatialGrid] (cheap, and nothing shared
@@ -66,6 +81,10 @@ class Flocking(
     private var fleeRadius: Double = 25.0,
     private var fleeStrength: Double = 40.0,
     private var maxAcceleration: Double = 40.0,
+    /** Width of the blind cone straight behind a bird, degrees; 0 = sees all round. */
+    private var blindAngle: Double = 0.0,
+    /** The steepest a bird banks into a turn, degrees from level; 90 = no limit. */
+    private var maxBankAngle: Double = 90.0,
     override val name: String? = null,
     /** Grid cell size for the neighbour search - only speed depends on it; about the birds'
      * typical spacing is best. */
@@ -73,6 +92,8 @@ class Flocking(
 ) : Force, EditableFields {
     init {
         require(speedRelaxation > 0.0) { "speedRelaxation must be positive, was $speedRelaxation" }
+        require(blindAngle in 0.0..360.0) { "blindAngle must be 0-360 degrees, was $blindAngle" }
+        require(maxBankAngle in 0.0..90.0) { "maxBankAngle must be 0-90 degrees, was $maxBankAngle" }
     }
 
     override fun editableFields(): Map<String, FieldValue> = mapOf(
@@ -91,6 +112,8 @@ class Flocking(
         "fleeRadius" to FieldValue.Scalar(fleeRadius),
         "fleeStrength" to FieldValue.Scalar(fleeStrength),
         "maxAcceleration" to FieldValue.Scalar(maxAcceleration),
+        "blindAngle" to FieldValue.Scalar(blindAngle),
+        "maxBankAngle" to FieldValue.Scalar(maxBankAngle),
     )
 
     override fun setField(field: String, value: FieldValue): Boolean {
@@ -116,6 +139,8 @@ class Flocking(
             "fleeRadius" -> fleeRadius = v.coerceAtLeast(0.0)
             "fleeStrength" -> fleeStrength = v
             "maxAcceleration" -> maxAcceleration = v.coerceAtLeast(0.0)
+            "blindAngle" -> if (v in 0.0..360.0) blindAngle = v else return false
+            "maxBankAngle" -> if (v in 0.0..90.0) maxBankAngle = v else return false
             else -> return false
         }
         return true
@@ -148,26 +173,38 @@ class Flocking(
         val vel = store.velocity(id)
         var accel = Vector3.ZERO
 
-        val near = grid.nearest(pos, neighbours, perceptionRadius, exclude = id, positionOf = store::position)
+        // The blind cone behind: a bird at offset d is hidden when the angle between d and -vel
+        // is under half of blindAngle, i.e. -(d . vel) > |d| |vel| cos(blindAngle / 2).
+        val speed = vel.length()
+        val cosHalf = cos(Math.toRadians(blindAngle / 2.0))
+        val visible: ((Int, Vector3) -> Boolean)? = if (blindAngle > 0.0 && speed > 1e-9) { _: Int, pj: Vector3 ->
+            val d = pj - pos
+            -d.dot(vel) <= d.length() * speed * cosHalf
+        } else null
+        val near = grid.nearest(pos, neighbours, perceptionRadius, exclude = id, accept = visible, positionOf = store::position)
+        // Separation is all round: with a blind angle, from every bird within separationDistance,
+        // found by its own search.
+        val close = if (visible == null) near else grid.within(pos, separationDistance)
+        var separation = Vector3.ZERO
+        for (j in close) {
+            if (j == id) continue
+            val away = pos - store.position(j)
+            val d = away.length()
+            if (d < separationDistance && d > 1e-9) separation += away * ((1.0 - d / separationDistance) / d)
+        }
+        accel += separation * separationStrength
         if (near.isNotEmpty()) {
-            var separation = Vector3.ZERO
             var meanVel = Vector3.ZERO
             var centroid = Vector3.ZERO
             for (j in near) {
-                val pj = store.position(j)
                 meanVel += store.velocity(j)
-                centroid += pj
-                val away = pos - pj
-                val d = away.length()
-                if (d < separationDistance && d > 1e-9) separation += away * ((1.0 - d / separationDistance) / d)
+                centroid += store.position(j)
             }
             val n = 1.0 / near.size
-            accel += separation * separationStrength
             accel += (meanVel * n - vel) * alignmentStrength
             accel += (centroid * n - pos) * cohesionStrength
         }
 
-        val speed = vel.length()
         if (speed > 1e-9) accel += vel * ((cruiseSpeed - speed) / (speedRelaxation * speed))
 
         val offX = pos.x - roostCenter.x
@@ -185,8 +222,36 @@ class Flocking(
             if (d < fleeRadius && d > 1e-9) accel += away * (fleeStrength * (1.0 - d / fleeRadius) / d)
         }
 
+        if (maxBankAngle < 90.0 && speed > 1e-9) accel = banked(accel, vel * (1.0 / speed))
+
         val magnitude = accel.length()
         return if (magnitude > maxAcceleration) accel * (maxAcceleration / magnitude) else accel
+    }
+
+    /**
+     * [accel] with its sideways part limited by [maxBankAngle] (see the class doc), for a bird
+     * heading along the unit vector [forward]. Sideways is horizontal and square to [forward];
+     * "up" is square to both, tilted back by the bird's pitch.
+     */
+    private fun banked(accel: Vector3, forward: Vector3): Vector3 {
+        val upRaw = Vector3(0.0, 1.0, 0.0) - forward * forward.y
+        val upLength = upRaw.length()
+        if (upLength < 1e-6) return accel // flying straight up or down: no "sideways" to speak of
+        val up = upRaw * (1.0 / upLength)
+        val side = forward.cross(up)
+        val sideways = accel.dot(side)
+        // The lift the bird must make, along `up`: its share of holding off gravity (g times the
+        // cosine of its pitch, which is upLength) plus whatever climb it is asking for.
+        val lift = (GRAVITY * upLength + accel.dot(up)).coerceAtLeast(0.0)
+        val limit = lift * tan(Math.toRadians(maxBankAngle))
+        if (kotlin.math.abs(sideways) <= limit) return accel
+        return accel + side * (kotlin.math.sign(sideways) * limit - sideways)
+    }
+
+    private companion object {
+        /** Standard gravity, m/s². Lift balances it in level flight, so it isn't applied, but it
+         * sets how hard a banked bird can turn. */
+        const val GRAVITY = 9.80665
     }
 }
 

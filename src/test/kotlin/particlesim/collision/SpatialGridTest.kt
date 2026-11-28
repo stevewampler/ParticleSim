@@ -96,6 +96,52 @@ class SpatialGridTest {
     }
 
     @Test
+    fun `nearest with a filter matches a brute-force search over the accepted ids`() {
+        val random = kotlin.random.Random(11)
+        val points = (0 until 400).associateWith { Vector3(random.nextDouble(-20.0, 20.0), random.nextDouble(-5.0, 5.0), random.nextDouble(-20.0, 20.0)) }
+        // Only points ahead (+x) of the query count, like a bird's blind angle behind it.
+        for (cellSize in listOf(0.5, 2.0, 9.0)) {
+            val grid = SpatialGrid(cellSize)
+            for ((id, p) in points) grid.insert(id, p)
+            for (query in listOf(0, 17, 211, 399)) {
+                val at = points.getValue(query)
+                val ahead = { _: Int, p: Vector3 -> p.x > at.x }
+                for ((k, maxDistance) in listOf(1 to 100.0, 7 to 100.0, 20 to 4.0)) {
+                    val expected = points.filterKeys { it != query && ahead(it, points.getValue(it)) }.map { (id, p) -> id to (p - at).length() }
+                        .filter { it.second <= maxDistance }.sortedWith(compareBy({ it.second }, { it.first })).take(k).map { it.first }
+                    assertEquals(expected, grid.nearest(at, k, maxDistance, exclude = query, accept = ahead) { points.getValue(it) }, "cell $cellSize, query $query, k $k")
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `nearest finds a far-off flock from a lone straggler`() {
+        // Every ring between the straggler and the flock is empty, so this exercises the shell walk
+        // out to the full search radius.
+        val grid = SpatialGrid(cellSize = 1.0)
+        val points = (0 until 10).associateWith { Vector3(30.0 + it * 0.1, 0.0, 0.0) } + mapOf(99 to Vector3.ZERO)
+        for ((id, p) in points) grid.insert(id, p)
+        assertEquals(listOf(0, 1, 2), grid.nearest(Vector3.ZERO, 3, 40.0, exclude = 99) { points.getValue(it) })
+        assertEquals(emptyList(), grid.nearest(Vector3.ZERO, 3, 29.0, exclude = 99) { points.getValue(it) })
+    }
+
+    @Test
+    fun `within holds every id inside the radius`() {
+        val random = kotlin.random.Random(3)
+        val points = (0 until 300).associateWith { Vector3(random.nextDouble(-10.0, 10.0), random.nextDouble(-10.0, 10.0), random.nextDouble(-10.0, 10.0)) }
+        for (cellSize in listOf(0.5, 2.0, 9.0)) {
+            val grid = SpatialGrid(cellSize)
+            for ((id, p) in points) grid.insert(id, p)
+            for (radius in listOf(1.0, 3.0)) {
+                val found = grid.within(Vector3.ZERO, radius).toSet()
+                val inside = points.filterValues { it.length() <= radius }.keys
+                assertTrue(found.containsAll(inside), "cell $cellSize, radius $radius")
+            }
+        }
+    }
+
+    @Test
     fun `nearest breaks distance ties by id and leaves out the excluded id`() {
         val grid = SpatialGrid(cellSize = 1.0)
         val points = mapOf(5 to Vector3(1.0, 0.0, 0.0), 3 to Vector3(-1.0, 0.0, 0.0), 4 to Vector3(0.0, 1.0, 0.0), 9 to Vector3.ZERO)

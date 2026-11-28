@@ -497,6 +497,18 @@ terms are:
   (2010).
 - **Predator evasion.** Birds flee any member of an optional predator group
   within a flee radius.
+- **Limited field of view.** An optional blind cone behind each bird
+  (`blindAngle`): its neighbours for alignment and cohesion are the nearest
+  birds it can see. Hemelrijk & Hildenbrandt (PLOS ONE 2011) use 2 × 45°.
+  Separation still works all round, from every bird within the separation
+  distance; a blind separation leaves only the bird behind braking, and the
+  flock flies slow.
+- **Banked turns.** A bird turns by tilting its lift, so its sideways
+  steering is capped at `(g cos(pitch) + upward steering) × tan(maxBankAngle)`:
+  pulling up allows a harder turn, and a bird diving faster than gravity
+  can't turn. 90° turns the cap off. The roll is instantaneous, with no
+  per-bird state, so checkpoints and determinism are unaffected; Hildenbrandt
+  et al. (2010) let a bird's bank build up over time.
 
 Every term is an acceleration, and the total is capped. No gravity applies,
 since lift balances it. Every weight is live-editable (§10.4).
@@ -507,7 +519,9 @@ a rest point, then chases. That gives the flock time to re-form.
 
 The k-nearest search is exact and is added to the same spatial grid that
 collision broad-phase and SPH use (§9.3's "shared spatial partitioning").
-It searches outward ring by ring and breaks distance ties by id (§11).
+It searches outward ring by ring, visiting only each ring's shell of cells,
+breaks distance ties by id (§11), and can skip ids a filter rejects (the
+blind cone).
 Each bird reads only the state at the start of the step, so the work
 strides across chunks (§9.3), and results are bit-identical for any chunk
 count or thread count.
@@ -1128,10 +1142,16 @@ external image onto a mesh's surface.
     a connection instead of a single particle.
 - **Scene sky color and solid particle colors**: a scene may set the
   background color the viewer draws (`SceneFrame.skyColor`, null = the
-  viewer's own dark default). It may also ask for its per-particle colors to
+  viewer's own dark default). With `skyHorizonColor` as well, the sky is a
+  gradient: `skyColor` overhead, fading to the horizon color low down, most
+  of the change near the horizon (a dome drawn behind everything, centred
+  on the camera). It may also ask for its per-particle colors to
   be drawn as plain opaque dots (`solidParticleColors`) instead of the
   additive glow suited to fire and sparks. Both were added for the
-  `murmuration` scene's dark starlings against a dusk sky (§5.6).
+  `murmuration` scene's dark starlings against a dusk sky (§5.6). Dots are
+  drawn instanced, one draw call for all the opaque dots and one for all
+  the glowing ones, so a flock's thousands of birds don't cost a draw call
+  each.
 - **Particle trails**: a scene may ask for `SceneFrame.trailSeconds` of
   fading trail behind each visible particle, like a long exposure. The
   viewer draws them from positions it has already been sent and prunes by

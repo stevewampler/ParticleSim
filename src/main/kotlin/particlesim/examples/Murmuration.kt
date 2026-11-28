@@ -25,12 +25,13 @@ import kotlin.random.Random
  *   Animal Behaviour 76(1), 2008) report birds keeping a minimum distance comparable to their
  *   wingspan, but at that spacing 1500 birds pack into a ball ~7 m across; looser spacing lets a
  *   flock this small spread into a murmuration's shape.
+ * - Each bird is blind in a 90° cone behind it ([STARLING_BLIND_ANGLE]), after Hemelrijk &
+ *   Hildenbrandt (PLOS ONE 2011), and banks at most [STARLING_MAX_BANK] into a turn.
  * - The falcon chases at twice the starlings' cruise speed - a peregrine's level pursuit is
  *   faster than a starling's, though nothing like its 300+ km/h stoop.
  *
  * Real murmurations run from hundreds to hundreds of thousands of birds; the default stays in
- * the low thousands, both for the step rate and because the viewer draws each bird as its own
- * mesh.
+ * the low thousands for the step rate (about 9 ms a step at 1500).
  *
  * The birds start in a loose ball [displayAltitude] up over the roost (at [placement]'s offset),
  * all heading roughly the same way with some scatter in direction, from a fixed [seed] so a run
@@ -64,6 +65,13 @@ const val FALCON_REST_SECONDS = 12.0
 
 /** How far above the display the falcon waits between passes, m. */
 const val FALCON_WAIT_HEIGHT = 50.0
+
+/** The blind cone behind a starling, degrees: 2 × 45° in Hemelrijk & Hildenbrandt (2011). */
+const val STARLING_BLIND_ANGLE = 90.0
+
+/** The steepest a starling banks into a turn, degrees. A modelling choice, not a measurement: at
+ * 10 m/s in level flight it allows turns down to about a 6 m radius. */
+const val STARLING_MAX_BANK = 60.0
 
 /** A European starling's mass, kg. */
 const val STARLING_MASS = 0.08
@@ -107,6 +115,8 @@ fun buildMurmuration(
         group = birdGroup,
         roostCenter = roost,
         predatorGroup = if (withFalcon) falconGroup else null,
+        blindAngle = STARLING_BLIND_ANGLE,
+        maxBankAngle = STARLING_MAX_BANK,
         name = placement.name("flocking"),
     )
 

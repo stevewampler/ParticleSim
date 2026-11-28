@@ -1080,6 +1080,26 @@ class BinaryFrameTest {
             BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), skyColor = sky, solidParticleColors = true),
         )
         assertEquals(sky, dusk.skyColor)
+        assertEquals(null, dusk.skyHorizonColor)
         assertEquals(true, dusk.solidParticleColors)
+    }
+
+    @Test
+    fun `a gradient sky round-trips, and a horizon color with no sky color is dropped`() {
+        val store = ParticleStore()
+        val zenith = Color(0.2, 0.22, 0.4)
+        val horizon = Color(0.88, 0.48, 0.26)
+        val gradient = BinaryFrame.decode(
+            BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), skyColor = zenith, skyHorizonColor = horizon, trailSeconds = 1.5),
+        )
+        assertEquals(zenith, gradient.skyColor)
+        assertEquals(horizon, gradient.skyHorizonColor)
+        assertEquals(1.5, gradient.trailSeconds, "the fields after the sky still line up")
+        val orphan = BinaryFrame.decode(
+            BinaryFrame.encode(t = 0.0, step = 0L, store = store, ids = emptyList(), connections = emptyList(), skyHorizonColor = horizon, trailSeconds = 1.5),
+        )
+        assertEquals(null, orphan.skyColor)
+        assertEquals(null, orphan.skyHorizonColor)
+        assertEquals(1.5, orphan.trailSeconds)
     }
 }
