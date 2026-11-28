@@ -692,7 +692,12 @@ affects the simulation itself.
 physics steps to catch up — that would silently break determinism (§11).
 Instead it falls behind and lets rendered/recorded frames drop (the viewer
 shows the most recent state it has, rather than every step), which costs
-smoothness, not correctness. A `duration` (§8) is required for a run, so an
+smoothness, not correctness. The interactive loop paces against absolute
+frame deadlines, so a late frame is made up by not sleeping before the next
+(never by skipping steps), and only a loop more than a few frames behind
+gives up and restarts its deadlines. After a scene switch or restart the
+viewer ignores frames still in flight from before it, so the old scene's
+camera and clock don't leak into the new one. A `duration` (§8) is required for a run, so an
 open-ended interactive session with no fixed end is `[stretch]` — for now,
 set a long `duration` and pause/step manually via the time controls above.
 

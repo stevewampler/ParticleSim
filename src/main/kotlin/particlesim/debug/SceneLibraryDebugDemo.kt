@@ -78,8 +78,17 @@ fun main(args: Array<String>) {
 
     val framesPerSecond = 60
     val frameNanos = 1_000_000_000L / framesPerSecond
+    // Paced against absolute deadlines, one frame apart, rather than sleeping "a frame minus this
+    // frame's work": Thread.sleep takes whole milliseconds and oversleeps, so that version ran
+    // about 46-55 frames/s even when the work took a fraction of a frame, and sim time fell
+    // further behind the wall clock every second - against §9.1's pacing policy, which only lets
+    // it fall behind when the physics can't keep up. A frame that runs late is made up by not
+    // sleeping before the next (still one frame's worth of steps each - nothing is skipped or
+    // coarsened, §11). If the loop falls more than MAX_CATCH_UP_FRAMES behind (a scene too slow
+    // for real time, a long GC pause) it stops trying to make that up and starts the deadlines
+    // afresh, so it never bursts through a backlog.
+    var deadline = System.nanoTime()
     while (true) {
-        val frameStart = System.nanoTime()
         // This whole body used to run unguarded: any exception here - a scene's own step()/
         // frame() throwing, a malformed control message somehow surviving parsing - would kill
         // this single always-on loop thread outright. Nothing else in the process would notice
@@ -135,7 +144,13 @@ fun main(args: Array<String>) {
             System.err.println("scene loop error on '${library.activeName}': $e")
             e.printStackTrace()
         }
-        val elapsed = System.nanoTime() - frameStart
-        if (elapsed < frameNanos) Thread.sleep((frameNanos - elapsed) / 1_000_000)
+        deadline += frameNanos
+        val now = System.nanoTime()
+        if (now - deadline > MAX_CATCH_UP_FRAMES * frameNanos) deadline = now
+        val wait = deadline - now
+        if (wait > 0) Thread.sleep(wait / 1_000_000, (wait % 1_000_000).toInt())
     }
 }
+
+/** How many frames late the scene-library loop may run before it gives up making them up. */
+private const val MAX_CATCH_UP_FRAMES = 6

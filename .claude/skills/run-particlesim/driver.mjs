@@ -9,6 +9,15 @@
 // Unlike an Electron app, plain `chromium.launch()` needs no xvfb/display server at all - this
 // runs genuinely headless on Linux or macOS with no X server.
 //
+// Headless Chromium draws WebGL in software (SwiftShader) unless told otherwise, which made the
+// viewer look 4x slower than it is (murmuration: 16 frames/s and seconds of lag in software, 60
+// and none on an M3 Pro's GPU). On macOS it's launched on the GPU through ANGLE's Metal backend;
+// set PARTICLESIM_SOFTWARE_GL=1 to get the software renderer back. `launch` prints which one it
+// got.
+const GPU_ARGS = process.platform === 'darwin' && !process.env.PARTICLESIM_SOFTWARE_GL
+  ? ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist']
+  : [];
+//
 // Usage: pipe a line-delimited command script to stdin (see SKILL.md for a worked example):
 //   node driver.mjs <<'EOF'
 //   launch
@@ -37,11 +46,16 @@ const COMMANDS = {
   // only exists once the WebSocket handshake completes.
   async launch() {
     if (browser) return console.log('already launched');
-    browser = await chromium.launch();
+    browser = await chromium.launch({ args: GPU_ARGS });
     page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     page.on('console', (msg) => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
     page.on('pageerror', (err) => consoleErrors.push('pageerror: ' + err.message));
     await page.goto(URL, { waitUntil: 'load' });
+    console.log('webgl renderer: ' + await page.evaluate(() => {
+      const gl = document.createElement('canvas').getContext('webgl2');
+      const info = gl && gl.getExtension('WEBGL_debug_renderer_info');
+      return gl ? gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) : 'no webgl';
+    }));
     try {
       await page.waitForFunction(
         () => document.body.innerText.includes('connected'),

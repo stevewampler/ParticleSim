@@ -2592,7 +2592,31 @@ document.getElementById("stepOnceBtn").addEventListener("click", () => {
 // selection and the per-object panel it drives, plus the hidden-group/-surface/shown-force
 // toggles, which would otherwise silently persist onto a scene whose names may not even mean the
 // same thing (or exist at all).
+// Frames still in flight from before a scene switch or restart. The server keeps streaming the
+// old scene until it reads the request, and when the viewer is behind those frames can arrive
+// well after the reset below: applied, they'd move the camera back to the old scene's scripted
+// pose and re-anchor the lag readout on the old scene's clock. So until the first fresh frame -
+// the requested scene, with its step counter restarted (SceneLibrary resets it to 0 on every
+// load and restart) - frames are dropped. A request the server never answers (dropped while
+// disconnected, say) can't freeze the view: after AWAIT_SCENE_MS frames are taken regardless.
+const AWAIT_SCENE_MS = 2000;
+let awaitingScene = null; // { name, stepBefore, since }
+let latestActiveScene = null;
+
+function isStaleFrame(frame) {
+  if (!awaitingScene) return false;
+  const fresh = frame.activeScene === awaitingScene.name && frame.step < awaitingScene.stepBefore;
+  if (fresh || performance.now() - awaitingScene.since > AWAIT_SCENE_MS) {
+    awaitingScene = null;
+    return false;
+  }
+  return true;
+}
+
 function resetViewerStateForSceneChange(sceneName) {
+  // A different scene's frames are told apart by name, so any step will do for those.
+  const stepBefore = sceneName === latestActiveScene ? latestStep : Infinity;
+  awaitingScene = { name: sceneName, stepBefore: Math.max(stepBefore, 1), since: performance.now() };
   resetStats();
   lastSuggestedDeformation = null; // the new scene's suggestion applies afresh
   colorFieldName = null;
@@ -4024,6 +4048,8 @@ function connect() {
   ws.onerror = () => ws.close();
   ws.onmessage = (event) => {
     const frame = decodeFrame(event.data);
+    if (isStaleFrame(frame)) return;
+    latestActiveScene = frame.activeScene;
     applyFrame(frame);
     playFrameSounds(frame);
     updateStats(frame);

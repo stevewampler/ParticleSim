@@ -6217,9 +6217,10 @@ load. Full `./gradlew test -q` suite green throughout.
         the thump already is). Needs a recording with clear launches;
       - stars leave no smoke trails of their own (only bursts and launches
         smoke), and smoke doesn't rise or spread on its own;
-      - in headless Chromium the viewer falls a few seconds behind real
-        time (the server takes ~0.8 ms a step); not checked in a GPU browser
-        since the ribbons and smoke were added.
+      - (fixed 2026-11-28: the viewer falling seconds behind real time was
+        software rendering plus the server loop's pacing; see "Real-time
+        pacing and the GPU test driver" below. On the GPU it runs 60
+        steps/s with no lag.)
 
 ## Starling murmuration (§5.6/§9.6/§10.2, new requirement) — not yet phased
 - [x] **`Flocking` force** (`particlesim.physics`), with these terms:
@@ -6262,8 +6263,8 @@ load. Full `./gradlew test -q` suite green throughout.
       - `MURMURATION_DT` = 1/60 s, exactly one step per viewer frame.
 
       A step takes about 7 ms (9 ms with the blind angle and banking below).
-      In the headless browser it runs about 16 frames/s; see the instanced
-      dots item below for why.
+      In a GPU browser it runs at 60 frames/s and real time; software
+      rendering manages about 16 (see the instanced dots item below).
 
       Scenario tests: cohesion, polarization, speed, spacing and staying
       over the roost; the falcon scatters the flock and it re-forms; the
@@ -6301,10 +6302,10 @@ load. Full `./gradlew test -q` suite green throughout.
       Also fixed: styled-connection instanced meshes kept their first
       frame's bounding sphere, so raycasts tested stale bounds.
 
-      The headless browser still draws murmuration at about 16 frames/s;
-      hiding the dots brings it to 57. In software rendering the cost is
-      the dots' triangles (1,500 × 8×6-segment spheres), not draw calls.
-      Not checked in a GPU browser.
+      Software-rendered (SwiftShader) headless Chromium still draws
+      murmuration at about 16 frames/s; hiding the dots brings it to 57.
+      There the cost is the dots' triangles (1,500 × 8×6-segment spheres),
+      not draw calls. On the GPU (M3 Pro) it's 60 frames/s.
 - [x] **`SpatialGrid.nearest` visits only each ring's shell** (the cube's
       six faces), not the whole cube. It also takes an `accept` filter
       (id, position), still exact. `SpatialGrid.within` returns the ids in
@@ -6332,12 +6333,11 @@ load. Full `./gradlew test -q` suite green throughout.
         which needs per-bird state, so it would have to be checkpointed),
         and lift doesn't depend on speed, so banking birds don't lose
         height in turns;
-      - fewer triangles per dot (or point sprites), if the software-
-        rendered frame rate matters; check a GPU browser first;
-      - switching scenes while frames are still queued (headless lag) lets
-        the old scene's scripted camera land after the reset, so a scene
-        with no scripted camera (e.g. `fire` after `murmuration`) can open
-        framed from 130 m away.
+      - fewer triangles per dot (or point sprites), only if the
+        software-rendered frame rate ever matters (fine on a GPU);
+      - (fixed 2026-11-28: a scene switch with frames still queued let the
+        old scene's camera land after the reset; see "Real-time pacing and
+        the GPU test driver" below.)
 
 ## Steel I-beam stress visualization (§5.1/§6/§7/§10.2, new requirement) — not yet phased
 - [x] **`ElasticLattice`** (`particlesim.physics`): a solid built from filled
@@ -7134,3 +7134,33 @@ load. Full `./gradlew test -q` suite green throughout.
       Kotlin-authored scene to export *into*. Struck at the user's
       request rather than left as an open item implying it's still
       planned.
+
+## Real-time pacing and the GPU test driver (§9.1, 2026-11-28)
+- [x] **The test driver renders on the GPU.** Headless Chromium draws WebGL
+      in software (SwiftShader) by default, which made the viewer look far
+      slower than it is: murmuration 16 frames/s with 5 s of lag, against
+      60 frames/s on the M3 Pro. `run-particlesim`'s `driver.mjs` now launches
+      with ANGLE's Metal backend on macOS (`PARTICLESIM_SOFTWARE_GL=1` for
+      software) and `launch` prints the WebGL renderer. Earlier "headless
+      Chromium falls behind" notes in this file were measured in software.
+- [x] **Server loop paced against absolute deadlines** (`SceneLibraryDebugDemo`).
+      It used to sleep "a frame minus the work" in whole milliseconds, and
+      macOS oversleeps, so even a cheap scene ran 46-55 steps/s and fell
+      further behind real time every second, against §9.1 (fall behind only
+      when the physics can't keep up). Now a late frame is made up by not
+      sleeping before the next (one frame's steps each, nothing skipped);
+      more than 6 frames behind, it starts the deadlines afresh rather than
+      bursting through a backlog. Fireworks: 60 steps/s, lag 0.00 s over
+      25 s (was 46 steps/s and +4 s after 15 s).
+- [x] **The viewer drops stale frames after a scene switch or restart.**
+      Frames the server sent before it read the request used to be applied
+      after the viewer's reset, moving the camera back to the old scene's
+      scripted pose (`fire` after `murmuration` opened 130 m away) and
+      anchoring the lag readout on the old scene's clock (+18 s). Until a
+      frame of the requested scene arrives with its step counter restarted,
+      frames are dropped; after 2 s they're taken regardless, so an
+      unanswered request can't freeze the view. Checked in the viewer:
+      switch, restart, and the lag readout.
+- [ ] Not unit tested: the loop lives in `main` and the stale-frame filter in
+      the viewer; both checked only by driving the viewer.
+

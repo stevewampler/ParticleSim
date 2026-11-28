@@ -10,6 +10,15 @@ at `.claude/skills/run-particlesim/driver.mjs`: pipe it a line-delimited
 command script over stdin (no tmux/xvfb needed - plain
 `chromium.launch()` is genuinely headless on both Linux and macOS).
 
+On macOS the driver launches headless Chromium on the **real GPU** (ANGLE's
+Metal backend), not the software renderer headless Chromium uses by default.
+Software rendering (SwiftShader) made the viewer look about 4x slower than it
+is: murmuration ran 16 frames/s with seconds of lag, against 60 frames/s and
+under a second on the GPU. `launch` prints the renderer it got (`webgl
+renderer: ANGLE (Apple, ANGLE Metal Renderer: ...)`); if it says SwiftShader,
+frame rates and lag aren't representative. `PARTICLESIM_SOFTWARE_GL=1` forces
+software rendering, e.g. to reproduce what a GPU-less machine sees.
+
 All paths below are relative to the repo root.
 
 ## Prerequisites
@@ -72,7 +81,7 @@ port 8888/8887 listeners (same two `lsof` lines as above).
 
 | command | what it does |
 |---|---|
-| `launch` | launch headless Chromium, open the viewer, wait for the "connected" badge |
+| `launch` | launch headless Chromium (on the GPU on macOS), print its WebGL renderer, open the viewer, wait for the "connected" badge |
 | `ss [name]` | screenshot -> `$SCREENSHOT_DIR/<name-or-timestamp>.png` |
 | `scene <name>` | switch the active demo via the SCENE dropdown - one of `flag`, `ballBounce`, `trampoline`, `sparks`, `fire`, `fluid`, `drag`, `particleCollision`, `spatialGrid`, `multiShape`, `poleRope`, `flagOnRope`, `iBeam`, `towerCrane`, `luffingCrane`, `gantryCrane`, `crawlerCrane`, `guyDerrick` |
 | `click <exact text>` | click an outliner entry (group/force/constraint/surface/collider/emitter/light name) or any other exact-text element - opens its per-object panel |
